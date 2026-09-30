@@ -1,0 +1,28 @@
+{
+  "name": "thrash-watchdog",
+  "version": 2,
+  "window": 6,
+  "warmup": 6,
+  "judge_every": 6,
+  "rules": {
+    "R1_loop": { "min_dup_in_window": 0.5 },
+    "R2_saturation": { "zero_novel_windows": 2 },
+    "R3_stale_strategy": { "min_plan_sim": 0.85, "max_novel_ratio": 0.34 },
+    "R4_goal_drift": { "min_dup_in_window": 0.5, "min_tokens_per_script": 3 },
+    "R5_stale_verification": { "advisory": true, "min_age": 6 }
+  },
+  "escalation": { "escalate_at": 2, "halt_at": 3 },
+  "tokenizer": {
+    "ascii_min_len": 2,
+    "cjk": "bigram",
+    "stopwords": [
+      "the", "a", "an", "to", "of", "and", "or", "in", "on", "at", "for", "with",
+      "is", "are", "be", "will", "then", "next", "i", "we", "it", "this", "that",
+      "plan", "action", "now", "again", "still", "just", "so", "if", "as", "by"
+    ],
+    "cjk_stopwords": [
+      "我们", "你们", "他们", "这个", "那个", "一下", "然后", "现在", "需要", "可以",
+      "进行", "一个", "看看", "继续", "再次", "还是", "已经", "就是", "所以", "如果"
+    ]
+  }
+}
