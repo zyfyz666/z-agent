@@ -159,9 +159,9 @@ if (e2eUserDataDir) {
   && typeof app.setPath === 'function'
   && typeof app.getPath === 'function'
 ) {
-  // The macOS product is now displayed as YAgent, but existing installs keep
-  // their sessions and settings under the original Yan Agent profile.
-  app.setPath('userData', path.join(app.getPath('appData'), 'Yan Agent'));
+  // Fork profile: kept apart from an installed upstream Yan Agent so the two
+  // never share sessions or settings.
+  app.setPath('userData', path.join(app.getPath('appData'), 'WD Agent'));
 }
 
 const isE2EMode = process.env.YAN_E2E_MODE === '1';
@@ -10037,7 +10037,7 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
 app.whenReady().then(async () => {
   if (e2eOrphanShutdownStarted) return;
-  app.setAppUserModelId('com.yan.agent');
+  app.setAppUserModelId('io.github.zyfyz666.wdagent');
   // The Chromium spellchecker re-segments a contenteditable on every edit and
   // is a constant per-keystroke cost under CJK IME input — the composer's
   // typing lag. The app is Chinese-first; disable it at the session level.
