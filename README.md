@@ -19,7 +19,7 @@ For what the desktop client itself can do, read the
 | `lib/thrash-watchdog.js` | Yan adapter: uses Yan's own `verificationRecord` to decide what counts as a check |
 | `lib/opencode-sidecar.js` | judges each poll while the run is busy; delivers via `deliverInterjection`; emits `yan.thrash.watchdog` events; writes a hash-chained audit to `<workspace>/.yanagent/thrash-audit.jsonl` |
 | `test/thrash-watchdog.test.cjs` | adapter tests |
-| `package.json`, `main.js` | own app id, product name and profile directory (`%APPDATA%/WD Agent`), so the fork never shares settings with an installed Yan Agent |
+| `package.json`, `main.js` | own app id, product name and profile directory (`WD Agent` when packaged, `wd-agent` when run from source; `main.js` pins it on macOS), so the fork never shares settings with an installed Yan Agent |
 
 In-app strings still say Yan Agent; the fork keeps its diff against upstream small on purpose.
 
