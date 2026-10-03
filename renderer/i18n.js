@@ -2,6 +2,22 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installYanI18n(global) {
   const ZH_EN = Object.freeze({
+    '选择连接': 'Select connection', '切换 API 连接': 'Switch API connection', '切换 API': 'Switch API',
+    'API 连接': 'API connection', '规则': 'Rules', '规则模式': 'Rule mode', '观察者设置': 'Observer settings',
+    '细节模式': 'Details', '检查间隔（工具动作数）': 'Check interval (tool actions)',
+    '规则模式无需模型。选择独立模型后，观察者会在后台分析任务摘要并提供建议。修改从下一轮任务生效。': 'Rule mode needs no model. An independent model can review task summaries in the background and offer advice. Changes apply to the next task.',
+    '在这里切换主模型使用的 API 和模型。正在执行的任务继续使用原来的连接。': 'Choose the API and model for the main agent. A running task keeps its original connection.',
+    '每新增指定数量的工具动作，启动一次观察；不是按聊天消息计数。规则首次需要至少 6 个动作。模型判断期间不重复发起请求。': 'Review after this many new tool actions, not chat messages. Rules need at least 6 actions initially. Model reviews never overlap.',
+    '正在读取连接…': 'Loading connections…', '仅规则观察（不调用模型）': 'Rules only (no model calls)',
+    '原连接已不可用，请重新选择。': 'The previous connection is unavailable. Choose another.',
+    '尚无可用连接，请先在设置中添加 API。': 'No connections available. Add an API in Settings first.',
+    '读取连接失败，请重试。': 'Could not load connections. Try again.', '正在保存…': 'Saving…',
+    '观察者设置已保存，下轮任务生效': 'Observer settings saved for the next task', 'API 和模型已切换': 'API and model switched',
+    '保存失败，请重试。': 'Could not save. Try again.', '检查间隔须为 1 到 100 个工具动作': 'Enter an interval from 1 to 100 tool actions',
+    '请选择已启用 API 中的文本模型': 'Choose a text model from an enabled API',
+    '模型观察建议': 'Model observer advice', '观察者模型和检查间隔': 'Observer model and check interval',
+    '等待动作': 'Waiting for actions', '正在判断': 'Reviewing', '已完成判断': 'Review completed',
+    '规则模式继续工作': 'Rule mode remains active', '本轮已结束': 'Task ended',
     '主界面': 'Main', '新建任务': 'New task', 'Skill 市场': 'Skill market', 'MCP 服务': 'MCP services',
     '设置': 'Settings', '宠物': 'Pet', '用户': 'User', '新对话': 'New conversation', '关于Z v1.6.1': 'About Z v1.6.1',
     '选择文件夹': 'Choose folder', '分支': 'Branch', '搜索分支': 'Search branches',
@@ -332,6 +348,10 @@
     if (normalize(target) !== 'en' || !/[\u3400-\u9fff]/u.test(source)) return source;
     const exact = ZH_EN[source.trim()];
     if (exact) return source.replace(source.trim(), exact);
+    const modelChecks = source.match(/^模型检查 (\d+) 次$/u);
+    if (modelChecks) return `Model reviews: ${modelChecks[1]}`;
+    const modelPhase = source.match(/^(.+) · (等待动作|正在判断|已完成判断|规则模式继续工作|本轮已结束)$/u);
+    if (modelPhase) return `${modelPhase[1]} · ${ZH_EN[modelPhase[2]]}`;
     const startupError = source.match(/^Z 无法启动本轮任务：([\s\S]*)$/u);
     if (startupError) return `Z could not start this task: ${translate(startupError[1], target)}`;
     const kernelError = source.match(/^Z 内核无法启动。\s*([\s\S]*)$/u);

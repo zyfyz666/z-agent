@@ -468,6 +468,8 @@
 
               <!-- Composer controls share one bottom toolbar. -->
               <div class="composer-toolbar-controls">
+                <button id="zApiPill" class="ws-pill z-connection-pill" type="button" aria-haspopup="dialog" aria-controls="zConnectionDialog" title="切换 API 连接">API · <span id="zApiName">选择连接</span></button>
+                <button id="zObserverPill" class="ws-pill z-connection-pill" type="button" aria-haspopup="dialog" aria-controls="zConnectionDialog" title="配置观察者模型和检查间隔">观察者 · <span id="zObserverName">规则</span></button>
                 <div id="modelPickerWrap" class="model-picker-wrap">
                   <button id="modelPill" class="ws-pill model-pill" type="button" title="选择模型与推理强度" aria-haspopup="dialog" aria-controls="modelQuickMenu" aria-expanded="false">
                     <svg class="model-control-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2108,6 +2110,24 @@
   <script src="../lib/subagent/workflow-state.js"></script>
   <script src="subagent-panel.js"></script>
   <script src="release-notes.js"></script>
+  <dialog id="zConnectionDialog" class="z-connection-dialog" aria-labelledby="zConnectionTitle">
+    <form id="zConnectionForm">
+      <header><h3 id="zConnectionTitle">切换 API</h3><button id="zConnectionClose" type="button" aria-label="关闭">×</button></header>
+      <p id="zConnectionDescription"></p>
+      <label for="zConnectionSelect">API 连接</label>
+      <select id="zConnectionSelect"></select>
+      <div id="zConnectionModelField"><label for="zConnectionModel">模型</label><select id="zConnectionModel"></select></div>
+      <details id="zObserverDetails" hidden>
+        <summary>细节模式</summary>
+        <label for="zObserverEvery">检查间隔（工具动作数）</label>
+        <input id="zObserverEvery" type="number" min="1" max="100" step="1" value="6">
+        <p>每新增指定数量的工具动作，启动一次观察；不是按聊天消息计数。规则首次需要至少 6 个动作。模型判断期间不重复发起请求。</p>
+      </details>
+      <p id="zConnectionNotice" role="status" aria-live="polite"></p>
+      <footer><button id="zConnectionCancel" type="button">取消</button><button id="zConnectionSave" type="submit">保存</button></footer>
+    </form>
+  </dialog>
+  <script src="z-connection-controls.js"></script>
   <script src="wd-monitor.js"></script>
   <script src="renderer.js"></script>
 </body>

@@ -92,6 +92,7 @@ const updateChecker = require('./lib/update-checker');
 const { detectVsCode, launchVsCode } = require('./lib/vscode-launcher');
 const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
+const { normalizeObserverSettings } = require('./lib/observer-model');
 const workspaceSandbox = require('./lib/workspace-sandbox');
 const { classifyDelegatedShellCommand } = require('./lib/shell-command-risk');
 const {
@@ -3546,6 +3547,7 @@ function buildPublicModelState(cfg = loadConfig()) {
     capabilities: current?.capabilities || {},
     models,
     agentModel,
+    observer: normalizeObserverSettings(cfg.observer),
     media: normalizeMediaConfig(cfg)
   };
 }
@@ -5899,6 +5901,52 @@ ipcMain.handle('connections:delete', (_e, { id } = {}) => {
   saveConfig(cfg);
   publishModelState(cfg);
   return { ok: true };
+});
+
+// All configured connections are available outside settings. Only public
+// model metadata crosses this endpoint, never API keys or gateway URLs.
+function composerConnections(cfg) {
+  return Object.values(MODEL_PROVIDERS).flatMap(provider => getProviderSuppliers(cfg, provider.id).flatMap(supplier => {
+    if (!isConfiguredSupplier(cfg, provider.id, supplier)) return [];
+    const models = getProviderSupplierCatalog(provider.id, supplier)
+      .filter(model => getModelType(provider.id, model) === 'text')
+      .map(model => ({ id: model.id, name: model.name || model.id }));
+    if (!models.length) return [];
+    return [{ providerId: provider.id, supplierId: supplier.id,
+      name: supplier.id === 'official' ? provider.name : `${provider.name} · ${supplier.name}`, models }];
+  }));
+}
+
+function observerConnectionForRun(cfg) {
+  const selection = normalizeObserverSettings(cfg.observer).model;
+  if (!selection) return null;
+  const entry = composerConnections(cfg).find(item => item.providerId === selection.providerId && item.supplierId === selection.supplierId);
+  if (!entry?.models.some(model => model.id === selection.modelId)) {
+    return { ...selection, unavailable: true };
+  }
+  const connection = getProviderConnectionForSupplier(cfg, selection.providerId, selection.supplierId);
+  return { ...selection, ...connection, apiFormat: MODEL_PROVIDERS[selection.providerId]?.apiFormat || 'openai' };
+}
+
+ipcMain.handle('models:connections', () => {
+  const cfg = loadConfig();
+  return { connections: composerConnections(cfg), observer: normalizeObserverSettings(cfg.observer) };
+});
+ipcMain.handle('observer:configure', (_event, payload = {}) => {
+  const cfg = loadConfig();
+  const every = Number(payload.judgeEvery);
+  if (!Number.isInteger(every) || every < 1 || every > 100) return { error: '检查间隔须为 1 到 100 个工具动作' };
+  if (payload.model !== null) {
+    const model = payload.model || {};
+    const entry = composerConnections(cfg).find(item => item.providerId === model.providerId && item.supplierId === model.supplierId);
+    const selected = entry?.models.find(item => item.id === model.modelId);
+    if (!selected) return { error: '请选择已启用 API 中的文本模型' };
+    payload = { ...payload, model: { providerId: entry.providerId, supplierId: entry.supplierId, modelId: selected.id, name: selected.name } };
+  }
+  cfg.observer = normalizeObserverSettings(payload);
+  saveConfig(cfg);
+  publishModelState(cfg);
+  return { observer: cfg.observer };
 });
 
 ipcMain.handle('models:quick-list', () => {
@@ -9411,6 +9459,8 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       hasUserWorkspace: !!workspace,
       providerId: selection.providerId,
       modelId: selection.modelId,
+      observerConnection: observerConnectionForRun(cfg),
+      observerJudgeEvery: normalizeObserverSettings(cfg.observer).judgeEvery,
       inputTokensPerSecond: Math.max(DEFAULT_INPUT_TOKENS_PER_SECOND, normalizeInputTokensPerSecond(
         cfg.api?.inputTokensPerSecond || cfg.agent?.inputTokensPerSecond
       )),

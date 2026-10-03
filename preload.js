@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('yan', {
   },
   browserAgentCommandResult: (payload) => ipcRenderer.send('browser:agent-command-result', payload),
   listQuickModels: () => ipcRenderer.invoke('models:quick-list'),
+  listModelConnections: () => ipcRenderer.invoke('models:connections'),
+  configureObserver: (settings) => ipcRenderer.invoke('observer:configure', settings),
   listMediaModels: () => ipcRenderer.invoke('models:media-list'),
   setModelRole: (providerId, modelId, modelType, supplierId = '') => ipcRenderer.invoke('model:role-set', {
     providerId,

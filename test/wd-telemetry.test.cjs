@@ -17,7 +17,7 @@ function action(id, target = `src/${id}.js`) {
   };
 }
 
-function fixture(t, { enabled = true, repetitive = false, polls = 3, initial = [], tools = 6 } = {}) {
+function fixture(t, { enabled = true, repetitive = false, polls = 3, initial = [], tools = 6, observerConnection, observerJudgeEvery } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-wd-telemetry-'));
   // Startup may fail while the read-only baseline child is still exiting.
   t.after(() => fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -54,10 +54,58 @@ function fixture(t, { enabled = true, repetitive = false, polls = 3, initial = [
   const run = listener => sidecar.run({
     runId: 'run-wd', workspace: directory, hasUserWorkspace: true,
     prompt: 'Read the project source files.', workMode: 'normal', enableSubagents: false,
-    providerId: 'test', modelId: 'test'
+    providerId: 'test', modelId: 'test', observerConnection, observerJudgeEvery
   }, event => { events.push(event); listener?.(event); });
   return { sidecar, events, calls, run };
 }
+
+test('runtime invokes the independent observer API and records delivered model advice', async t => {
+  const http = require('node:http');
+  const requests = [];
+  const server = http.createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    requests.push({ path: req.url, auth: req.headers.authorization, body: JSON.parse(body) });
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { content: '{"action":"remind","message":"Verify the focused change."}' } }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const f = fixture(t, { observerJudgeEvery: 2, observerConnection: {
+    providerId: 'independent', supplierId: 'official', modelId: 'reviewer', name: 'Reviewer',
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'observer-only', apiFormat: 'openai'
+  } });
+  const result = await f.run();
+  assert.equal(result.status, 'done'); assert.equal(requests.length, 1);
+  assert.equal(requests[0].auth, 'Bearer observer-only'); assert.equal(requests[0].body.model, 'reviewer');
+  assert.equal(result.watchdog.judgeEvery, 2); assert.equal(result.watchdog.model.checks, 1);
+  assert.equal(result.watchdog.model.phase, 'stopped');
+  assert.equal(result.watchdog.events[0].rules[0], 'model_observer');
+  assert.equal(result.watchdog.events[0].delivery, 'delivered');
+  assert.doesNotMatch(JSON.stringify(f.events), /observer-only/);
+});
+
+test('a slow observer never holds the main task open and its request is aborted', async t => {
+  const http = require('node:http');
+  let requests = 0;
+  const server = http.createServer(() => { requests++; });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const f = fixture(t, { polls: 2, observerConnection: {
+    providerId: 'independent', supplierId: 'official', modelId: 'slow',
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'fake'
+  } });
+  const result = await f.run();
+  assert.equal(requests, 1); assert.equal(result.status, 'done');
+  assert.equal(result.watchdog.model.phase, 'stopped'); assert.equal(f.calls.deliveries, 0);
+});
+
+test('unavailable observer connection preserves normal rule monitoring', async t => {
+  const f = fixture(t, { observerConnection: { modelId: 'deleted', unavailable: true }, observerJudgeEvery: 10, tools: 12 });
+  const result = await f.run();
+  assert.equal(result.status, 'done'); assert.equal(result.watchdog.checks, 1);
+  assert.equal(result.watchdog.judgeEvery, 10); assert.equal(result.watchdog.model.phase, 'error');
+  assert.equal(f.calls.deliveries, 0);
+});
 
 test('disabled WD reports disabled from startup through the saved result', async t => {
   const f = fixture(t, { enabled: false });
@@ -86,6 +134,18 @@ test('checks count normal judgments, while judgedSteps remains the last action i
   assert.equal(watch.telemetry.checks, 2);
   assert.equal(watch.telemetry.judgedSteps, 12);
   assert.equal(watch.state.fires, 0);
+});
+
+test('custom rule intervals honor the initial six-action warmup then the selected cadence', () => {
+  const messages = Array.from({ length: 20 }, (_, i) => action(`interval-${i}`));
+  for (const every of [1, 2, 10]) {
+    const watch = createThrashWatch({ judgeEvery: every });
+    const first = Math.max(6, every);
+    watch.observe(messages.slice(0, first - 1)); assert.equal(watch.telemetry.checks, 0);
+    watch.observe(messages.slice(0, first)); assert.equal(watch.telemetry.checks, 1);
+    watch.observe(messages.slice(0, first + every - 1)); assert.equal(watch.telemetry.checks, 1);
+    watch.observe(messages.slice(0, first + every)); assert.equal(watch.telemetry.checks, 2);
+  }
 });
 
 test('repeated busy polls neither increment counters nor emit unchanged snapshots', async t => {

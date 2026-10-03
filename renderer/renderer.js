@@ -3049,7 +3049,8 @@ function showMainPage(page) {
   $('#pageMcp').classList.toggle('hidden', page !== 'mcp');
   $('#pagePhotoVideo')?.classList.toggle('hidden', page !== 'photo-video');
   if (page !== 'chat') closeTaskActionsMenu();
-  closeBrowserPanel();
+  // Returning to chat must not close another tool, including the Observer.
+  if (getActiveRightSidebarTab()?.type === 'browser') closeBrowserPanel();
   if (page !== 'chat') window.YanUnderstandAnything?.close?.({ silent: true });
 
   if (page !== 'chat') closeRightSidebar();
@@ -21550,6 +21551,10 @@ async function saveModelPicker() {
 }
 
 function renderModelBadge() {
+  window.ZConnectionControls?.mount({ api, config: state.config, onNotice: toast, onLayoutChange: scheduleComposerGrow,
+    onMainChange: config => { state.config = config; quickModelsCache = null; renderModelBadge(); },
+    onObserverChange: observer => { state.config.observer = observer; renderModelBadge(); }
+  });
   const selection = getAgentModelSelection();
   const name = selection.name || selection.modelId || '未选择模型';
   const pillName = $('#modelPillName');

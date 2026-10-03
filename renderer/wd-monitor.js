@@ -15,7 +15,8 @@
     R2_saturation: '探索趋于饱和',
     R3_stale_strategy: '策略长期未变',
     R4_goal_drift: '偏离任务目标',
-    R5_stale_verification: '验证结果需要更新'
+    R5_stale_verification: '验证结果需要更新',
+    model_observer: '模型观察建议'
   });
   const ACTIONS = Object.freeze({ advise: '建议', remind: '提醒', escalate: '升级提醒', halt: '请求停止' });
   const text = (value, limit = 2000) => typeof value === 'string' ? value.slice(0, limit) : '';
@@ -57,7 +58,12 @@
       judgedSteps: count(value.judgedSteps), checks: count(value.checks),
       interventions: count(value.interventions), streak: count(value.streak),
       updatedAt: count(value.updatedAt), events: events.slice(-MAX_EVENTS),
-      partial: value.partial === true
+      partial: value.partial === true,
+      model: value.model && typeof value.model === 'object' ? {
+        name: text(value.model.name, 150), modelId: text(value.model.modelId, 200),
+        phase: text(value.model.phase, 30), checks: count(value.model.checks),
+        message: text(value.model.message, 1200), error: text(value.model.error, 200)
+      } : null
     };
   }
 
@@ -213,11 +219,26 @@
     const mode = node('span', 'wd-mode', { live: '实时', history: '历史', empty: '待命' }[view.mode] || '待命');
     mode.dataset.mode = view.mode;
     header.append(node('span', 'wd-eyebrow', '观察者 / 运行状态'), mode);
+    const configure = node('button', 'wd-config-button', '设置');
+    configure.type = 'button'; configure.dataset.observerConfig = 'true';
+    configure.setAttribute('aria-label', '观察者模型和检查间隔');
+    header.append(configure);
     const status = node('section', 'wd-status');
     status.dataset.state = view.phase;
     const dot = node('span', 'wd-status-dot');
     dot.setAttribute('aria-hidden', 'true');
     status.append(dot, node('h2', 'wd-status-title', view.title), node('p', 'wd-status-description', view.description));
+    const model = normalizeSnapshot(selection?.snapshot)?.model;
+    if (model) {
+      const modelState = node('div', 'wd-model-state');
+      modelState.dataset.phase = model.phase;
+      const label = { waiting: '等待动作', reviewing: '正在判断', observing: '已完成判断', error: '规则模式继续工作', stopped: '本轮已结束' }[model.phase] || '等待动作';
+      modelState.append(node('strong', '', `${model.name || model.modelId} · ${label}`),
+        node('p', '', `模型检查 ${model.checks || 0} 次`));
+      if (model.message) modelState.append(node('p', '', model.message));
+      if (model.error) modelState.append(node('p', '', model.error));
+      status.append(modelState);
+    }
     const stats = node('dl', 'wd-stats');
     view.stats.forEach(stat => {
       const item = node('div', 'wd-stat');
