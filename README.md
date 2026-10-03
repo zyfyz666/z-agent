@@ -1,80 +1,67 @@
 # Z
 
-Z is a desktop coding agent based on [Yan-Agent](https://github.com/ViaTumLab/Yan-Agent)
-by ViaTum Lab, with [thrash-watchdog](https://github.com/zyfyz666/thrash-watchdog)
-built into its OpenCode runtime and a dedicated Observer panel in the interface.
+Z 是一个桌面编程 Agent，将对话、项目操作、工具执行和代码审查放在同一个界面中。你可以交给它一个任务，查看执行过程，并通过内置的「观察者」了解 Agent 是否陷入重复操作，以及何时收到纠偏提醒。
 
-Almost everything here is Yan-Agent's work: the Electron desktop client, the task and
-review workflow, model adapters, skills, MCP and the rest. While
-a run is busy, a deterministic watchdog judges the agent's tool-call pattern and, when it is
-looping, delivers a one-sentence nudge through Yan's existing runtime interjection channel.
-For what the desktop client itself can do, read the
-[upstream README](https://github.com/ViaTumLab/Yan-Agent#readme) and
-[documentation](https://viatumlab.inkmindspace.com/yagent/).
+## 功能
 
-## What the fork changes
+- **项目与任务**：围绕本地项目开展对话、修改代码、执行命令和查看变更。
+- **上下文管理**：支持会话管理与上下文压缩，延续较长的任务。
+- **观察者**：记录工具调用中的重复行为和停滞信号，展示状态、触发原因及提醒投递情况。
+- **模型接入**：在设置中配置模型服务，并为任务选择模型。
+- **工具扩展**：通过技能和 MCP 接入更多工具，配合代码审查等工作流完成任务。
 
-| file | change |
-|---|---|
-| `lib/vendor/thrash-watchdog/` | the thrash-watchdog core, vendored unmodified (see `VENDORED.md`) |
-| `lib/thrash-watchdog.js` | Yan adapter: uses Yan's own `verificationRecord` to decide what counts as a check |
-| `lib/opencode-sidecar.js` | judges each poll while the run is busy; delivers via `deliverInterjection`; emits `yan.thrash.watchdog` events; writes a hash-chained audit to `<workspace>/.yanagent/thrash-audit.jsonl` |
-| `test/thrash-watchdog.test.cjs` | adapter tests |
-| `package.json`, `main.js` | Z app branding and build names; the existing app id and profile directories are preserved |
-| `renderer/` | Z interface and the Observer panel for the current task's watchdog status and intervention history |
+## 观察者
 
-## Observer (观察者)
+观察者面板在启动时默认展开，显示当前任务的运行状态和干预记录。你可以手动关闭，也可以从侧栏重新打开；任务更新或切换会话不会强制打开已经关闭的面板。
 
-The **Observer** panel opens by default at startup and shows the watchdog's state
-for the selected task and the interventions it has reported. You can close it and
-reopen it from the sidebar; task updates do not force it open again. The observer watches tool-call patterns for repeated work without
-progress and can send a short reminder through the runtime's interjection channel.
-The panel reports actual runtime events; it does not make an additional model request
-or grade the quality of an answer. A quiet watchdog is not proof that a task is correct.
+运行过程中，观察者使用规则分析工具调用和验证记录。当检测到持续重复、缺少进展的行为时，会通过运行中的提醒通道向 Agent 发送简短提示。面板展示真实的运行事件，规则判断本身无需额外调用模型。
 
-## Existing settings and sessions
+## 开始使用
 
-Z keeps the former WD Agent profile directories in place, so renaming the app does not
-hide existing settings, model connections, memories, or conversations. Nothing is moved
-or copied during this rename:
-
-- Windows/Linux source runs keep `<appData>/wd-agent`.
-- Packaged runs keep `<appData>/WD Agent`; macOS source runs also keep this directory,
-  matching the previous app behavior.
-- The `YanData` subdirectory, workspace `.yanagent` evidence, existing `YAN_*`
-  environment variables, and app id `io.github.zyfyz666.wdagent` remain compatible.
-
-On Windows, `<appData>` is normally `%APPDATA%`. The explicit E2E profile override
-continues to take precedence, keeping tests isolated from personal data. These profiles
-remain separate from an installed upstream Yan Agent.
-
-## Watchdog settings
-
-| variable | default | effect |
-|---|---|---|
-| `WD_WATCHDOG` | on | `0` disables the watchdog |
-| `WD_WATCHDOG_N` | `6` | judge every N tool calls |
-| `WD_WATCHDOG_HALT` | off | `1` lets persistent thrashing request the run to finish |
-
-The rules, the evidence behind them and their limits are documented in the
-[thrash-watchdog README](https://github.com/zyfyz666/thrash-watchdog#the-rules).
-
-## Run from source
-
-Windows x64 or macOS arm64, Node.js 22 (as in CI):
+源码运行环境：**Windows x64 或 macOS arm64，Node.js 22**。
 
 ```bash
+git clone https://github.com/zyfyz666/z-agent.git
+cd z-agent
 npm ci
-npm start       # or: npm run dev
-npm test
+npm start
 ```
 
-Build targets are unchanged from upstream (`npm run build`, `build:portable`, `build:mac`).
-Build outputs are named Z. There are no official Z installers; build your own.
+首次启动后：
 
-## License and credits
+1. 在设置中配置模型服务和访问凭据。
+2. 打开要处理的本地项目。
+3. 新建任务，描述你希望完成的工作。
+4. 在对话中查看执行结果，通过观察者面板查看运行状态。
 
-MIT, as upstream. The original copyright notice is kept in [LICENSE](LICENSE). Third-party
-code, skills, fonts and assets keep their own licenses, listed in
-[lib/THIRD_PARTY_NOTICES.md](lib/THIRD_PARTY_NOTICES.md). Issues with the desktop client
-itself are best reported [upstream](https://github.com/ViaTumLab/Yan-Agent/issues).
+已有用户的模型配置、会话和历史记录会沿用现有的数据目录。
+
+## 开发与构建
+
+```bash
+npm run dev             # 开发模式
+npm test                # 单元测试
+npm run build           # Windows 安装包
+npm run build:portable  # Windows 便携版
+npm run build:mac       # macOS arm64 镜像，需在 macOS 上构建
+```
+
+构建产物输出到 `dist/`，应用名称为 **Z**。
+
+## 观察者高级设置
+
+可通过环境变量调整观察者的运行规则：
+
+| 变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `WD_WATCHDOG` | 开启 | 设置为 `0` 可关闭观察者的运行干预 |
+| `WD_WATCHDOG_N` | `6` | 每经过 N 次工具调用进行一次判断 |
+| `WD_WATCHDOG_HALT` | 关闭 | 设置为 `1` 时，持续停滞可触发结束运行的请求 |
+
+## 反馈
+
+使用问题和功能建议可以提交到 [Issues](https://github.com/zyfyz666/z-agent/issues)。
+
+## 许可证
+
+本项目使用 [MIT 许可证](LICENSE)。第三方组件及其许可说明见 [Third-Party Notices](lib/THIRD_PARTY_NOTICES.md)。

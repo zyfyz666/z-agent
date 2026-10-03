@@ -1,7 +1,7 @@
 {
   "name": "z",
   "version": "1.6.1",
-  "description": "Z: a desktop agent based on Yan-Agent with a visible thrash-watchdog monitor",
+  "description": "Z desktop coding agent with context compaction and a visible Observer panel",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
