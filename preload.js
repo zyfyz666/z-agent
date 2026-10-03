@@ -273,12 +273,6 @@ contextBridge.exposeInMainWorld('yan', {
   openCodeRecoverRuns: (payload = {}) => ipcRenderer.invoke('opencode:recover-runs', payload || {}),
   yanCoreGetState: (payload = {}) => ipcRenderer.invoke('yan:core-state', payload || {}),
   yanCoreSettleRecoveredRun: (payload = {}) => ipcRenderer.invoke('yan:core-settle-recovered-run', payload || {}),
-  workGuiSnapshot: () => ipcRenderer.invoke('work-gui:snapshot'),
-  onWorkGuiEvent: (cb) => {
-    const handler = (_e, batch) => cb(batch);
-    ipcRenderer.on('work-gui:event-batch', handler);
-    return () => ipcRenderer.removeListener('work-gui:event-batch', handler);
-  },
   yanCoreEnqueueIntent: (payload = {}) => ipcRenderer.invoke('yan:core-enqueue-intent', payload || {}),
   yanCoreConsumeIntent: (intentId) => ipcRenderer.invoke('yan:core-consume-intent', intentId),
   yanCoreRequeueIntent: (intentId) => ipcRenderer.invoke('yan:core-requeue-intent', intentId),

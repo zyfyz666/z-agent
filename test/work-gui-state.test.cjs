@@ -25,7 +25,7 @@ test('resident identities use the same role names as the subagent panel', () => 
   const data = snapshot(10);
   data.agents.push({ id: 'sub:read', role: 'researcher', name: 'A task description', state: 'working' });
   gui.applySnapshot(data);
-  assert.equal(gui.getState().actors.find(a => a.id === 'main').name, 'Yan Agent');
+  assert.equal(gui.getState().actors.find(a => a.id === 'main').name, 'Z');
   assert.equal(gui.getState().actors.find(a => a.id === 'sub:read').name, 'Research Agent');
   gui.ingest({ events: [{ seq: 11, kind: 'agent.updated', agentId: 'sub:read', payload: { role: 'reviewer', name: 'Another assignment' } }] });
   assert.equal(gui.getState().actors.find(a => a.id === 'sub:read').name, 'Review Agent');

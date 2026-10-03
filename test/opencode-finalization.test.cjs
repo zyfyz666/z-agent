@@ -134,6 +134,41 @@ function waitForSignal(signal) {
   return new Promise(resolve => signal?.addEventListener('abort', resolve, { once: true }));
 }
 
+test('runtime watchdog audits the full tool history and delivers its session event', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-runtime-poll-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let busy = true;
+  const delivered = [];
+  const fixture = fakeClient(directory, (_payload, _call, messages) => {
+    for (let i = 0; i < 30; i++) messages.push(assistant('read-' + i, [{
+      type: 'tool', tool: 'read', callID: 'call-' + i,
+      state: { status: 'completed', input: { filePath: 'src/config.py' }, output: 'unchanged' }
+    }]));
+    return assistant('final', [{ type: 'text', text: 'Completed the check.' }]);
+  }, null, { status: () => ({ type: busy ? 'busy' : 'idle' }) });
+  fixture.client.session.messages = async payload => ({
+    data: payload.limit ? fixture.messages.slice(-payload.limit) : fixture.messages
+  });
+  const sidecar = new OpenCodeSidecar({ appRoot: process.cwd(), dataDir: directory, log: { warn() {} } });
+  sidecar.thrashWatchdogEnabled = true;
+  sidecar.client = fixture.client;
+  sidecar.start = async () => ({ ok: true });
+  sidecar.deliverInterjection = async (_runId, guidance) => {
+    delivered.push(guidance);
+    busy = false;
+    return { ok: true, delivered: true };
+  };
+  const events = [];
+  await sidecar.run({ runId: 'wd-runtime', workspace: directory, hasUserWorkspace: true,
+    prompt: 'Find the configuration.', workMode: 'normal', providerId: 'test', modelId: 'test' }, event => events.push(event));
+  assert.equal(delivered.length, 1);
+  assert.match(delivered[0].guidance, /WD THRASH WATCHDOG/);
+  const event = events.find(event => event.type === 'yan.thrash.watchdog');
+  assert.equal(event.data.sessionID, 'workspace-session');
+  const audit = fs.readFileSync(path.join(directory, '.yanagent', 'thrash-audit.jsonl'), 'utf8');
+  assert.match(audit, /"step":30/);
+});
+
 test('normal coding preserves its final body without followups for missing, failed or stale checks and builders', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-check-pass-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

@@ -215,6 +215,13 @@ function assertRetiredMigration() {
     for (const id of visibleIds) assert.ok(catalog.installed.some(skill => skill.id === id), `${id} must be visible`);
     for (const id of internalIds) assert.ok(!catalog.installed.some(skill => skill.id === id), `${id} must stay internal`);
 
+    const displayed = skillRegistry.getAllSkillsForCatalog(cfg, appRoot, dataDir);
+    assert.strictEqual(displayed.find(skill => skill.id === 'yan-prompt-optimizer').name, 'Z Prompt Optimizer');
+    assert.strictEqual(displayed.find(skill => skill.id === 'yan-understand-anything').name, '项目地图');
+    for (const skill of displayed.filter(skill => !skill.hidden)) {
+      assert.ok(!/\bYan(?:[ -]Agent)?\b/i.test(`${skill.name} ${skill.desc}`), `${skill.id} exposes obsolete product branding`);
+    }
+
     const companion = skillRegistry.readSkill('hyperframes-cli', 'render this composition', cfg, appRoot, dataDir);
     assert.strictEqual(companion.ok, true, 'HyperFrames must resolve its hidden CLI companion');
     assert.ok(companion.prompt.includes('npx hyperframes render'));

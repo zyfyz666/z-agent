@@ -5,7 +5,7 @@
   const list=value=>Array.isArray(value)?value:[];
   window.YanTiangongHost=Object.freeze({
     async read(place){
-      if(!backend)throw Error('Yan Agent 本地接口不可用');
+      if(!backend)throw Error('Z 本地接口不可用');
       if(place==='library'){
         const [skills,mcp]=await Promise.all([backend.listSkills(),backend.mcpList()]);
         return {skills:list(skills).map(s=>({id:s.id,name:s.name,description:s.description,enabled:s.enabled})),mcp:list(mcp).map(m=>({id:m.id,name:m.name,description:m.description,type:m.type,status:m.status||m.connectionStatus||(m.enabled?'待连接':'未启用'),builtin:m.builtin||m.systemManaged,native:m.native}))};

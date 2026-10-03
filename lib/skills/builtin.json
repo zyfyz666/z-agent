@@ -4,7 +4,7 @@
     {
       "id": "yan-react-bits",
       "name": "React Bits UI",
-      "desc": "调用 Yan Agent 预装的 React Bits 组件库，为 React 界面加入可复用的文字、背景与交互动效",
+      "desc": "调用 Z 预装的 React Bits 组件库，为 React 界面加入可复用的文字、背景与交互动效",
       "prompt": "请使用 Yan Agent 预装的 React Bits 组件库完成任务。先调用 list_ui_kit(kit=react-bits) 查看可用组件，再用 read_ui_kit 读取与当前技术栈匹配的实现，然后写入工作区并验证。不要从 GitHub 或其他网站重复下载组件。任务：\n\n{{cursor}}",
       "tags": [
         "ui-beautify"
@@ -23,7 +23,7 @@
     {
       "id": "yan-uiverse",
       "name": "Uiverse Web UI",
-      "desc": "调用 Yan Agent 预装的 Uiverse HTML/CSS 片段，为网页加入可直接落地的按钮、卡片、导航与页面区块",
+      "desc": "调用 Z 预装的 Uiverse HTML/CSS 片段，为网页加入可直接落地的按钮、卡片、导航与页面区块",
       "prompt": "请使用 Yan Agent 预装的 Uiverse 模式完成网页任务。先调用 list_ui_kit(kit=uiverse) 查看可用模式，再用 read_ui_kit 读取所需片段，按现有页面结构与视觉规范整合进 HTML/CSS 并验证。不要从网站重复下载片段。任务：\n\n{{cursor}}",
       "tags": [
         "web-design"

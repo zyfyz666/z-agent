@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const T=window.THREE,root=document.createElement('section');root.id='palace-entry';root.setAttribute('aria-label','天宫入口');
-  root.innerHTML='<canvas aria-hidden="true"></canvas><div class="entry-vignette"></div><div class="entry-heading"><span>YAN AGENT · WORK GUI</span><h1>云顶天宫</h1><p>入阙 · 开物 · 成事</p></div><button class="entry-open" disabled><span>正在启阙</span><i>双扉向内，万象徐开</i></button><p class="entry-caption">朱门承天光，云阙待君来。</p>';
+  root.innerHTML='<canvas aria-hidden="true"></canvas><div class="entry-vignette"></div><div class="entry-heading"><span>Z · 可视工作区</span><h1>云顶天宫</h1><p>入阙 · 开物 · 成事</p></div><button class="entry-open" disabled><span>正在启阙</span><i>双扉向内，万象徐开</i></button><p class="entry-caption">朱门承天光，云阙待君来。</p>';
   document.body.append(root);const main=document.querySelector('#experience');main.inert=true;
   const button=root.querySelector('button'),canvas=root.querySelector('canvas');let renderer,scene,camera,leaves=[],raf=0,opened=false,start=0,done=false;
   const materials=[],geometries=[],textures=[];

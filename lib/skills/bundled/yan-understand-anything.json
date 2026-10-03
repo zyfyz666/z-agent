@@ -1,6 +1,6 @@
 {
   "id": "yan-understand-anything",
-  "name": "Understand Anything",
+  "name": "项目地图",
   "desc": "用本地 CodeGraph 图谱浏览项目结构、文件职责、符号关系和影响范围",
   "aliases": [
     "understand anything",

@@ -54,7 +54,7 @@
     }
     setWorkspace(next);
     clearFrame();
-    setStatus('正在生成并打开知识图谱…');
+    setStatus('正在生成并打开项目地图…');
     let result;
     try {
       result = await api?.understandAnythingOpen?.(next);
@@ -68,7 +68,7 @@
       return { ok: false, cancelled: true };
     }
     if (!result?.ok || !result.url) {
-      const error = result?.error || '无法启动 Understand Anything';
+      const error = result?.error || '无法打开项目地图';
       setStatus(error, true);
       hooks.toast?.(error);
       return result || { ok: false, error };
@@ -83,7 +83,7 @@
     if (!workspace) return openViewer(hooks.getWorkspace?.());
     const seq = ++openSeq;
     if (!open) showLayer(true);
-    setStatus('正在刷新知识图谱…');
+    setStatus('正在刷新项目地图…');
     let result;
     try {
       result = await api?.understandAnythingRefresh?.(workspace);
@@ -97,7 +97,7 @@
       return { ok: false, cancelled: true };
     }
     if (!result?.ok || !result.url) {
-      const error = result?.error || '刷新图谱失败';
+      const error = result?.error || '刷新项目地图失败';
       setStatus(error, true);
       hooks.toast?.(error);
       return result || { ok: false, error };

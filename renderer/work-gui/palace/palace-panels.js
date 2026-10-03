@@ -17,8 +17,8 @@
   async function load(quiet=false){
     if(!active||!dialog.open)return;const id=active,token=++generation;
     if(!quiet)content.replaceChildren(el('p','正在读取…','palace-empty'));
-    $('#palace-connection').textContent=bridge?'已连接 Yan Agent · 本地数据':'独立预览 · 未连接 Yan Agent';
-    if(!bridge){content.replaceChildren();empty('请在 Yan Agent 的 Work GUI 中使用真实任务、Skill 和 MCP。此独立预览不填充模拟数据。');return;}
+    $('#palace-connection').textContent=bridge?'已连接 Z · 本地数据':'独立预览 · 未连接 Z';
+    if(!bridge){content.replaceChildren();empty('请在 Z 的可视工作区中查看任务、技能和 MCP 服务。');return;}
     try{
       const data=await bridge.read(id);if(token!==generation||id!==active||!dialog.open)return;
       if(quiet&&document.activeElement?.closest('.palace-content'))return;

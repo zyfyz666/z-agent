@@ -996,7 +996,7 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
     assert.equal(states.groupedState.callCount, 4);
     assert.equal(states.groupedState.collapsedBeforeClick, true);
     assert.equal(states.groupedState.expandedAfterClick, true);
-    assert.equal(states.groupedState.summary, '已读取文件、已使用 Yan 内置浏览器');
+    assert.equal(states.groupedState.summary, '已读取文件、已使用 Z 内置浏览器');
     assert.doesNotMatch(states.groupedState.summary, /并行|\d+次/);
     assert.equal(states.groupedState.statusCount, 0);
     assert.equal(states.groupedState.outerLabelColor, states.groupedState.skillColor);

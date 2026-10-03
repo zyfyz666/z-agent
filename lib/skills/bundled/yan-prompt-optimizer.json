@@ -1,6 +1,6 @@
 {
   "id": "yan-prompt-optimizer",
-  "name": "Yan Prompt Optimizer",
+  "name": "Z Prompt Optimizer",
   "desc": "在不扩张意图与任务范围的前提下，让用户 Prompt 更清晰、更可执行",
   "tags": [
     "agent-rules"

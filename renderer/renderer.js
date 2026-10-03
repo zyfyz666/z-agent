@@ -1,5 +1,5 @@
 /* ============================================================
-   Yan — renderer logic
+   Z — renderer logic
    ============================================================ */
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -325,9 +325,9 @@ function renderInterjectionTranscript(runCtx = currentInterjectionRun()) {
   const items = thread?.items || [];
   if (!items.length) {
     transcript.innerHTML = `<div class="auxiliary-dialogue-empty" aria-hidden="true">
-      <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-light" src="assets/logo.png" alt="">
-      <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-dark" src="assets/logo-light.png" alt="">
-      <span>Yan Agent工作期间，提问以辅助工作</span>
+      <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-light" src="assets/z-mark.svg" alt="">
+      <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-dark" src="assets/z-mark.svg" alt="">
+      <span>Z工作期间，提问以辅助工作</span>
     </div>`;
     transcript.dataset.interjectionRunId = String(runCtx?.runId || '');
     transcript.dataset.interjectionItemCount = '0';
@@ -653,11 +653,20 @@ function isAgentStateForCurrentSession(agentState) {
 function syncCurrentSessionAgentUi(session = state.currentSession) {
   if (!session || state.currentSession?.id !== session.id) return;
   const agentState = getSessionAgentState(session);
+  renderWdMonitor(session);
   renderSubagentUi();
   renderTodos(agentState);
   updateContextInfo(agentState, session);
   syncBrowserFocusPromptStatus();
   scheduleRightSidebarReviewRefresh();
+}
+
+function renderWdMonitor(session = state.currentSession) {
+  if (session && state.currentSession?.id !== session.id) return;
+  const monitor = window.ZWdMonitor;
+  if (!monitor) return;
+  const runCtx = session?.id ? getRunCtx(session.id) : null;
+  monitor.render($('#rs-watchdog'), monitor.selectSession(session, runCtx));
 }
 
 function canStartRun() {
@@ -732,7 +741,7 @@ function syncPetFocusedSession(session = state.currentSession) {
       status: 'idle',
       sessionId: null,
       running: false,
-      title: 'Yan Agent',
+      title: 'Z',
       message: '随时待命'
     });
     return;
@@ -1235,6 +1244,9 @@ async function init() {
   }
 
   showMainPage('chat');
+  // Default to the observer once at startup. Later task updates must respect
+  // a manually closed panel or another panel already restored for a live run.
+  if (!getActiveRightSidebarTab()) openRightSidebarTool('watchdog');
   quickInputHandlerReady = true;
   void consumeQuickInputPrompt();
 }
@@ -1252,10 +1264,10 @@ async function openTaskFromPet(sessionId) {
 }
 
 // ============================================================
-// Greeting (time-based)
+// Greeting
 // ============================================================
 function normalizeUserName(value) {
-  return String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 32) || 'Yanxi';
+  return window.ZProductContent.normalizeUserName(value);
 }
 
 function syncUserNameUi() {
@@ -1265,18 +1277,13 @@ function syncUserNameUi() {
   updateGreeting();
 }
 
-function updateGreeting() {
-  const h = new Date().getHours();
-  let part = 'evening';
-  if (h < 12) part = 'morning';
-  else if (h < 18) part = 'afternoon';
+function updateGreeting(language = state.config?.language) {
   const el = $('#greeting');
   const activeNameInput = document.activeElement?.matches?.('#userNameInput')
     ? document.activeElement
     : null;
-  const editingName = activeNameInput?.value || '';
-  const userName = normalizeUserName(editingName || state.config?.userName);
-  if (el) el.textContent = `Good ${part}, ${userName}`;
+  const userName = activeNameInput ? activeNameInput.value : state.config?.userName;
+  if (el) el.textContent = window.ZProductContent.greeting(userName, normalizeUiLanguage(language));
 }
 
 // ============================================================
@@ -1299,7 +1306,7 @@ function applyTheme(theme) {
   updateThemeSegmented(theme);
   // The migrated review view is an isolated document, so it cannot inherit
   // the parent theme live. Rebuild it when the user changes theme while the
-  // Review tab is open; the generated page will receive the fresh Yan tokens.
+  // Review tab is open; the generated page will receive the fresh Z tokens.
   if (typeof openRightSidebarTabs !== 'undefined'
       && openRightSidebarTabs.some(tab => tab.type === 'review')
       && globalThis.YanDshReview) {
@@ -1374,6 +1381,7 @@ function applyLanguage(language) {
   document.body?.setAttribute('data-language', value);
   window.YanI18n?.apply(value, document);
   updateLanguageSegmented(value);
+  updateGreeting(value);
   return value;
 }
 
@@ -2108,7 +2116,7 @@ function renderSessionList() {
 async function confirmDeadWorkspaceCleanup(summary) {
   const confirmed = await requestGenericConfirmation({
     title: '工作区已被删除',
-    description: '该任务所在的工作区已被删除 Yan Agent不再允许打开它并会立即删除',
+    description: '该任务所在的工作区已被删除 Z不再允许打开它并会立即删除',
     confirmLabel: '确定',
     danger: true
   });
@@ -3033,17 +3041,12 @@ function closeRightSidebar() {
 }
 
 function showMainPage(page) {
-  // The titlebar owns the world view. Background task/workspace updates can
-  // refresh chat data, but must not replace the surface the user is watching.
-  if (currentWindowView === 'work-gui' && page !== 'work-gui') return;
+  // Older callers of the removed scene return to the regular task workspace.
+  if (page === 'work-gui') page = 'chat';
   currentMainPage = page;
   $('#pageChat').classList.toggle('hidden', page !== 'chat');
   $('#pageSkills').classList.toggle('hidden', page !== 'skills');
   $('#pageMcp').classList.toggle('hidden', page !== 'mcp');
-  $('#pageWorkGui')?.classList.toggle('hidden', page !== 'work-gui');
-  // The cloud-sea world only animates while its page is visible.
-  if (page === 'work-gui') window.YanWorkGui?.open?.();
-  else window.YanWorkGui?.close?.();
   $('#pagePhotoVideo')?.classList.toggle('hidden', page !== 'photo-video');
   if (page !== 'chat') closeTaskActionsMenu();
   closeBrowserPanel();
@@ -3344,7 +3347,7 @@ function bindMediaStudio() {
 
 async function showWindowView(view) {
   if (!$('#settingsOverlay')?.classList.contains('hidden')) closeSettings();
-  const next = ['main', 'project-map', 'work-gui'].includes(view) ? view : 'main';
+  const next = ['main', 'project-map'].includes(view) ? view : 'main';
   if (next === currentWindowView && next !== 'project-map') {
     syncSidebarAccessibility();
     return;
@@ -3379,14 +3382,6 @@ async function showWindowView(view) {
   if (currentWindowView === 'main') mainSidebarWasOpen = !$('#app').classList.contains('sidebar-hidden');
   currentWindowView = next;
   window.YanUnderstandAnything?.close?.({ silent: true });
-  if (next === 'work-gui') {
-    syncSidebarAccessibility();
-    setLeftSidebarOpen(false);
-    showMainPage(next);
-    syncSidebarAccessibility();
-    return;
-  }
-
   currentWindowView = 'main';
   showMainPage('chat');
   setLeftSidebarOpen(mainSidebarWasOpen);
@@ -3724,7 +3719,7 @@ function renderSkillDetail(skillId, installedById = new Map()) {
   const managed = isManagedSkill(installedRecord);
   const removable = installed && !managed;
   const children = skillMarketChildren(skill.id);
-  const sourceLabel = managed ? 'Yan Agent' : (skill.repo || skill.source || '本地安装');
+  const sourceLabel = managed ? 'Z' : (skill.repo || skill.source || '本地安装');
   const groupId = skillMarketGroupId(skill);
   const userSkillDirectory = installed && !managed && !!skill.runtimeDirectory;
   const explorerAction = userSkillDirectory
@@ -3854,7 +3849,7 @@ async function openSkillCreatorComposer() {
   )) || {
     id: 'skill-creator',
     name: 'Skill Creator',
-    desc: 'Create and update focused Yan Agent skills',
+    desc: 'Create and update focused Z skills',
     tags: ['agent-rules'],
     logo: 'assets/skill-logos/github.png'
   };
@@ -4392,8 +4387,8 @@ async function renderMcpPage() {
   });
   const groupOrder = ['native', 'bundled', 'user'];
   const groupMeta = {
-    native: ['系统原生', '由 Yan 管理的原生 MCP 能力，状态随应用提供。'],
-    bundled: ['自带', '随 Yan 一起提供的 MCP 工具，可按需使用。'],
+    native: ['系统原生', '由 Z 管理的原生 MCP 能力，状态随应用提供。'],
+    bundled: ['自带', '随 Z 一起提供的 MCP 工具，可按需使用。'],
     user: ['用户自行安装', '你添加的 MCP 服务，可在详情页继续管理。']
   };
   list.innerHTML = [...groups.entries()].sort((a, b) => groupOrder.indexOf(a[0]) - groupOrder.indexOf(b[0])).map(([groupId, groupServers]) => `
@@ -4488,7 +4483,7 @@ async function renderMcpDetail(serverId, servers = []) {
   const isNative = server.systemManaged === true;
   const isRemote = server.type === 'remote';
   const toggleLabel = isNative ? '始终启用' : (server.enabled ? '禁用' : '启用');
-  const toggleTitle = isNative ? '原生 MCP 始终由 Yan 启用' : `${toggleLabel} ${server.name}`;
+  const toggleTitle = isNative ? '原生 MCP 始终由 Z 启用' : `${toggleLabel} ${server.name}`;
   const status = server.available === false ? '不可用' : (server.enabled ? '已启用' : '已停用');
   const statusClass = server.available === false ? 'is-available' : (server.enabled ? 'is-installed' : 'is-available');
   content.innerHTML = `
@@ -4516,7 +4511,7 @@ async function renderMcpDetail(serverId, servers = []) {
       <div class="skill-detail-section-head">
         <div>
           <h2 id="mcpDetailToolsTitle">包含的工具</h2>
-          <p>该 MCP 服务向 Yan 提供的具体工具。</p>
+          <p>该 MCP 服务向 Z 提供的具体工具。</p>
         </div>
       </div>
       <div id="mcpDetailTools" class="skill-detail-list mcp-tool-list">
@@ -5098,7 +5093,7 @@ async function previewTtsVoice() {
   try {
     const settings = speechSettings();
     const result = await requestSpeechAudio({
-      text: '你好，我是 Yan Agent，正在为你朗读正文。',
+      text: '你好，我是 Z，正在为你朗读正文。',
       voice: settings.voice,
       rate: settings.rate,
       requestId: `tts-preview-${++speechRequestSeq}`
@@ -5787,7 +5782,7 @@ function updatePromptOptimizerButton(composerText = getComposerText(), hasText =
   if (!button) return;
   const busy = !!promptOptimizationRun;
   const disabled = busy || isCurrentSessionExecutionActive() || !hasText;
-  const title = busy ? 'Yan Prompt Optimizer 正在优化' : '优化你的prompt';
+  const title = busy ? 'Z Prompt Optimizer 正在优化' : '优化你的prompt';
   if (button.disabled !== disabled) button.disabled = disabled;
   if (button.getAttribute('aria-busy') !== String(busy)) button.setAttribute('aria-busy', String(busy));
   if (button.title !== title) button.title = title;
@@ -5877,7 +5872,7 @@ async function optimizeComposerPrompt() {
   try {
     const skill = await api.readSkill?.('yan-prompt-optimizer', '');
     if (!skill?.ok || !String(skill.prompt || '').trim()) {
-      throw new Error(skill?.error || 'Yan Prompt Optimizer 未正确安装');
+      throw new Error(skill?.error || 'Z Prompt Optimizer 未正确安装');
     }
     if (operation.cancelled || promptOptimizationRun !== operation) return;
 
@@ -5888,14 +5883,14 @@ async function optimizeComposerPrompt() {
     ].join('\n\n');
     const optimizerSession = {
       id: operation.runCtx.sessionId,
-      title: 'Yan Prompt Optimizer',
+      title: 'Z Prompt Optimizer',
       workspace: operation.runCtx.workspace || state.config?.workspace || '',
       messages: [{
         role: 'user',
         content: optimizerPrompt,
         skillCalls: [{
           id: String(skill.id || 'yan-prompt-optimizer'),
-          name: String(skill.name || 'Yan Prompt Optimizer'),
+          name: String(skill.name || 'Z Prompt Optimizer'),
           prompt: String(skill.prompt)
         }]
       }]
@@ -6323,7 +6318,7 @@ function abortSessionById(sessionId) {
   applyAbortRunUi(sessionId);
   if (window.Notification && Notification.permission === 'granted' && state.currentSession?.id === sessionId) {
     try {
-      new Notification('Yan Agent', { body: '任务已被中断', icon: 'assets/logo.png' });
+      new Notification('Z', { body: '任务已被中断', icon: 'assets/z-mark.svg' });
     } catch {}
   }
   if (state.currentSession?.id === sessionId) toast('任务已被中断');
@@ -7793,7 +7788,7 @@ function splitTaggedThinkingText(value) {
   return { text: String(value || ''), thinking: '', incomplete: false };
 }
 
-const DELIVERY_AGREEMENT_NAME = 'Yan-Delivery-Agreement';
+const DELIVERY_AGREEMENT_NAME = 'Z-Delivery-Agreement';
 const DELIVERY_AGREEMENT_OPEN_TAG = '<yan-delivery-contract>';
 const DELIVERY_AGREEMENT_CLOSE_TAG = '</yan-delivery-contract>';
 const DELIVERY_AGREEMENT_FIELDS = window.YanDeliveryContract.FIELDS;
@@ -7804,8 +7799,8 @@ const DELIVERY_AGREEMENT_STATUS = Object.freeze({
   failed: '交付协议认证出错'
 });
 
-const REASONING_SIDEPATH_NAME = 'Yan-Reasoning-Sidepath';
-const REASONING_SIDEPATH_BRIEF_NAME = 'Yan-Reasoning-Sidepath 简报';
+const REASONING_SIDEPATH_NAME = 'Z-Reasoning-Sidepath';
+const REASONING_SIDEPATH_BRIEF_NAME = 'Z-Reasoning-Sidepath 简报';
 const REASONING_SIDEPATH_STATUS = Object.freeze({
   pending: '·待提出',
   cleared: '·已放行',
@@ -8646,7 +8641,7 @@ function renderOpenCodeRunNow(runCtx) {
 
 async function requireOpenCodeInteractionReply(result, runCtx, label) {
   if (result?.ok) return;
-  const message = `${label}失败：${result?.error || 'Yan Kernel 未返回成功结果'}`;
+  const message = `${label}失败：${result?.error || 'Z Kernel 未返回成功结果'}`;
   runCtx.openCodeError = message;
   toast(message);
   try { await api.openCodeCancelRun(runCtx.runId); } catch {}
@@ -8977,6 +8972,13 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
   runCtx.openCodeLastEventAt = Date.now();
   if (updateSubagentWorkflow(runCtx, event, deferEffects)) return;
   const data = event.data || event.properties || {};
+  if (event.type === 'yan.thrash.watchdog.status' || event.type === 'yan.thrash.watchdog') {
+    if (runCtx.activeAgentRun && window.ZWdMonitor) {
+      runCtx.activeAgentRun.watchdog = window.ZWdMonitor.reduce(runCtx.activeAgentRun.watchdog, event);
+      if (state.currentSession?.id === runCtx.sessionId) renderWdMonitor();
+    }
+    return;
+  }
   const part = data.part;
   if (
     event.type === 'message.part.delta'
@@ -9648,6 +9650,8 @@ function openCodeResultToAgentRun(result, runCtx) {
     : (result.status === 'interrupted' ? 'interrupted' : (result.status === 'error' ? 'error' : 'done'));
   runCtx.agentState.status = status;
   runCtx.finalStatus = status;
+  const watchdog = window.ZWdMonitor?.finish(result.watchdog || runCtx.activeAgentRun?.watchdog, status) || null;
+  if (runCtx.activeAgentRun) runCtx.activeAgentRun.watchdog = watchdog;
   runCtx.agentState.toolCallCount = result.toolCalls?.length || runCtx.agentState.toolCallCount || 0;
   const resultTodos = Array.isArray(result.todos)
     ? normalizeAgentTodos(result.todos)
@@ -9665,6 +9669,7 @@ function openCodeResultToAgentRun(result, runCtx) {
   }
   return {
     runId: runCtx.runId,
+    watchdog,
     openCodeSessionId: result.openCodeSessionId || runCtx.openCodeSessionId || '',
     openCodeVersion: result.openCodeVersion || '1.18.11',
     providerId: runCtx.providerId || '',
@@ -9706,7 +9711,7 @@ function openCodeResultToAgentRun(result, runCtx) {
               ? '主轮已包含真实预览或验证，交付核对直接通过。'
               : result.delivery?.failure
                 ? (result.delivery.passive ? result.delivery.failure : '任务已完成，但交付核对未完全通过，请查看核对记录。')
-          : 'Yan Kernel 已完成执行并返回真实会话结果。')
+          : 'Z Kernel 已完成执行并返回真实会话结果。')
         : ''),
     acceptanceCriteria: runCtx.workspaceRequired
       ? []
@@ -9795,6 +9800,7 @@ function initOpenCodeRunState(runCtx) {
   runCtx.reviewVersion = 0;
   runCtx.activeAgentRun = {
     runId: runCtx.runId,
+    watchdog: null,
     providerId: runCtx.providerId || '',
     supplierId: runCtx.supplierId || '',
     modelId: runCtx.modelId || '',
@@ -9815,6 +9821,7 @@ function initOpenCodeRunState(runCtx) {
   rebuildOpenCodeTimelineIndex(runCtx);
   interjectionThreadFor(runCtx, true);
   syncInterjectionUi();
+  if (state.currentSession?.id === runCtx.sessionId) renderWdMonitor();
 }
 
 function attachOpenCodeRunEventListeners(runCtx, onCompleted) {
@@ -9884,7 +9891,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         runId: openCodeRunId,
         yanSessionId: session.id,
         openCodeSessionId: session.openCodeSessionId || '',
-        title: session.title || latestUserMessage.content || 'Yan task',
+        title: session.title || latestUserMessage.content || 'Z task',
         prompt: String(latestUserMessage.content || ''),
         attachments: latestUserMessage.attachments || [],
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
@@ -9908,7 +9915,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         utility: !!runCtx.utility,
         handoff: session.handoff || null
       });
-      if (!start?.ok) throw new Error(start?.error || 'Yan Kernel 启动失败');
+      if (!start?.ok) throw new Error(start?.error || 'Z Kernel 启动失败');
       await rejectStartedOpenCodeRunIfAborted(runCtx, openCodeRunId);
       runCtx.runAbortController?.signal.addEventListener('abort', () => {
         api.openCodeCancelRun(openCodeRunId).catch(() => {});
@@ -9987,6 +9994,7 @@ async function persistResumedOpenCodeRunOnce(session, runCtx, result) {
     updateSendState();
   }
   state.activeRuns.delete(session.id);
+  if (state.currentSession?.id === session.id) renderWdMonitor(session);
   syncChatAutoFollowUi(currentChatSessionId());
   scheduleQueuedTurnDispatch(session);
   const petStatus = agentRun?.status === 'interrupted'
@@ -10093,11 +10101,11 @@ async function reconcileOpenCodeActiveRuns() {
 
 
 // ---------------------------------------------------------------------------
-// Interrupted-run recovery: Yan Core durably journals every provider event, so
+// Interrupted-run recovery: Z Core durably journals every provider event, so
 // a Turn that died with the previous process can be replayed from disk and
 // persisted into its session instead of vanishing from the UI.
 // ---------------------------------------------------------------------------
-const OPEN_CODE_RECOVERY_NOTE = '此回复由 Yan Core 运行日志恢复：应用退出前模型已产生的正文、工具调用与进度都保留在这里。';
+const OPEN_CODE_RECOVERY_NOTE = '此回复由 Z Core 运行日志恢复：应用退出前模型已产生的正文、工具调用与进度都保留在这里。';
 let openCodeCoreRecoveryStarted = false;
 
 async function recoverInterruptedOpenCodeRuns(recoveredTurns) {
@@ -10525,11 +10533,11 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
     if (window.Notification && Notification.permission === 'granted' && agentRun?.status !== 'interrupted') {
       try {
         const failed = agentRun?.status === 'error';
-        new Notification(failed ? 'Yan Agent · 任务异常' : 'Yan Agent', {
+        new Notification(failed ? 'Z · 任务异常' : 'Z', {
           body: failed
             ? `「${runSession.title || '任务'}」已停止：${taskErr || '模型请求失败'}`
             : `「${runSession.title || '任务'}」已完成 · 耗时 ${formatDuration(taskDuration)}`,
-          icon: 'assets/logo.png'
+          icon: 'assets/z-mark.svg'
         });
         completionNotificationSent = true;
       } catch {}
@@ -10542,7 +10550,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
       // completion arriving afterwards must not append a second assistant
       // message or overwrite the cancelled/failed outcome.
       taskOk = false;
-      taskErr = err?.message || '任务已由 Yan Core 对账结束';
+      taskErr = err?.message || '任务已由 Z Core 对账结束';
       runCtx.agentState.status = 'interrupted';
       if (ui) showTyping(false);
     } else if (err && (err.name === 'AbortError' || runCtx.shouldAbort)) {
@@ -10623,9 +10631,9 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
       && window.Notification
       && Notification.permission === 'granted') {
       try {
-        new Notification('Yan Agent · 任务异常', {
+        new Notification('Z · 任务异常', {
           body: `「${runSession.title || '任务'}」已停止：${taskErr || '模型连接异常'}`,
-          icon: 'assets/logo.png'
+          icon: 'assets/z-mark.svg'
         });
       } catch {}
     }
@@ -10874,6 +10882,7 @@ function finalizeAgentRun(content, status, activeRun, bodyEl, error, runCtx) {
   }
   return {
     ...(activeRun || {}),
+    watchdog: window.ZWdMonitor?.finish(activeRun?.watchdog, status) || null,
     runId: runCtx?.runId || activeRun?.runId || '',
     status,
     startedAt: runCtx?.startedAt || activeRun?.startedAt || Date.now(),
@@ -11232,7 +11241,7 @@ function renderAgentQuestionStep({ focus = true } = {}) {
   customToggle?.setAttribute('aria-expanded', 'false');
   if (customInput) {
     customInput.value = draft.custom || '';
-    customInput.placeholder = options.length ? '否，并告诉 Yan Agent 应该如何做不同' : '请输入你的回答';
+    customInput.placeholder = options.length ? '否，并告诉 Z 应该如何做不同' : '请输入你的回答';
   }
   if (!options.length) {
     customField?.classList.remove('hidden');
@@ -12106,7 +12115,7 @@ function buildDeliveryAgreementElement(contract = {}, agreement = {}) {
   details.open = false;
 
   // The state lives on the tool label itself (same purple as the name):
-  // "Yan-Delivery-Agreement ·已完成" / "Yan-Delivery-Agreement ·错误".
+  // "Z-Delivery-Agreement ·已完成" / "Z-Delivery-Agreement ·错误".
   const stateSuffix = verification === 'failed' ? '·错误' : '·已完成';
   const summary = document.createElement('summary');
   summary.className = 'tool-activity-summary';
@@ -13488,17 +13497,17 @@ const TOOL_ICON_SVG = {
 };
 
 const TOOL_SERVER_UI = {
-  'yan-browser': { label: 'Yan 内置浏览器', toolName: 'Yan-builtin-browser-Control', icon: 'globe-cursor' },
-  serena: { label: 'Yan Serena', toolName: 'Yan-Serena-MCP', icon: 'file-check' },
-  codegraph: { label: 'Yan CodeGraph', toolName: 'Yan-CodeGraph-MCP', icon: 'folder-check' },
-  playwright: { label: 'Yan Playwright', toolName: 'Yan-Playwright-MCP', icon: 'terminal-cursor' },
-  harness: { label: 'Yan Continual Harness', toolName: 'Yan-Continual-Harness', icon: 'sliders-horizontal' }
+  'yan-browser': { label: 'Z 内置浏览器', toolName: 'Z-builtin-browser-Control', icon: 'globe-cursor' },
+  serena: { label: 'Z Serena', toolName: 'Z-Serena-MCP', icon: 'file-check' },
+  codegraph: { label: 'Z CodeGraph', toolName: 'Z-CodeGraph-MCP', icon: 'folder-check' },
+  playwright: { label: 'Z Playwright', toolName: 'Z-Playwright-MCP', icon: 'terminal-cursor' },
+  harness: { label: 'Z Continual Harness', toolName: 'Z-Continual-Harness', icon: 'sliders-horizontal' }
 };
 
 // MCP detail rows use the same icon vocabulary as the work-process tool UI.
 // Keep the mapping by the real MCP tool name so each tool has its own visual cue.
 const MCP_DETAIL_TOOL_UI = Object.freeze({
-  // Yan Analysis
+  // Z Analysis
   repo_map: { icon: 'folder-check', description: '按结构重要性整理整个工作区，列出关键文件及其主要符号，帮助快速了解大型代码库。' },
   code_outline: { icon: 'file-text', description: '读取单个文件的符号大纲，包括名称、类型和所在行号，避免加载整个大文件。' },
   code_symbol: { icon: 'file-check', description: '按名称精确读取一个函数、类或方法的源码及行号范围。' },
@@ -13514,8 +13523,8 @@ const MCP_DETAIL_TOOL_UI = Object.freeze({
   ghidra_decompile: { icon: 'terminal', description: '使用 Ghidra 对二进制文件执行 headless 分析并返回反编译后的 C 代码。' },
   slice: { icon: 'folder-arrow-left', description: '对一个 JavaScript/TypeScript 符号中的变量执行语句级反向切片，找出影响该值的代码行。' },
 
-  // Yan built-in browser
-  open_builtin_browser: { icon: 'globe-plus', description: '在 Yan 专属内置浏览器标签页中打开网址、搜索词、本地文件或工作区预览。' },
+  // Z built-in browser
+  open_builtin_browser: { icon: 'globe-plus', description: '在 Z 专属内置浏览器标签页中打开网址、搜索词、本地文件或工作区预览。' },
   browser_snapshot: { icon: 'eye', description: '读取当前页面的新鲜元素引用、角色、标签、状态和可见文字，供后续交互使用。' },
   browser_read_page: { icon: 'file-text', description: '读取当前页面的文字、网址和标题，适合文本研究与摘要。' },
   browser_click: { icon: 'handshake', description: '点击最近一次页面快照中的元素，并验证页面或目标是否发生变化。' },
@@ -13535,24 +13544,24 @@ const MCP_DETAIL_TOOL_UI = Object.freeze({
   browser_history: { icon: 'circle-more-horizontal', description: '在内置浏览器中后退、前进或重新加载页面。' },
   browser_status: { icon: 'monitor', description: '读取当前网址、标题、加载状态和历史记录可用性，不改变页面。' },
 
-  // Yan Web
+  // Z Web
   fetch_text: { icon: 'globe-plus', description: '直接抓取已知 URL 的文本内容（HTML/JSON/XML/SVG 等），不打开内置浏览器。' },
   download_file: { icon: 'download', description: '把图标、图片、字体等静态资源下载到当前工作区，并返回路径、大小与 sha256。' },
 
   // Other bundled MCP services
   find_skills: { icon: 'eye', description: '搜索官方 Agent Skill 生态中的可用能力。' },
-  install_skill: { icon: 'download', description: '通过官方 Skill 工具安装一个或多个完整的 Yan Agent Skill。' },
-  list_installed_skills: { icon: 'filter', description: '列出 Yan Agent 当前可用的内置 Skill 和用户安装的 Skill。' },
-  read_skill: { icon: 'file', description: '读取一个完整的 Yan Agent Skill 指令文档。' },
+  install_skill: { icon: 'download', description: '通过官方 Skill 工具安装一个或多个完整的 Z Skill。' },
+  list_installed_skills: { icon: 'filter', description: '列出 Z 当前可用的内置 Skill 和用户安装的 Skill。' },
+  read_skill: { icon: 'file', description: '读取一个完整的 Z Skill 指令文档。' },
   read_skill_resource: { icon: 'file-text', description: '读取 Skill 指令文档或引用文本资源中的一个精确分块。' },
   read_skill_resources: { icon: 'file-text', description: '并行读取多个 Skill 文档分块，并按确定顺序返回。' },
-  list_design_references: { icon: 'filter', description: '列出 Yan 内置设计参考库中可用的品牌标识。' },
+  list_design_references: { icon: 'filter', description: '列出 Z 内置设计参考库中可用的品牌标识。' },
   read_design_reference: { icon: 'file-check', description: '读取指定品牌的完整 DESIGN.md 设计参考。' },
-  remove_skill: { icon: 'bin', description: '移除一个已安装的 Yan Agent Skill，并保留可恢复的隔离副本。' },
-  read_image: { icon: 'image-check', description: '通过配置好的视觉中继读取本地图片或 Yan 生成图片中的视觉事实。' },
+  remove_skill: { icon: 'bin', description: '移除一个已安装的 Z Skill，并保留可恢复的隔离副本。' },
+  read_image: { icon: 'image-check', description: '通过配置好的视觉中继读取本地图片或 Z 生成图片中的视觉事实。' },
   generate_image: { icon: 'image-plus', description: '使用配置好的图像模型生成或编辑图片。' },
   generate_video: { icon: 'list-video', description: '使用配置好的视频模型生成视频。' },
-  create_handoff: { icon: 'folder-arrow-left', description: '在用户明确授权后进入另一个工作区的 Yan 任务并交接有限上下文。' },
+  create_handoff: { icon: 'folder-arrow-left', description: '在用户明确授权后进入另一个工作区的 Z 任务并交接有限上下文。' },
   read_source_context: { icon: 'folder-arrow-up', description: '读取由工作区交接绑定的来源任务中的一页上下文。' },
   schedule_refinement: { icon: 'sliders-horizontal', description: '为当前回合结束后排队一次有证据支持的 Continual Harness 改进。' },
   list_entries: { icon: 'filter', description: '读取可注入未来回合的 Continual Harness 条目（策略/记忆/技能/子代理）。' },
@@ -14495,11 +14504,11 @@ const TOOL_ACTIVITY_COMPLETED_LABELS = Object.freeze({
   'Git 拉取': '已完成 Git 拉取',
   'Git 克隆': '已完成 Git 克隆',
   'Git 分支': '已完成 Git 分支操作',
-  'Yan 内置浏览器': '已使用 Yan 内置浏览器',
-  'Yan Serena': '已调用 Yan Serena',
-  'Yan CodeGraph': '已调用 Yan CodeGraph',
-  'Yan Playwright': '已调用 Yan Playwright',
-  'Yan Continual Harness': '已调用 Yan Continual Harness'
+  'Z 内置浏览器': '已使用 Z 内置浏览器',
+  'Z Serena': '已调用 Z Serena',
+  'Z CodeGraph': '已调用 Z CodeGraph',
+  'Z Playwright': '已调用 Z Playwright',
+  'Z Continual Harness': '已调用 Z Continual Harness'
 });
 
 function toolActivityCompletedLabel(label) {
@@ -17579,6 +17588,10 @@ function bindTaskGit() {
 }
 
 const RIGHT_SIDEBAR_TOOLS = Object.freeze({
+  watchdog: {
+    label: '观察者',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>'
+  },
   browser: {
     label: '浏览器',
     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>'
@@ -17871,7 +17884,7 @@ function createRightSidebarTab(tool, options = {}) {
     openRightSidebarTabs.push(tab);
     return tab;
   }
-  if (tool === 'review' || tool === 'interjection' || tool === 'plan') {
+  if (tool === 'review' || tool === 'interjection' || tool === 'plan' || tool === 'watchdog') {
     const existing = openRightSidebarTabs.find(tab => tab.type === tool);
     if (existing) return existing;
     const tab = { id: tool, type: tool, label: RIGHT_SIDEBAR_TOOLS[tool].label };
@@ -17923,6 +17936,7 @@ function activateRightSidebarTab(tabId, { forceReview = true } = {}) {
     requestAnimationFrame(() => $('#interjectionInput')?.focus({ preventScroll: true }));
   }
   if (tab.type === 'plan') renderPlanDocumentPanel();
+  if (tab.type === 'watchdog') renderWdMonitor();
   if (tab.type === 'browser') syncBrowserViewport(tab.id);
   if (tab.type === 'subagents') renderSubagentUi();
   return true;
@@ -18030,6 +18044,7 @@ $('#rightSidebarTabStrip')?.addEventListener('error', event => {
 $$('[data-rs-open-tool]').forEach(button => {
   button.addEventListener('click', () => {
     if (button.disabled) return;
+    if (button.id === 'wdMonitorNavBtn') switchSidebarNav('tasks');
     openRightSidebarTool(button.dataset.rsOpenTool);
   });
 });
@@ -18329,7 +18344,7 @@ function openSettings(tab = 'about') {
     $('#app').classList.add('settings-mode');
     settingsOverlay.classList.remove('hidden');
     [
-      '#pageChat', '#pageSkills', '#pageMcp', '#pageWorkGui',
+      '#pageChat', '#pageSkills', '#pageMcp',
       '#rightSidebar', '#rightResizeHandle'
     ].forEach(selector => {
       const element = $(selector);
@@ -18348,7 +18363,7 @@ function closeSettings() {
   settingsOverlay.classList.add('hidden');
   $('#app').classList.remove('settings-mode');
   [
-    '#pageChat', '#pageSkills', '#pageMcp', '#pageWorkGui',
+    '#pageChat', '#pageSkills', '#pageMcp',
     '#rightSidebar', '#rightResizeHandle'
   ].forEach(selector => {
     const element = $(selector);
@@ -18370,7 +18385,7 @@ const SETTINGS_TAB_META = Object.freeze({
   api: { title: 'API 配置', description: '模型厂商、凭据与兼容端点' },
   model: { title: '模型', description: '选择当前任务默认使用的模型' },
   'vision-relay': { title: '视觉中继', description: '允许任意主模型读取和理解图像内容，实现完全多模态' },
-  about: { title: '关于Yan Agent', description: '版本信息与更新文档' }
+  about: { title: '关于Z', description: '版本信息与更新文档' }
 });
 
 $('#settingsSidebarNav')?.addEventListener('keydown', event => {
@@ -18409,90 +18424,10 @@ function switchTab(tab) {
   if (settingsContent) settingsContent.scrollTop = 0;
 }
 
-const ABOUT_CONTACTS = Object.freeze({
-  douyin: '994525685197',
-  qq: '1103989964',
-  email: '1420894553@qq.com'
-});
-
-function syncAboutContact(key = 'douyin') {
-  const picker = $('#aboutContactPicker');
-  const value = ABOUT_CONTACTS[key] || ABOUT_CONTACTS.douyin;
-  if (!picker) return;
-  picker.querySelectorAll('[data-about-contact]').forEach(button => {
-    const active = button.dataset.aboutContact === key;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-checked', String(active));
-  });
-  const valueEl = $('#aboutContactValue');
-  if (valueEl) valueEl.textContent = value;
-  const copyButton = $('#aboutContactCopy');
-  if (copyButton) copyButton.dataset.contactValue = value;
-}
-
-async function copyAboutContact() {
-  const value = String($('#aboutContactCopy')?.dataset.contactValue || $('#aboutContactValue')?.textContent || '').trim();
-  if (!value) return;
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-    } else {
-      const helper = document.createElement('textarea');
-      helper.value = value;
-      helper.setAttribute('readonly', 'true');
-      helper.style.position = 'fixed';
-      helper.style.opacity = '0';
-      document.body.appendChild(helper);
-      helper.select();
-      document.execCommand('copy');
-      helper.remove();
-    }
-    toast('已复制到剪贴板');
-  } catch {
-    toast('复制失败');
-  }
-}
-
 const aboutErrorDialog = $('#aboutErrorDialog');
 const aboutErrorsButton = $('#aboutErrorsBtn');
 const aboutErrorClose = $('#aboutErrorClose');
-const ABOUT_ERROR_PAGES = Object.freeze([
-  {
-    title: 'OpenCode configuration changed while Agent runs are active.',
-    description: '任务运行期间修改了模型配置',
-    answer: 'A：任务期间请勿随意更改模型配置'
-  },
-  {
-    title: "Expected 'id' to be a string.",
-    description: 'OpenAI 兼容工具流的首个 tool-call 增量缺少字符串 “id”',
-    answer: 'A：属上游响应形状问题，请反馈至Yan Agent抖音/QQ群'
-  },
-  {
-    title: "Expected 'function.name' to be a string.",
-    description: 'OpenAI 兼容工具流的首个 tool-call 增量缺少函数名',
-    answer: 'A：属上游响应形状问题，请反馈至Yan Agent抖音/QQ群'
-  },
-  {
-    title: 'ConfigInvalidError / Invalid input: expected …',
-    description: 'provider、model 或权限对象不符合 SDK schema（例如 provider/model id 不是字符串）',
-    answer: 'A：provider-ID / model-ID有误，请检查API配置'
-  },
-  {
-    title: 'OpenCode completed without a final user-facing answer.',
-    description: '有 assistant 消息，但没有可展示的最终文本（finish=stop/other/缺 finish，正文空白或只有 thinking）',
-    answer: 'A：Yan 会自动续写一次。仍失败时换模型或降低推理强度；中转可能把推理吞掉只回一个空格'
-  },
-  {
-    title: 'Model output was truncated by max_output_tokens before a user-facing answer.',
-    description: '推理模型在输出上限处结束，可见正文为空（常见于 GPT-5.6 Terra / Responses）',
-    answer: 'A：Yan 会自动续写一次。仍失败时降低推理强度，或检查中转是否丢了 reasoning/正文'
-  },
-  {
-    title: 'Unknown certificate verification error.',
-    description: '未知证书配置错误',
-    answer: 'A：此为偶发性问题，请尝试重新发送prompt'
-  }
-]);
+const ABOUT_ERROR_PAGES = window.ZProductContent.errors;
 let aboutErrorPage = 0;
 function renderAboutErrorPage() {
   const pageIndex = Math.max(0, Math.min(ABOUT_ERROR_PAGES.length - 1, aboutErrorPage));
@@ -18550,91 +18485,6 @@ aboutErrorDialog?.addEventListener('keydown', event => {
   }
 });
 aboutErrorDialog?.addEventListener('close', () => aboutErrorsButton?.focus({ preventScroll: true }));
-$('#aboutContactPicker')?.addEventListener('click', event => {
-  const button = event.target.closest('[data-about-contact]');
-  if (!button) return;
-  syncAboutContact(button.dataset.aboutContact);
-});
-$('#aboutContactCopy')?.addEventListener('click', copyAboutContact);
-
-// About panel: check updates from the COS release feed
-const UPDATE_BUTTON_IDLE_LABEL = '检查当前版本并更新';
-const aboutCheckUpdateButton = $('#aboutCheckUpdateBtn');
-let updateDownloading = false;
-let updateProgressOff = null;
-
-function setUpdateButtonLabel(label, disabled = false) {
-  if (!aboutCheckUpdateButton) return;
-  aboutCheckUpdateButton.textContent = window.YanI18n?.translate(label) || label;
-  aboutCheckUpdateButton.disabled = !!disabled;
-}
-
-async function installDownloadedUpdate(version) {
-  const confirmed = window.confirm(`v${version} 安装包已下载完成。\n是否立即运行安装程序？更新会关闭当前应用。`);
-  if (!confirmed) {
-    toast('安装包已保存，可稍后手动运行');
-    return;
-  }
-  const result = await window.yan?.updateInstall?.();
-  if (!result?.ok) toast(`启动安装程序失败（${result?.error || '未知错误'}）`);
-}
-
-async function downloadUpdatePackage(info) {
-  updateDownloading = true;
-  setUpdateButtonLabel('准备下载…', true);
-  updateProgressOff = window.yan?.onUpdateProgress?.((progress) => {
-    if (!progress) return;
-    setUpdateButtonLabel(`下载中 ${Number(progress.percent) || 0}%`, true);
-  }) || null;
-  try {
-    const result = await window.yan?.updateDownload?.();
-    if (!result?.ok) {
-      toast(`下载失败（${result?.error || '未知错误'}）`);
-      return;
-    }
-    setUpdateButtonLabel('下载完成', true);
-    await installDownloadedUpdate(result.version || info.latestVersion);
-  } finally {
-    updateDownloading = false;
-    if (updateProgressOff) updateProgressOff();
-    updateProgressOff = null;
-    setUpdateButtonLabel(UPDATE_BUTTON_IDLE_LABEL);
-  }
-}
-
-async function checkForUpdatesFromAbout() {
-  if (updateDownloading) return;
-  setUpdateButtonLabel('正在检查…', true);
-  try {
-    const result = await window.yan?.updateCheck?.();
-    if (!result) {
-      toast('当前环境不支持检查更新');
-      return;
-    }
-    if (!result.ok) {
-      toast(`检查更新失败（${result.error || '未知错误'}）`);
-      return;
-    }
-    if (!result.hasUpdate) {
-      toast(`已是最新版本 v${result.currentVersion}`);
-      return;
-    }
-    const confirmed = window.confirm(`发现新版本 v${result.latestVersion}（当前 v${result.currentVersion}）\n是否下载安装包？`);
-    if (!confirmed) {
-      toast('已取消更新');
-      return;
-    }
-    await downloadUpdatePackage(result);
-  } finally {
-    if (!updateDownloading) setUpdateButtonLabel(UPDATE_BUTTON_IDLE_LABEL);
-  }
-}
-
-aboutCheckUpdateButton?.addEventListener('click', () => {
-  checkForUpdatesFromAbout();
-});
-syncAboutContact();
-
 let connectionCache = [];
 let activeConnectionId = '';
 let connectionEditing = null;
@@ -18671,7 +18521,7 @@ const CONNECTION_FORMAT_LABELS = Object.freeze({
   responses: 'Responses（/responses）'
 });
 const PET_PICKER_LABELS = Object.freeze({
-  orb: 'Yan Agent Orb',
+  orb: 'Z Orb',
   yuexinmiao: '月薪猫',
   deepseek: '大烧货',
   claude: 'claude'
@@ -19595,201 +19445,7 @@ function syncVisionRelaySettings(status = {}) {
 
 const VISION_RELAY_GUIDES = Object.freeze({
   'release-notes': window.YanReleaseNotes,
-  'yan-guide': {
-    title: 'Yan Agent 上手指南',
-    subtitle: '按页渐进了解全部功能；随时可以点左下角「引导」重新打开。',
-    pages: [
-      {
-        title: '欢迎使用 Yan Agent',
-        paragraphs: ['Yan Agent 是运行在桌面上的真实工作 Agent：它能读写工作区文件、执行命令、操控内置浏览器、生成图片与视频，并用可复核的证据向你交付结果。这份引导会逐页介绍全部功能。']
-      },
-      {
-        title: '三步完成初始配置',
-        paragraphs: ['第一次使用，建议先完成下面三件事，之后就可以直接新建任务。'],
-        bullets: [
-          '配置 API：进入 设置 → API →「新建连接」，按页填写名称、兼容预设、Base URL 与 API Key，测试连接并拉取模型。',
-          '选择模型：点击输入框底部工具条的模型按钮，选择主模型并拖动“推理强度”滑块。',
-          '设置权限：把输入框底部工具条的权限滑块调到「替我审批」或「完全访问」，Agent 才能顺畅地读写文件与执行命令。'
-        ]
-      },
-      {
-        title: '任务与工作区',
-        paragraphs: ['新建任务默认不在任何项目中（Blank），可以先对话和查询；涉及写入、构建或 Git 的任务，需要先选择工作区。'],
-        bullets: [
-          '新建任务：点击左侧「新建任务」，开始一条新对话。',
-          '选择工作区：点击任务栏的「选择工作区」，可以选一个文件夹，或选「不在项目中工作」。',
-          '任务列表：左侧中间列出历史任务；任务栏的「⋯」菜单可置顶或重命名任务。',
-          'Git 分支：任务栏可以直接搜索并切换分支，Agent 会在同一分支上工作。',
-          '每个任务独立保存消息、工作区与权限上下文，互不干扰。'
-        ]
-      },
-      {
-        title: '输入框：把要求说清楚',
-        paragraphs: ['输入框是任务的起点：按 Enter 发送，按 Shift+Enter 换行。'],
-        bullets: [
-          '添加附件：点「+」→「添加附件」，也可以把文件或图片直接粘贴进输入框。',
-          '优化 prompt：点「+」→「优化你的prompt」，Yan Prompt Optimizer 会重写你的输入，按 Ctrl+Z 可以回退。',
-          '排队对话：Agent 工作时仍可继续输入，消息会先排队，再在合适时机送达。',
-          '工具条：输入框底部集中了「+」、权限滑块、工作方式、模型与发送按钮。'
-        ]
-      },
-      {
-        title: '工作方式：目标 / 计划 / 自进化 / AGI',
-        paragraphs: ['在输入框按「/」，或点「+」→「使用/选择工作方式」，就能给这轮任务换一种推进方式；开启后底部会出现工作方式标识，点它即可退出。'],
-        bullets: [
-          '目标：给出一条可验收的目标，Agent 会分轮推进、自我验收并给出证据，直到达成或明确说明阻塞原因。',
-          '计划：先把计划文档写入右侧「计划文档」面板，方案确认后再开始执行。',
-          '自进化：本轮结束后把重复失败与可复用经验沉淀为长期演进，不会打断当前工作。',
-          'AGI：实验性能力，叠加推理侧路与自进化双链路。'
-        ]
-      },
-      {
-        title: '技能（Skill）',
-        paragraphs: ['在输入框按「$」，或点「+」→「使用$选择技能」，可以把技能绑定到本轮任务；不手动选择时，Agent 也会按需自动调用。'],
-        bullets: [
-          '预装技能：覆盖网页设计、动效、代码理解、Office 文档、逆向工程、视频生成等常用场景，开箱即用。',
-          'Skill 市场：左侧「Skill 市场」可以搜索、筛选、查看详情并安装。',
-          '个人技能：市场右上角「+」可以导入自定义 Skill JSON，文件需要包含 id、name、desc、prompt 字段。',
-          '也可以直接对 Agent 说「安装某某 Skill」或「新建一个 Skill」，它会用 Yan Skills 完成。'
-        ]
-      },
-      {
-        title: 'MCP 服务',
-        paragraphs: ['MCP 是 Agent 的工具来源：左侧「MCP 服务」列出全部服务，点击卡片可以查看包含的工具。'],
-        bullets: [
-          '测试连接：在服务详情里点「测试连接」，成功后显示可用的工具数量。',
-          '启停服务：普通服务可以「启用 / 禁用」；系统内置的 MCP 显示「始终启用」，由 Yan 统一管理。',
-          '添加服务器：按名称、启动命令与命令参数接入自己的 MCP 服务。',
-          '内置能力：内置 CodeGraph（代码图）、Serena（符号定位）、Built-in Browser、Yan Media、Skills 等 MCP，覆盖代码理解、浏览器操作与媒体生成。'
-        ]
-      },
-      {
-        title: '子代理与并行工作',
-        paragraphs: ['在输入框按「￥」，或点「+」→「使用￥调用子代理」，把适合并行的部分交给子代理；主代理负责编排、汇总与最终交付。'],
-        bullets: [
-          '角色分工：探索、研究、测试、审阅、构建、测绘、追踪、逆向等子代理各司其职。',
-          '子智能体面板：右侧面板可以查看每个子代理的实时进度与产出。',
-          '任务工作树：Git 工具 →「任务工作树」为并行构建创建隔离的 git worktree，完成后合并回当前分支。'
-        ]
-      },
-      {
-        title: '权限与访问模式',
-        paragraphs: ['权限滑块位于输入框底部工具条，共三档；Agent 触发受限操作时会弹出确认卡片。'],
-        bullets: [
-          '请求批准：每次受限操作都先询问，最稳妥。',
-          '替我审批：常见操作自动放行，高危命令仍会停下来请你确认。',
-          '完全访问：不再逐次询问，适合你信任的任务。',
-          '逐项开关：设置 → 常规 → 权限，可分别控制读取文件、写入文件、执行命令与网络访问。',
-          '确认卡片：出现时可以选择「本次允许」「总是允许」或「拒绝」。'
-        ]
-      },
-      {
-        title: 'API 与模型',
-        paragraphs: ['进入 设置 → API 可以自建任意数量的连接，凭据只保存在本机。'],
-        bullets: [
-          '新建连接：按页填写 配置名称 → 兼容预设 → Base URL → 接口格式 → API Key，可选填写生成图像 / 编辑图片 / 生成视频 POST 与自定义模型 ID。',
-          '测试与拉取：一键测试连接，成功后返回该连接的全部可用模型。',
-          '图像与视频模型：在 API 页底部选择生成图像/生成视频模型，之后就能让 Agent 生成或编辑图片与视频。',
-          '兼容预设：内置 GLM、通义、豆包、硅基流动、日日新等预设，不确定时保持「自动识别」即可。'
-        ]
-      },
-      {
-        title: '视觉中继（多模态）',
-        paragraphs: ['主模型不支持多模态时，视觉中继会从侧路调用视觉模型读图，再把内容转告主模型，让任意主模型都能完成多模态工作。'],
-        bullets: [
-          '免费来源：GLM、SenseNova、Agnes、硅基流动，配置任意一家即可。',
-          '教学文档：设置 → 视觉中继，每个来源都有分步教学、配置状态检查与开关。',
-          '关闭后，图片会直接发送给主模型；需要时随时可以打开。'
-        ]
-      },
-      {
-        title: '上下文与长期记忆',
-        paragraphs: ['长任务要关注上下文占用：Yan Agent 会自动压缩，也允许你手动干预。'],
-        bullets: [
-          '上下文配置：设置 → 常规 →「配置上下文」，按模型能力设置最大上下文与压缩阈值。',
-          '状态环：右侧面板工具条的圆环显示上下文占用，点击可以查看已用 / 上限与压缩提示。',
-          '手动压缩：在状态环面板点「我来压缩」，立即压缩早期对话。',
-          '长期记忆：Agent 会把稳定偏好与可复用经验沉淀下来，在后续任务中继续生效。'
-        ]
-      },
-      {
-        title: '右侧面板：审阅 / 浏览器 / 临时对话',
-        paragraphs: ['右侧工具条可以一键打开面板，支持多个标签页并行；全屏按钮让面板铺满工作区，Agent 仍会继续工作。'],
-        bullets: [
-          '审阅：Agent 修改文件后显示逐行 diff，可以刷新、折叠 / 展开、复制差异，并一键撤销本轮改动。',
-          '浏览器：打开网页交给 Agent 阅读与操作，也支持你随时接管。',
-          '临时对话：询问当前进度或注入新要求，不会打断 Agent 正在做的事。',
-          '计划文档与子智能体：运行计划模式或派出子代理时，会显示对应标签页。'
-        ]
-      },
-      {
-        title: '内置浏览器',
-        paragraphs: ['Yan Agent 优先使用内置浏览器完成网页阅读、交互与视觉验收。'],
-        bullets: [
-          'Agent 控制：打开、点击、输入、滚动、截图、读取页面等操作都能由 Agent 执行。',
-          '用户接管：点击浏览器工具栏的手势按钮，就可以自己接管鼠标与键盘。',
-          '导航与缩放：前进、后退、刷新、缩放（自动或手动），也可以直接输入 URL。',
-          '隐私清理：浏览器设置里可以单独清除缓存或 Cookie。',
-          '联网搜索：Agent 会优先使用 AnySearch 技能检索实时信息。'
-        ]
-      },
-      {
-        title: 'Git 工具',
-        paragraphs: ['任务栏右侧的 Git 工具覆盖日常版本控制操作。'],
-        bullets: [
-          '更改：查看当前工作区改动与 + / − 统计。',
-          '分支：搜索、切换，或创建并检出新分支。',
-          '提交或推送：填写提交信息，一键提交，也可以直接提交并推送。',
-          '任务工作树：创建与合并隔离工作树，配合并行子代理使用。',
-          'GitHub PR：查看与当前分支关联的 PR，或把分支发成 Pull Request（需要 gh CLI）。',
-          'Git 图谱：可视化查看提交历史与分支关系。'
-        ]
-      },
-      {
-        title: '媒体生成',
-        paragraphs: ['配置好图像 / 视频模型后，直接用自然语言描述画面，Agent 会调用 Yan Media 完成生成。'],
-        bullets: [
-          '图片：生成图片，也可以带参考图进行图像编辑。',
-          '视频：支持画面比例、时长、分辨率、反向提示词与随机种子等参数。',
-          '生成结果可以直接预览与打开，也可以继续交给 Agent 加工。'
-        ]
-      },
-      {
-        title: '桌宠、快速启动与外观',
-        paragraphs: ['个性化与效率选项集中在 设置 → 常规。'],
-        bullets: [
-          '桌宠：共四种可选；Yan Agent Orb 是监督型桌宠，会在你忙碌时帮你盯住 Agent 的工作状态。',
-          '快速启动：开启后按 Ctrl+Shift+Y（可以自定义）在任意软件上方呼出快速输入。',
-          '主题、语言与正文字体：深浅色与中英界面随时切换；不喜欢 Agent 输出的衬线宋体观感时，可在「正文字体」改为无衬线。',
-          '壁纸市场：内置多款壁纸，支持上传自定义壁纸并调节材质强度。',
-          '正文朗读：选择音色与语速，试听满意后可以让 Agent 朗读正文。',
-          '极速文件写入：写入时不逐次格式化，任务收尾统一格式化本次改动的文件，适合大批量修改。'
-        ]
-      },
-      {
-        title: '三种工作视图',
-        paragraphs: ['标题栏左侧可以切换三个工作视图，任务会在后台继续运行。'],
-        bullets: [
-          '主界面：日常对话与工作的主场景。',
-          'Understand Anything：基于本地代码图谱浏览项目结构、文件职责、符号关系与改动影响。',
-          'Yan Work GUI：用可视化方式查看 Agent 的工作过程与工作区状态。'
-        ]
-      },
-      {
-        title: '关于与帮助',
-        paragraphs: [
-          '遇到问题或有建议，随时联系我们；这份引导也可以随时重看。',
-          '现在，点击「新建任务」，向 Yan Agent 说出你的第一个目标吧。'
-        ],
-        bullets: [
-          '常见报错：设置 → 关于 →「常见报错」，覆盖已发现的内核报错与处理建议。',
-          '检查更新：一键检查当前版本并更新。',
-          '联系方式：抖音群、QQ 群与邮箱，欢迎反馈问题与建议。',
-          '重看引导：点击左下角「引导」按钮，或用 ← → 方向键翻页。'
-        ]
-      }
-    ]
-  },
+  'yan-guide': window.ZProductContent.guide,
   overview: {
     title: '视觉中继使用说明',
     pages: [
@@ -19818,7 +19474,7 @@ const VISION_RELAY_GUIDES = Object.freeze({
   glm: {
     title: 'GLM 视觉中继教学文档',
     pages: [
-      { title: 'Yan Agent使用的视觉中继模型', paragraphs: ['glm-4.6v-flash --> glm-4.1v-thinking-flash --> glm-4v-flash'] },
+      { title: 'Z使用的视觉中继模型', paragraphs: ['glm-4.6v-flash --> glm-4.1v-thinking-flash --> glm-4v-flash'] },
       { title: '新建连接', paragraphs: ['前往“设置” → “API”，点击新建连接并输入连接名称。'] },
       { title: '选择预设', paragraphs: ['预设选择“glm·GLMM”。'] },
       { title: '填写 Base URL', paragraphs: ['Base URL 填写：https://open.bigmodel.cn/api/paas/v4'] },
@@ -19827,14 +19483,14 @@ const VISION_RELAY_GUIDES = Object.freeze({
         paragraphs: ['打开智谱 BigModel 平台，注册并登录账号，然后新建 API Key。'],
         link: { label: '打开智谱 BigModel 平台', url: 'https://bigmodel.cn/glm-coding' }
       },
-      { title: '填写 API Key', paragraphs: ['回到 Yan Agent，填写刚刚创建的 API Key。'] },
-      { title: '完成配置', paragraphs: ['之后的一切跟随 Yan Agent 提示即可。'] }
+      { title: '填写 API Key', paragraphs: ['回到 Z，填写刚刚创建的 API Key。'] },
+      { title: '完成配置', paragraphs: ['之后的一切跟随 Z 提示即可。'] }
     ]
   },
   sensenova: {
     title: 'SenseNova 视觉中继教学文档',
     pages: [
-      { title: 'Yan Agent使用的视觉中继模型', paragraphs: ['sensenova-6.8-flash-lite'] },
+      { title: 'Z使用的视觉中继模型', paragraphs: ['sensenova-6.8-flash-lite'] },
       { title: '新建连接', paragraphs: ['前往“设置” → “API”，点击新建连接并输入连接名称。'] },
       { title: '选择预设', paragraphs: ['预设选择“日日新”。'] },
       { title: '填写 Base URL', paragraphs: ['Base URL 填写：https://token.sensenova.cn/v1'] },
@@ -19843,14 +19499,14 @@ const VISION_RELAY_GUIDES = Object.freeze({
         paragraphs: ['打开 SenseNova，注册并登录账号，然后新建 API Key。'],
         link: { label: '打开 SenseNova', url: 'https://www.sensenova.cn/' }
       },
-      { title: '填写 API Key', paragraphs: ['回到 Yan Agent，填写刚刚创建的 API Key。'] },
-      { title: '完成配置', paragraphs: ['之后的一切跟随 Yan Agent 提示即可。'] }
+      { title: '填写 API Key', paragraphs: ['回到 Z，填写刚刚创建的 API Key。'] },
+      { title: '完成配置', paragraphs: ['之后的一切跟随 Z 提示即可。'] }
     ]
   },
   agnes: {
     title: 'Agnes 视觉中继教学文档',
     pages: [
-      { title: 'Yan Agent使用的视觉中继模型', paragraphs: ['Agnes-2.5-flash --> Agnes-2.0-flash'] },
+      { title: 'Z使用的视觉中继模型', paragraphs: ['Agnes-2.5-flash --> Agnes-2.0-flash'] },
       { title: '新建连接', paragraphs: ['前往“设置” → “API”，点击新建连接并输入连接名称。'] },
       { title: '选择预设', paragraphs: ['预设选择“Agnes”。'] },
       { title: '填写 Base URL', paragraphs: ['Base URL 填写：https://apihub.agnes-ai.com/v1。Agnes 为国际模型，需要自备 VPN。'] },
@@ -19859,14 +19515,14 @@ const VISION_RELAY_GUIDES = Object.freeze({
         paragraphs: ['打开 Agnes AI，注册并登录账号，然后新建 API Key。'],
         link: { label: '打开 Agnes AI', url: 'https://agnes-ai.com/' }
       },
-      { title: '填写 API Key', paragraphs: ['回到 Yan Agent，填写刚刚创建的 API Key。'] },
-      { title: '完成配置', paragraphs: ['之后的一切跟随 Yan Agent 提示即可。'] }
+      { title: '填写 API Key', paragraphs: ['回到 Z，填写刚刚创建的 API Key。'] },
+      { title: '完成配置', paragraphs: ['之后的一切跟随 Z 提示即可。'] }
     ]
   },
   siliconflow: {
     title: '硅基流动 视觉中继教学文档',
     pages: [
-      { title: 'Yan Agent使用的视觉中继模型', paragraphs: ['Qwen/Qwen3.5-4B --> deepseek-ai/DeepSeek-OCR --> PaddlePaddle/PaddleOCR-VL-1.5'] },
+      { title: 'Z使用的视觉中继模型', paragraphs: ['Qwen/Qwen3.5-4B --> deepseek-ai/DeepSeek-OCR --> PaddlePaddle/PaddleOCR-VL-1.5'] },
       { title: '新建连接', paragraphs: ['前往“设置” → “API”，点击新建连接并输入连接名称。'] },
       { title: '选择预设', paragraphs: ['预设选择“硅基流动”。'] },
       { title: '填写 Base URL', paragraphs: ['Base URL 填写：https://api.siliconflow.cn/v1'] },
@@ -19875,8 +19531,8 @@ const VISION_RELAY_GUIDES = Object.freeze({
         paragraphs: ['打开硅基流动，注册并登录账号，然后新建 API Key。'],
         link: { label: '打开硅基流动', url: 'https://www.siliconflow.cn/' }
       },
-      { title: '填写 API Key', paragraphs: ['回到 Yan Agent，填写刚刚创建的 API Key。'] },
-      { title: '完成配置', paragraphs: ['之后一切跟随 Yan Agent 提示即可。'] }
+      { title: '填写 API Key', paragraphs: ['回到 Z，填写刚刚创建的 API Key。'] },
+      { title: '完成配置', paragraphs: ['之后一切跟随 Z 提示即可。'] }
     ]
   }
 });
@@ -24153,7 +23809,7 @@ async function executeBrowserAgentCommand(detail = {}) {
     return { ok: false, error: 'Agent 已退出对此网页的操控。', code: 'BROWSER_AGENT_CONTROL_RELEASED' };
   }
   const agent = controller.agent;
-  if (!agent) return { ok: false, error: 'Yan 内置浏览器 Agent 控制器未就绪。', code: 'BROWSER_AGENT_NOT_READY' };
+  if (!agent) return { ok: false, error: 'Z 内置浏览器 Agent 控制器未就绪。', code: 'BROWSER_AGENT_NOT_READY' };
 
   const runAgentAction = async operation => {
     try {
@@ -24279,7 +23935,7 @@ function createBrowserTabController(tab) {
   root.id = `rs-${tab.id}`;
   root.dataset.browserTabId = tab.id;
   root.setAttribute('aria-hidden', 'true');
-  // Electron's guest page already runs on Chromium; remove Electron/Yan branding
+  // Electron's guest page already runs on Chromium; remove Electron/Z branding
   // from the guest UA so sites use their normal Chromium compatibility path.
   const chromiumUserAgent = String(navigator.userAgent || '')
     .replace(/\s*Electron\/[^\s]+/gi, '')
@@ -24718,34 +24374,8 @@ function destroyBrowserTabController(tabId, { userInitiated = false } = {}) {
 // ============================================================
 // Boot
 // ============================================================
-// Work GUI submits through the normal execution path without navigating away.
-let palaceSubmissionPending = false;
-window.YanPalaceSubmit = async function ({ prompt, workspace = '', model } = {}) {
-  const text = String(prompt || '').trim();
-  if (!text || text.length > 16000) return { ok: false, error: '请填写有效任务目标（最多 16000 字）' };
-  if (palaceSubmissionPending || !canStartRun()) return { ok: false, error: '任务正在提交或并发任务已达上限' };
-  palaceSubmissionPending = true;
-  try {
-    const available = await api.listQuickModels();
-    const selected = (available.models || []).find(item => item.id === (model?.modelId || model?.id)
-      && item.providerId === model?.providerId && String(item.supplierId || '') === String(model?.supplierId || '')
-      && (!item.modelType || item.modelType === 'text'));
-    if (!selected) return { ok: false, error: '所选模型已不可用，请刷新模型列表' };
-    const session = await api.createSession(true, String(workspace || ''));
-    if (!session?.id) return { ok: false, error: '创建任务失败' };
-    const result = submitMessage(text, [], [], { session, modelSelection: normalizeModelSelectionSnapshot({ ...selected, modelId: selected.id }) });
-    // submitMessage owns persistence, stream handling, permissions, and completion.
-    // Its promise spans the whole run, so keep the palace responsive.
-    void result.then(outcome => {
-      if (outcome?.ok === false) toast('天宫任务未能启动：' + (outcome.error || '未知错误'));
-    }).catch(error => toast('天宫任务失败：' + error.message));
-    return { ok: true, sessionId: session.id };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  } finally { palaceSubmissionPending = false; }
-};
 if (navigator.userAgent.includes('Mac')) {
   document.body.classList.add('is-mac');
-  document.querySelector('.sidebar-brand')?.setAttribute('aria-label', 'YAgent');
+  document.querySelector('.sidebar-brand')?.setAttribute('aria-label', 'Z');
 }
 window.addEventListener('DOMContentLoaded', init);

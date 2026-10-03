@@ -77,7 +77,7 @@ fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
     await page.locator('#mcpPageList [data-id="yan_analysis"] .mcp-open-btn').click();
     await page.locator('#mcpDetailView:not(.hidden)').waitFor();
     await page.waitForFunction(() => document.querySelectorAll('#mcpDetailTools .mcp-tool-row').length > 0);
-    assert.equal(await page.locator('#mcpDetailTitle').textContent(), 'Yan Analysis');
+    assert.equal(await page.locator('#mcpDetailTitle').textContent(), 'Z 项目分析');
     assert.equal(await page.locator('#mcpDetailContent .mcp-detail-control').count(), 2);
     assert.equal(await page.locator('#mcpDetailContent [data-mcp-detail-action="test"]').textContent(), '测试连接');
     assert.equal(await page.locator('#mcpDetailContent [data-mcp-detail-action="toggle"]').textContent(), '始终启用');

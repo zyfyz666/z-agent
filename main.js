@@ -127,6 +127,7 @@ const {
   resolveConnectionPreset
 } = require('./lib/connection-presets');
 const { OpenCodeEventBatcher } = require('./lib/open-code-stream');
+const { recordReconcileEvent, watchdogReplay } = require('./lib/wd-replay-state');
 const { normalizeReasoningSpeed, reasoningSpeedEnablesThinking } = require('./lib/reasoning-effort');
 const { createSerenaServer } = require('./lib/serena-runtime');
 const gitService = require('./lib/git-service');
@@ -136,7 +137,6 @@ const worktreeService = require('./lib/worktree-service');
 const ghService = require('./lib/gh-service');
 const { buildRepoMapBackground } = require('./lib/analysis/repo-map-background');
 const { YanCore, OpenCodeProviderAdapter, ResourceLockManager, registerAdapter } = require('./lib/yan-core');
-const { WorkGuiFeed } = require('./lib/work-gui/feed');
 const { writeAtomic } = require('./lib/yan-core/store');
 const {
   DEFAULT_CONTEXT_SETTINGS,
@@ -154,15 +154,16 @@ const e2eUserDataDir = String(process.env.YAN_E2E_USER_DATA_DIR || '').trim();
 if (e2eUserDataDir) {
   fs.mkdirSync(e2eUserDataDir, { recursive: true });
   app.setPath('userData', path.resolve(e2eUserDataDir));
-} else if (
-  process.platform === 'darwin'
-  && typeof app.setPath === 'function'
-  && typeof app.getPath === 'function'
-) {
-  // Fork profile: kept apart from an installed upstream Yan Agent so the two
-  // never share sessions or settings.
-  app.setPath('userData', path.join(app.getPath('appData'), 'WD Agent'));
+} else if (typeof app.setPath === 'function' && typeof app.getPath === 'function') {
+  // Keep the pre-Z profile in place. Electron would otherwise switch to a new
+  // directory after the package/product rename, hiding existing settings and
+  // sessions. macOS already used the packaged profile even for source runs.
+  const legacyProfileName = app.isPackaged || process.platform === 'darwin' ? 'WD Agent' : 'wd-agent';
+  const legacyUserDataDir = path.join(app.getPath('appData'), legacyProfileName);
+  fs.mkdirSync(legacyUserDataDir, { recursive: true });
+  app.setPath('userData', legacyUserDataDir);
 }
+if (typeof app.setName === 'function') app.setName('Z');
 
 const isE2EMode = process.env.YAN_E2E_MODE === '1';
 const e2eParentPid = isE2EMode
@@ -257,7 +258,7 @@ function sendOpenCodeRendererEvent(runId, event) {
 // ---------------------------------------------------------------------------
 const OPENCODE_RECONCILE_EVENT_CAP = 400;
 const OPENCODE_RECONCILE_COMPLETED_TTL_MS = 60_000;
-const openCodeRunReconcile = new Map(); // runId -> { meta, events, completed, completedAt }
+const openCodeRunReconcile = new Map(); // runId -> { meta, events, watchdogStatus, completed, completedAt }
 
 function ensureOpenCodeReconcileRun(runId, meta = {}) {
   const id = String(runId || '');
@@ -269,6 +270,7 @@ function ensureOpenCodeReconcileRun(runId, meta = {}) {
       startedAt: Number(meta.startedAt) || Date.now()
     },
     events: [],
+    watchdogStatus: null,
     completed: null,
     completedAt: 0
   };
@@ -278,11 +280,7 @@ function ensureOpenCodeReconcileRun(runId, meta = {}) {
 
 function recordOpenCodeReconcileEvent(runId, event) {
   const entry = openCodeRunReconcile.get(String(runId || ''));
-  if (!entry || entry.completed) return;
-  entry.events.push(event);
-  if (entry.events.length > OPENCODE_RECONCILE_EVENT_CAP) {
-    entry.events.splice(0, entry.events.length - OPENCODE_RECONCILE_EVENT_CAP);
-  }
+  recordReconcileEvent(entry, event, { runId, cap: OPENCODE_RECONCILE_EVENT_CAP });
 }
 
 function completeOpenCodeReconcileRun(runId, completedResult) {
@@ -402,19 +400,18 @@ let quickInputActive = false;
 let registeredQuickInputShortcut = '';
 const DEFAULT_QUICK_INPUT_SHORTCUT = 'CommandOrControl+Shift+Y';
 let petWindow = null;
-let workGuiFeed = null;
 let tray = null;
 let isQuiting = false;
 let petState = {
   status: 'idle',
   sessionId: null,
   running: false,
-  title: 'Yan Agent',
+  title: 'Z',
   message: '随时待命'
 };
 const PET_IDS = Object.freeze(['orb', 'yuexinmiao', 'deepseek', 'claude']);
 const PET_LABELS = Object.freeze({
-  orb: 'Yan Agent Orb',
+  orb: 'Z Orb',
   yuexinmiao: '月薪猫',
   deepseek: '大烧货',
   claude: 'claude'
@@ -567,7 +564,7 @@ function resolveAuthoritativeBrowserRun(action, params = {}) {
   return { ok: false, error: '多个 Agent 任务同时运行，当前浏览器调用缺少权威任务归属。', code: 'BROWSER_RUN_CONTEXT_AMBIGUOUS' };
 }
 
-function plainBrowserBridgeError(error, fallback = 'Yan 内置浏览器桥接失败。') {
+function plainBrowserBridgeError(error, fallback = 'Z 内置浏览器连接失败。') {
   return {
     ok: false,
     error: error?.message || String(error || fallback),
@@ -673,7 +670,7 @@ function cancelDispatchedBrowserAgentOperation(operationId, reason = 'client_can
     if (pending.operationId !== id) continue;
     browserAgentBridgePending.delete(requestId);
     clearTimeout(pending.timer);
-    pending.resolve({ ok: false, error: 'Yan 内置浏览器操作已取消。', code: 'BROWSER_ACTION_CANCELLED' });
+    pending.resolve({ ok: false, error: '内置浏览器操作已取消。', code: 'BROWSER_ACTION_CANCELLED' });
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('browser:agent-command', {
         requestId: '',
@@ -701,7 +698,7 @@ async function dispatchBrowserAgentCommand(action, params = {}, { operationId = 
   };
   const execute = async () => {
     if (!mainWindow || mainWindow.isDestroyed() || !mainRendererReady) {
-      return { ok: false, error: 'Yan 主窗口尚未就绪，无法控制内置浏览器。', code: 'YAN_RENDERER_NOT_READY' };
+      return { ok: false, error: 'Z 主窗口尚未就绪，无法控制内置浏览器。', code: 'YAN_RENDERER_NOT_READY' };
     }
     const requestId = crypto.randomUUID();
     const browserOperationId = String(operationId || requestId);
@@ -716,7 +713,7 @@ async function dispatchBrowserAgentCommand(action, params = {}, { operationId = 
             params: { yan_run_id: authority.runId, operation_id: browserOperationId, reason: 'bridge_timeout' }
           });
         }
-        resolve({ ok: false, error: 'Yan 内置浏览器操作超时。', code: 'YAN_BROWSER_TIMEOUT' });
+        resolve({ ok: false, error: '内置浏览器操作超时。', code: 'YAN_BROWSER_TIMEOUT' });
       }, 40_000);
       browserAgentBridgePending.set(requestId, { resolve, timer, operationId: browserOperationId, runId: authority.runId });
       mainWindow.webContents.send('browser:agent-command', { requestId, operationId: browserOperationId, action, params: authorizedParams });
@@ -822,7 +819,7 @@ function startBrowserAgentBridge() {
 function stopBrowserAgentBridge() {
   for (const pending of browserAgentBridgePending.values()) {
     clearTimeout(pending.timer);
-    pending.resolve({ ok: false, error: 'Yan 正在退出，内置浏览器操作已终止。', code: 'YAN_APP_EXITING' });
+    pending.resolve({ ok: false, error: 'Z 正在退出，内置浏览器操作已终止。', code: 'YAN_APP_EXITING' });
   }
   browserAgentBridgePending.clear();
   browserAgentBridgePort = 0;
@@ -908,7 +905,7 @@ function resolveAuthoritativeSessionRun(action, params = {}) {
 
 function requestSessionAgentApproval(detail) {
   if (!mainWindow || mainWindow.isDestroyed() || !mainRendererReady) {
-    return Promise.resolve({ approved: false, error: 'Yan 主窗口尚未就绪。' });
+    return Promise.resolve({ approved: false, error: 'Z 主窗口尚未就绪。' });
   }
   const requestId = crypto.randomUUID();
   return new Promise(resolve => {
@@ -930,7 +927,7 @@ async function dispatchSessionAgentCommand(action, params = {}) {
   const active = openCodeActiveRuns.get(authority.runId);
   const sourceSessionId = String(active?.yanSessionId || '');
   if (!sourceSessionId) {
-    return { ok: false, error: '当前 Yan Kernel 任务没有绑定 Yan 对话。', code: 'YAN_SESSION_NOT_BOUND' };
+    return { ok: false, error: '当前任务没有关联的 Z 对话。', code: 'YAN_SESSION_NOT_BOUND' };
   }
 
   if (action === 'read_source_context') {
@@ -981,8 +978,8 @@ async function dispatchSessionAgentCommand(action, params = {}) {
     reused: resolved.reused,
     created: !resolved.reused,
     output: resolved.reused
-      ? 'Yan 已找到目标工作区现有的最新任务；当前回答结束后界面会自动返回该任务。'
-      : 'Yan 已创建新的任务并完成上下文交接；当前回答结束后界面会自动进入新任务。'
+      ? 'Z 已找到目标工作区现有的最新任务；当前回答结束后界面会自动返回该任务。'
+      : 'Z 已创建新的任务并完成上下文交接；当前回答结束后界面会自动进入新任务。'
   };
 }
 
@@ -1057,7 +1054,7 @@ function startSessionAgentBridge() {
 function stopSessionAgentBridge() {
   for (const pending of sessionAgentBridgePending.values()) {
     clearTimeout(pending.timer);
-    pending.resolve({ approved: false, error: 'Yan 正在退出，会话操作已终止。', code: 'YAN_APP_EXITING' });
+    pending.resolve({ approved: false, error: 'Z 正在退出，会话操作已终止。', code: 'YAN_APP_EXITING' });
   }
   sessionAgentBridgePending.clear();
   sessionAgentToolClaims.clear();
@@ -1357,45 +1354,11 @@ function initializeYanCore() {
     logger: console
   });
   yanCore.on('event', event => {
-    // Work GUI observes every event before the renderer-channel filter drops
-    // streaming deltas; the feed owns its own coalescing.
-    try {
-      workGuiFeed?.handleCoreEvent(event);
-    } catch (error) {
-      console.warn('[work-gui] feed event failed:', error?.message || error);
-    }
     // Renderer consumes raw provider streaming over the OpenCode path; only
     // lifecycle, tool, context, and queue events are useful over this channel.
     if (['message.delta', 'reasoning.delta', 'provider.event'].includes(event?.type)) return;
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
     mainWindow.webContents.send('yan:core-event', event);
-  });
-  workGuiFeed = new WorkGuiFeed({
-    dataDir: STABLE_DATA_DIR,
-    core: () => yanCore,
-    emit: batch => {
-      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
-      mainWindow.webContents.send('work-gui:event-batch', batch);
-    },
-    listSessions: () => listSessionSummaries(),
-    listSkills: () => getMergedSkills(loadConfig()).map(skill => ({
-      id: String(skill?.id || skill?.name || ''),
-      name: String(skill?.name || skill?.id || '')
-    })),
-    listMcp: () => (loadConfig().mcpServers || []).map(server => ({
-      id: String(server?.id || server?.name || ''),
-      name: String(server?.name || server?.id || ''),
-      enabled: server?.enabled !== false
-    })),
-    listMemory: () => {
-      const entries = longTermMemory.list({});
-      return {
-        count: entries.length,
-        recent: entries.slice(0, 4).map(entry => ({
-          title: String(entry?.title || entry?.content || '').slice(0, 48)
-        }))
-      };
-    }
   });
   return yanCore;
 }
@@ -1633,7 +1596,7 @@ function ensureYanagent(workspace) {
   const readme = path.join(root, 'README.txt');
   if (!fs.existsSync(readme)) {
     fs.writeFileSync(readme,
-      'Yan Agent 数据目录（记忆、日志、会话快照、工具产物与验收证据）。\n' +
+      'Z 数据目录（记忆、日志、会话快照、工具产物与验收证据）。\n' +
       '内部含 .gitignore，不会出现在你的 Git 变更里。\n' +
       '可随时删除，不影响项目代码；删除后记忆、日志、会话快照与验收证据会丢失。\n',
       'utf8');
@@ -2001,7 +1964,7 @@ const DEFAULT_MCP_SERVERS = [
   {
     id: 'mcp_default_playwright',
     name: 'Playwright',
-    description: '隔离式网页自动化与端到端测试。Yan 内置浏览器无法满足脚本化测试需求时再使用。',
+    description: '隔离式网页自动化与端到端测试。Z 内置浏览器无法满足脚本化测试需求时再使用。',
     command: 'npx',
     // Relative on purpose: the MCP runs with the task workspace as cwd, so its
     // screenshots and traces land in .yanagent instead of the project tree.
@@ -2723,7 +2686,7 @@ function buildYanMediaMcpServer(cfg, childAppRoot, options = {}) {
   }
   return {
     id: 'yan_media',
-    name: 'Yan Media',
+    name: 'Z 媒体',
     description: cfg.api?.visionRelayEnabled === false
       ? '调用当前会话选定的生图与生视频次模型。'
       : '通过视觉中继读取本地或历史生成图片，并调用当前会话选定的生图与生视频次模型。',
@@ -2748,8 +2711,8 @@ function buildYanSkillsMcpServer(cfg, childAppRoot, options = {}) {
   const cli = path.join(childAppRoot, 'node_modules', 'skills', 'bin', 'cli.mjs');
   return {
     id: 'yan_skills',
-    name: 'Yan Skills',
-    description: '查找、安装、列出、读取和删除 Yan 自有 Skill；Blank 中也可使用。',
+    name: 'Z 技能',
+    description: '查找、安装、列出、读取和删除 Z 的 Skill；未选择工作区时也可使用。',
     runtime: 'yan-skills',
     command: process.execPath,
     args: [entry],
@@ -2780,8 +2743,8 @@ function buildYanBrowserMcpServer(cfg, childAppRoot) {
   if (!browserAgentBridgePort) return null;
   return {
     id: 'yan_browser',
-    name: 'Yan Built-in Browser',
-    description: '控制 Yan 右侧可见的内置浏览器，用于网页阅读、交互与视觉验收。',
+    name: 'Z 内置浏览器',
+    description: '控制 Z 右侧可见的内置浏览器，用于网页阅读、交互与视觉验收。',
     runtime: 'yan-browser',
     command: process.execPath,
     args: [path.join(childAppRoot, 'lib', 'yan-browser-mcp.js')],
@@ -2801,7 +2764,7 @@ function buildYanBrowserMcpServer(cfg, childAppRoot) {
 function buildYanWebMcpServer(cfg, childAppRoot) {
   return {
     id: 'yan_web',
-    name: 'Yan Web Fetch',
+    name: 'Z 网页读取',
     description: '直接抓取静态资源并落盘（图标、图片、SVG、字体、压缩包等），已知 URL 的文本/页面也可直接读取；不需要打开内置浏览器，搜索仍优先 AnySearch。',
     runtime: 'yan-web',
     command: process.execPath,
@@ -2822,8 +2785,8 @@ function buildYanSessionMcpServer(childAppRoot) {
   if (!sessionAgentBridgePort) return null;
   return {
     id: 'yan_session',
-    name: 'Yan Session',
-    description: '在用户明确授权后进入另一工作区的最新 Yan 任务；目标工作区没有任务时才创建并交接上下文。',
+    name: 'Z 会话',
+    description: '在用户明确授权后进入另一工作区的最新 Z 任务；目标工作区没有任务时才创建并交接上下文。',
     runtime: 'yan-session',
     command: process.execPath,
     args: [path.join(childAppRoot, 'lib', 'yan-session-mcp.js')],
@@ -2842,7 +2805,7 @@ function buildYanSessionMcpServer(childAppRoot) {
 function buildYanHarnessMcpServer(childAppRoot) {
   return {
     id: 'yan_harness',
-    name: 'Yan Continual Harness',
+    name: 'Z 持续改进',
     description: '将重复失败、可复用策略或子智能体角色排队，在本轮完成后进行证据化演进；运行中不会改写当前提示。',
     runtime: 'yan-harness',
     command: process.execPath,
@@ -2864,7 +2827,7 @@ function buildYanAnalysisMcpServer(cfg, childAppRoot) {
   // Task context carries workspace authorization without restarting the MCP.
   return {
     id: 'yan_analysis',
-    name: 'Yan Analysis',
+    name: 'Z 项目分析',
     description: '确定性代码理解工具：repo map、符号大纲与精读、调用树、BM25 代码/历史检索。供分析与逆向子代理及主任务使用。',
     runtime: 'yan-analysis',
     command: process.execPath,
@@ -2885,7 +2848,7 @@ function buildYanWorkspaceMcpServer(cfg, childAppRoot) {
   // through the per-run harness context file, not the server environment.
   return {
     id: 'yan_workspace',
-    name: 'Yan Workspace',
+    name: 'Z 工作区',
     description: '工作区工程工具：任务级 git worktree 创建/合并/清理（并行 builder 隔离）与 code_impact 反向依赖影响面检查。',
     runtime: 'yan-workspace',
     command: process.execPath,
@@ -3008,8 +2971,8 @@ function getMcpManagementServers(cfg) {
   if (!servers.some(server => server.id === 'yan_media')) {
     unavailableSystemServers.push({
       id: 'yan_media',
-      name: 'Yan Media',
-      description: '调用当前会话选定的 Yan 生图与生视频次模型，并维护可继续修改的媒体上下文。',
+      name: 'Z 媒体',
+      description: '调用当前会话选定的图像与视频模型，并维护可继续修改的媒体上下文。',
       runtime: 'yan-media',
       enabled: false,
       available: false,
@@ -3022,8 +2985,8 @@ function getMcpManagementServers(cfg) {
   if (!servers.some(server => server.id === 'yan_browser')) {
     unavailableSystemServers.push({
       id: 'yan_browser',
-      name: 'Yan Built-in Browser',
-      description: '控制 Yan 右侧可见的内置浏览器，用于网页阅读、交互与视觉验收。',
+      name: 'Z 内置浏览器',
+      description: '控制 Z 右侧可见的内置浏览器，用于网页阅读、交互与视觉验收。',
       runtime: 'yan-browser',
       enabled: false,
       available: false,
@@ -3036,8 +2999,8 @@ function getMcpManagementServers(cfg) {
   if (!servers.some(server => server.id === 'yan_session')) {
     unavailableSystemServers.push({
       id: 'yan_session',
-      name: 'Yan Session',
-      description: '在用户明确授权后进入另一工作区的最新 Yan 任务；目标工作区没有任务时才创建并交接上下文。',
+      name: 'Z 会话',
+      description: '在用户明确授权后进入另一工作区的最新 Z 任务；目标工作区没有任务时才创建并交接上下文。',
       runtime: 'yan-session',
       enabled: false,
       available: false,
@@ -3403,7 +3366,7 @@ function refreshAgentRuntimeActivity() {
 }
 
 async function prewarmOpenCodeSidecar() {
-  if (isQuiting) return { ok: false, error: 'Yan Agent is closing' };
+  if (isQuiting) return { ok: false, error: 'Z is closing' };
   if (openCodePrewarmPromise) return openCodePrewarmPromise;
   openCodePrewarmPromise = (async () => {
     const cfg = loadConfig();
@@ -3744,7 +3707,7 @@ function loadConfig() {
       subagentMaxChildren: 4
     },
     workspace: path.join(app.getPath('home'), 'YanWorkspace'),
-    userName: 'Yanxi',
+    userName: '',
     theme: 'dark',
     readingFont: 'serif',
     wallpaper: {
@@ -3828,7 +3791,7 @@ function loadConfig() {
     }],
     executionKernel: {
       id: 'yan-kernel',
-      name: 'Yan Kernel',
+      name: 'Z 内核',
       version: app.getVersion(),
       engine: 'opencode',
       engineVersion: OPENCODE_VERSION
@@ -3962,7 +3925,7 @@ function loadConfig() {
   delete merged.computerUseV3;
   merged.executionKernel = {
     id: 'yan-kernel',
-    name: 'Yan Kernel',
+    name: 'Z 内核',
     version: app.getVersion(),
     engine: 'opencode',
     engineVersion: OPENCODE_VERSION
@@ -4076,7 +4039,7 @@ function normalizeThemeCompatConfig(value = {}) {
 
 function normalizeUserName(value) {
   const name = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
-  return name.slice(0, 32) || 'Yanxi';
+  return name.slice(0, 32);
 }
 
 function normalizeLanguage(value) {
@@ -4299,8 +4262,8 @@ function stopYanSkillWatcher() {
 // ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
-const lightWindowIconPngPath = path.join(__dirname, 'renderer', 'assets', 'logo-light.png');
-const lightWindowIconIcoPath = path.join(__dirname, 'renderer', 'assets', 'logo-light.ico');
+const lightWindowIconPngPath = path.join(__dirname, 'renderer', 'assets', 'z-icon.png');
+const lightWindowIconIcoPath = path.join(__dirname, 'renderer', 'assets', 'z-icon.ico');
 
 function loadLightAppIcon() {
   let icon = nativeImage.createFromPath(lightWindowIconPngPath);
@@ -4376,6 +4339,7 @@ function createSplashWindow() {
   const y = Math.round(workArea.y + (workArea.height - height) / 2);
 
   splashWindow = new BrowserWindow({
+    title: 'Z',
     x,
     y,
     width,
@@ -4389,7 +4353,7 @@ function createSplashWindow() {
     closable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    backgroundColor: '#120f17',
+    backgroundColor: '#151715',
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -4421,6 +4385,7 @@ function createWindow() {
   mainWindowReadyForSplash = false;
   const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
+    title: 'Z',
     width: 1280,
     height: isMac ? 740 : 820,
     minWidth: 880,
@@ -4515,7 +4480,7 @@ function createQuickInputGlowWindow(display) {
     movable: false,
     focusable: false,
     hasShadow: false,
-    title: 'Yan Agent Quick Input Glow',
+    title: 'Z Quick Input Glow',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -4558,7 +4523,7 @@ function createQuickInputWindow(display) {
     maximizable: false,
     fullscreenable: false,
     hasShadow: false,
-    title: 'Yan Agent Quick Input',
+    title: 'Z Quick Input',
     webPreferences: {
       preload: path.join(__dirname, 'quick-input-preload.js'),
       contextIsolation: true,
@@ -4970,7 +4935,7 @@ function normalizePetState(payload = {}) {
     status: allowedStates.has(payload.status) ? payload.status : 'observing',
     sessionId: payload.sessionId ? String(payload.sessionId) : null,
     running: !!payload.running,
-    title: String(payload.title || 'Yan Agent').slice(0, 80),
+    title: String(payload.title || 'Z').slice(0, 80),
     message: String(payload.message || '正在监督任务').slice(0, 140),
     updatedAt: Date.now()
   };
@@ -4984,11 +4949,11 @@ function createTray() {
   let trayIcon = icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 });
   if (trayIcon.isEmpty()) return;
   tray = new Tray(trayIcon);
-  tray.setToolTip('Yan Agent');
+  tray.setToolTip('Z');
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: '显示主界面',
+      label: '打开 Z',
       click: () => {
         if (mainWindow) {
           mainWindow.show();
@@ -5002,7 +4967,7 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: '退出',
+      label: '退出 Z',
       click: () => {
         isQuiting = true;
         app.quit();
@@ -6165,7 +6130,7 @@ async function recordLearningReview(payload = {}) {
     trigger: `Learn reusable Skill ${candidate.name}`,
     evidence: candidate.evidence,
     expectedOutcome: recorded.ready
-      ? 'Make the repeatedly verified procedure available as a Yan Skill.'
+      ? 'Make the repeatedly verified procedure available as a Z Skill.'
       : 'Observe the same procedure in another independent verified run before activation.',
     edits: [harnessEdit]
   }, {
@@ -6237,7 +6202,7 @@ async function recordLearningReview(payload = {}) {
     });
     return {
       ...recorded,
-      error: `同名 Skill「${learnedId}」已由用户或外部来源安装，Yan Skill Creator 不会覆盖它。`,
+      error: `同名 Skill「${learnedId}」已由用户或外部来源安装，Z 不会覆盖它。`,
       promotedSkill: null
     };
   }
@@ -7498,7 +7463,7 @@ ipcMain.handle('image:generate', async (_e, payload = {}) => {
   if (payload.sourceImagePath) {
     if (!cfg.permissions.allowFileRead) return { error: '文件读取权限已关闭，无法编辑图片' };
     const sourcePath = resolveStoredUploadPath(payload.sourceImagePath);
-    if (!sourcePath) return { error: '只能编辑 Yan Agent 保存的图片附件' };
+    if (!sourcePath) return { error: '只能编辑 Z 保存的图片附件' };
     try {
       const stat = await fsp.stat(sourcePath);
       if (stat.size > 20 * 1024 * 1024) return { error: '输入图片不能超过 20MB' };
@@ -8612,7 +8577,7 @@ async function mcpStart(serverCfg) {
     const initPromise = mcpRequest(server, 'initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'Yan Agent', version: app.getVersion() }
+      clientInfo: { name: 'Z', version: app.getVersion() }
     });
 
     await Promise.race([initPromise, spawnError]);
@@ -8693,7 +8658,7 @@ ipcMain.handle('dsh-review:write-html', async (_event, html) => {
 ipcMain.handle('mcp:list', () => getMcpManagementServers(loadConfig()));
 ipcMain.handle('understand-anything:open', async (_e, workspace) => {
   const normalized = workspaceSandbox.normalizeWorkspace(workspace);
-  if (!normalized) return { ok: false, error: 'Understand Anything 需要当前任务工作区。' };
+  if (!normalized) return { ok: false, error: '项目地图需要当前任务工作区。' };
   return understandAnythingRuntime.openUnderstandAnything(appRoot, normalized, {
     viewerCommand: process.execPath,
     useElectron: true
@@ -8701,7 +8666,7 @@ ipcMain.handle('understand-anything:open', async (_e, workspace) => {
 });
 ipcMain.handle('understand-anything:refresh', async (_e, workspace) => {
   const normalized = workspaceSandbox.normalizeWorkspace(workspace);
-  if (!normalized) return { ok: false, error: 'Understand Anything 需要当前任务工作区。' };
+  if (!normalized) return { ok: false, error: '项目地图需要当前任务工作区。' };
   understandAnythingRuntime.stopUnderstandAnything(normalized);
   return understandAnythingRuntime.openUnderstandAnything(appRoot, normalized, {
     viewerCommand: process.execPath,
@@ -9128,7 +9093,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     const cfg = loadConfig();
     const selection = normalizeAgentModelSelection(cfg);
     if (selection.modelType !== 'text') {
-      return { ok: false, error: 'Yan Kernel 只能启动文本/工具模型。' };
+      return { ok: false, error: 'Z 内核只能启动文本或工具模型。' };
     }
     if (openCodeActiveRuns.size + openCodeRunAdmissions.size >= MAX_CONCURRENT_AGENT_RUNS) {
       return { ok: false, error: `并发任务已达上限（${MAX_CONCURRENT_AGENT_RUNS}个），请稍后再试。` };
@@ -9347,7 +9312,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       openCodeActiveRuns.delete(runId);
       openCodeRunReconcile.delete(runId);
       refreshAgentRuntimeActivity();
-      return { ok: false, code: error?.code || 'YAN_CORE_START_FAILED', error: `Yan Core 无法启动本轮任务：${detail}` };
+      return { ok: false, code: error?.code || 'YAN_CORE_START_FAILED', error: `Z 无法启动本轮任务：${detail}` };
     }
     const resolvedSkills = await selectedRunSkills(request.selectedSkills, cfg, { workspace, workMode });
     if (resolvedSkills.error) {
@@ -9683,14 +9648,15 @@ ipcMain.handle('opencode:sync-active-runs', () => {
   for (const [runId, entry] of openCodeRunReconcile) {
     const active = openCodeActiveRuns.get(runId);
     if (!active && !entry.completed) continue; // stale entry without a run
+    const replay = watchdogReplay(entry, { runId });
     runs.push({
       runId,
       yanSessionId: String(active?.yanSessionId || entry.meta.yanSessionId || ''),
       workspace: String(active?.workspace || entry.meta.workspace || ''),
       startedAt: Number(active?.startedAt || entry.meta.startedAt) || 0,
       running: !!active,
-      events: entry.events,
-      completed: entry.completed || null,
+      events: replay.events,
+      completed: replay.completed,
       coreTurn: yanCore.getTurn(runId)
     });
   }
@@ -9713,26 +9679,16 @@ ipcMain.handle('yan:core-settle-recovered-run', (_e, payload = {}) => {
   const runId = String(payload?.runId || '');
   if (!runId) return { ok: false, error: '缺少要结算的 Turn。' };
   try {
-    if (!yanCore) return { ok: false, error: 'Yan Core 尚未初始化。' };
+    if (!yanCore) return { ok: false, error: 'Z 任务引擎尚未初始化。' };
     const text = String(payload?.text || '');
     const turn = yanCore.completeTurn(runId, {
       status: 'interrupted',
       text,
       emptyFinalText: !text.trim()
     });
-    return turn ? { ok: true, turn } : { ok: false, error: 'Yan Turn 不存在。' };
+    return turn ? { ok: true, turn } : { ok: false, error: '任务回合不存在。' };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
-  }
-});
-
-ipcMain.handle('work-gui:snapshot', async () => {
-  if (!workGuiFeed) return { generatedAt: Date.now(), seq: 0, sessions: [], runs: [], agents: [], recentEvents: [], home: null };
-  try {
-    return await workGuiFeed.snapshot();
-  } catch (error) {
-    console.warn('[work-gui] snapshot failed:', error?.message || error);
-    return { generatedAt: Date.now(), seq: 0, sessions: [], runs: [], agents: [], recentEvents: [], home: null, error: error?.message || String(error) };
   }
 });
 
@@ -9755,7 +9711,7 @@ ipcMain.handle('yan:core-enqueue-intent', (_e, payload = {}) => {
 ipcMain.handle('yan:core-consume-intent', (_e, intentId) => {
   try {
     const intent = yanCore.consumeIntent(intentId);
-    return intent ? { ok: true, intent } : { ok: false, error: 'Yan Intent 不存在或已处理。' };
+    return intent ? { ok: true, intent } : { ok: false, error: '排队请求不存在或已处理。' };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -9764,7 +9720,7 @@ ipcMain.handle('yan:core-consume-intent', (_e, intentId) => {
 ipcMain.handle('yan:core-requeue-intent', (_e, intentId) => {
   try {
     const intent = yanCore.requeueIntent(intentId);
-    return intent ? { ok: true, intent } : { ok: false, error: 'Yan Intent 不存在。' };
+    return intent ? { ok: true, intent } : { ok: false, error: '排队请求不存在。' };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -9773,7 +9729,7 @@ ipcMain.handle('yan:core-requeue-intent', (_e, intentId) => {
 ipcMain.handle('yan:core-ack-intent', (_e, intentId) => {
   try {
     const intent = yanCore.ackIntent(intentId);
-    return intent ? { ok: true, intent } : { ok: false, error: 'Yan Intent 不存在或无法确认。' };
+    return intent ? { ok: true, intent } : { ok: false, error: '排队请求不存在或无法确认。' };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -9880,7 +9836,7 @@ async function cancelOpenCodeRun(runId) {
     cancelRequested,
     cancelled,
     settled,
-    error: cancelRequested ? '' : (sidecarResult.error || coreResult.error || 'Yan Kernel 任务不存在'),
+    error: cancelRequested ? '' : (sidecarResult.error || coreResult.error || 'Z 任务不存在'),
     coreTurn: coreResult.turn || yanCore.getTurn(key)
   };
 }
@@ -9951,7 +9907,7 @@ ipcMain.handle('plan:read-file', async (_e, payload = {}) => {
   try {
     const root = plansRoot(STABLE_DATA_DIR);
     const target = path.resolve(String(payload?.path || ''));
-    if (!target.startsWith(root + path.sep)) return { ok: false, error: '计划文件不在 Yan 计划目录内。' };
+    if (!target.startsWith(root + path.sep)) return { ok: false, error: '计划文件不在 Z 的计划目录内。' };
     const content = fs.readFileSync(target, 'utf8');
     return { ok: true, name: path.basename(target), content };
   } catch (error) {
@@ -9963,7 +9919,7 @@ ipcMain.handle('plan:download-file', async (_e, payload = {}) => {
   try {
     const root = plansRoot(STABLE_DATA_DIR);
     const target = path.resolve(String(payload?.path || ''));
-    if (!target.startsWith(root + path.sep)) return { error: '计划文件不在 Yan 计划目录内。' };
+    if (!target.startsWith(root + path.sep)) return { error: '计划文件不在 Z 的计划目录内。' };
     const stat = await fsp.stat(target);
     if (!stat.isFile() || !stat.size) return { error: '计划文件不存在或为空。' };
     const owner = BrowserWindow.fromWebContents(_e.sender);
@@ -9986,7 +9942,7 @@ ipcMain.handle('opencode:cancel-run', async (_e, runId) => {
 });
 
 ipcMain.handle('opencode:permission-reply', async (_e, payload = {}) => {
-  if (!openCodeSidecar) return { ok: false, error: 'Yan Kernel 尚未运行' };
+  if (!openCodeSidecar) return { ok: false, error: 'Z 内核尚未运行' };
   try {
     return await openCodeSidecar.replyPermission(payload);
   } catch (error) {
@@ -9999,7 +9955,7 @@ ipcMain.handle('opencode:classify-shell-command', (_e, command) => {
 });
 
 ipcMain.handle('opencode:question-reply', async (_e, payload = {}) => {
-  if (!openCodeSidecar) return { ok: false, error: 'Yan Kernel 尚未运行' };
+  if (!openCodeSidecar) return { ok: false, error: 'Z 内核尚未运行' };
   try {
     return await openCodeSidecar.replyQuestion(payload);
   } catch (error) {
@@ -10072,7 +10028,7 @@ app.whenReady().then(async () => {
     if (e2eOrphanShutdownStarted) return;
     const message = error && error.message ? error.message : String(error);
     destroySplashWindow();
-    dialog.showErrorBox('Yan Kernel 启动失败', `Yan Kernel 无法启动。\n\n${message}`);
+    dialog.showErrorBox('Z 内核启动失败', `Z 内核无法启动。\n\n${message}`);
     app.quit();
     return;
   }
@@ -10110,8 +10066,6 @@ app.on('before-quit', () => {
     e2eParentWatchdog = null;
   }
   openCodeEventBatcher.close();
-  workGuiFeed?.dispose();
-  workGuiFeed = null;
   // Flush a debounced Core snapshot before the process exits.
   try { yanCore?.persist?.(); } catch {}
   // Give a pending event-log compaction a chance to finish during shutdown.

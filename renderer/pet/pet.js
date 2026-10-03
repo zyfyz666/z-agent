@@ -44,7 +44,7 @@ const defaultState = {
   status: 'idle',
   sessionId: null,
   running: false,
-  title: 'Yan Agent',
+  title: 'Z',
   message: '随时待命'
 };
 

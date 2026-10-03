@@ -188,7 +188,7 @@ test('subagent task parts spawn helpers tracked with their own activity', async 
   assert.ok(helper);
   assert.equal(helper.kind, 'sub');
   assert.equal(helper.state, 'working');
-  assert.equal(snapshot.agents.find(agent => agent.id === 'main').name, 'Yan Agent');
+  assert.equal(snapshot.agents.find(agent => agent.id === 'main').name, 'Z');
 });
 
 test('context events update run energy with throttling', async t => {

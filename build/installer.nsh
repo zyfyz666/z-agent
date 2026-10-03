@@ -46,21 +46,21 @@
   !macroend
 
   Function YanPathPageCreate
-    !insertmacro MUI_HEADER_TEXT "环境配置" "让 IDE 和终端能够找到 Yan Agent"
+    !insertmacro MUI_HEADER_TEXT "环境配置" "让 IDE 和终端能够找到 Z"
     nsDialogs::Create 1018
     Pop $R8
     ${If} $R8 == error
       Abort
     ${EndIf}
 
-    ${NSD_CreateLabel} 0 0 100% 22u "选择是否将 Yan Agent 的安装目录同时加入用户与系统 PATH。"
+    ${NSD_CreateLabel} 0 0 100% 22u "选择是否将 Z 的安装目录同时加入用户与系统 PATH。"
     Pop $R8
     ${NSD_CreateCheckbox} 0 32u 100% 18u "加入 PATH（推荐）"
     Pop $YanAddToPathCheckbox
     ${If} $YanAddToPathRequested == "1"
       ${NSD_Check} $YanAddToPathCheckbox
     ${EndIf}
-    ${NSD_CreateLabel} 18u 54u 94% 34u "启用后，IDE、PowerShell 和命令提示符可以直接定位并启动 Yan Agent。安装程序将请求管理员权限，新终端窗口会自动生效。"
+    ${NSD_CreateLabel} 18u 54u 94% 34u "启用后，IDE、PowerShell 和命令提示符可以直接定位并启动 Z。安装程序将请求管理员权限，新终端窗口会自动生效。"
     Pop $R8
 
     nsDialogs::Show
@@ -98,7 +98,7 @@
   !macroend
 
   Function un.YanDataPageCreate
-    !insertmacro MUI_HEADER_TEXT "卸载选项" "选择是否同时清除本机保存的 Yan Agent 数据"
+    !insertmacro MUI_HEADER_TEXT "卸载选项" "选择是否同时清除本机保存的 Z 数据"
     nsDialogs::Create 1018
     Pop $R8
     ${If} $R8 == error
@@ -107,14 +107,14 @@
 
     ${NSD_CreateLabel} 0 0 100% 34u "普通卸载会保留配置、会话、技能和媒体缓存，方便以后重新安装后继续使用。"
     Pop $R8
-    ${NSD_CreateCheckbox} 0 46u 100% 18u "清除当前 Windows 用户的 Yan Agent 数据"
+    ${NSD_CreateCheckbox} 0 46u 100% 18u "清除当前 Windows 用户的 Z 数据"
     Pop $YanClearDataCheckbox
     ${If} $YanClearDataRequested == "1"
       ${NSD_Check} $YanClearDataCheckbox
     ${Else}
       ${NSD_Uncheck} $YanClearDataCheckbox
     ${EndIf}
-    ${NSD_CreateLabel} 18u 70u 94% 56u "勾选后删除当前 Windows 用户的配置、会话、浏览器缓存、运行时、技能存储和临时媒体。保留工作区及其他用户的数据；若使用另一管理员账号运行，请在原账号下卸载。"
+    ${NSD_CreateLabel} 18u 70u 94% 56u "勾选后删除当前 Windows 用户的 Z 配置、会话、浏览器缓存、运行时和技能存储。保留工作区、其他应用及共享临时缓存；若使用另一管理员账号运行，请在原账号下卸载。"
     Pop $R8
 
     nsDialogs::Show
@@ -130,9 +130,7 @@
   FunctionEnd
 
   Function un.YanStopProcesses
-    nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "Yan Agent.exe"'
-    Pop $R8
-    nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "yan-agent.exe"'
+    nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "${APP_EXECUTABLE_FILENAME}"'
     Pop $R8
     Sleep 500
   FunctionEnd
@@ -176,29 +174,22 @@
     SetShellVarContext current
     StrCpy $YanClearDataFailed "0"
 
-    Push "$APPDATA\yan-agent"
+    ; Z retains these pre-rename fork profiles. Never remove upstream Yan
+    ; profiles or shared temporary caches, which may belong to another app.
+    Push "$APPDATA\wd-agent"
     Call un.YanRemoveDataPath
-    Push "$APPDATA\Yan Agent"
+    Push "$APPDATA\WD Agent"
     Call un.YanRemoveDataPath
-    Push "$LOCALAPPDATA\yan-agent"
+    Push "$LOCALAPPDATA\wd-agent"
     Call un.YanRemoveDataPath
-    Push "$LOCALAPPDATA\Yan Agent"
+    Push "$LOCALAPPDATA\WD Agent"
     Call un.YanRemoveDataPath
-    Push "$LOCALAPPDATA\yan-agent-updater"
-    Call un.YanRemoveDataPath
-    Push "$TEMP\YanAgent"
-    Call un.YanRemoveDataPath
-    Push "$TEMP\yan-agent-update"
-    Call un.YanRemoveDataPath
-    Push "$TEMP\yan-dsh-code-review"
-    Call un.YanRemoveDataPath
-    Delete "$TEMP\yan-agent-yanxi-code-workspace.json"
 
     ${If} $YanClearDataFailed == "1"
       SetErrorLevel 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "部分 Yan Agent 数据未能删除，可能仍被其他进程占用。请在卸载详情中查看残留路径。" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "部分 Z 数据未能删除，可能仍被其他进程占用。请在卸载详情中查看残留路径。" /SD IDOK
     ${Else}
-      DetailPrint "Yan Agent 本机数据清理完成。"
+      DetailPrint "Z 本机数据清理完成。"
     ${EndIf}
   FunctionEnd
 

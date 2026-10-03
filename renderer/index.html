@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; img-src 'self' data: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https://api.deepseek.com https://dashscope.aliyuncs.com https://open.bigmodel.cn https://ark.cn-beijing.volces.com https://api.moonshot.cn https://api.stepfun.com https://api.minimaxi.com https://*; frame-src https: http: file:;" />
-  <title>Yan Agent</title>
+  <title>Z</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="review.css" />
   <link rel="stylesheet" href="dsh-review.css" />
-  <link rel="stylesheet" href="work-gui/work-gui.css" />
   <link rel="stylesheet" href="understand-anything/understand-anything.css" />
+  <link rel="stylesheet" href="z-theme.css" />
 </head>
 <body>
   <div id="app" class="app">
@@ -21,14 +21,11 @@
       <div class="titlebar-drag"></div>
       <div class="titlebar-left">
         <button id="sidebarToggle" class="titlebar-sidebar-btn" title="切换侧边栏 (Ctrl+B)" aria-label="切换侧边栏" aria-controls="sidebar" aria-expanded="true">
-          <img class="titlebar-sidebar-logo titlebar-sidebar-logo-dark" src="assets/logo.png" alt="" aria-hidden="true" />
-          <img class="titlebar-sidebar-logo titlebar-sidebar-logo-light" src="assets/logo-light.png" alt="" aria-hidden="true" />
-          <img class="titlebar-sidebar-logo titlebar-sidebar-logo-mac" src="assets/logo-macos.svg" alt="" aria-hidden="true" />
+          <img class="z-titlebar-mark" src="assets/z-mark.svg" alt="Z" />
         </button>
-        <div id="windowViewSwitcher" class="window-view-switcher" role="tablist" aria-label="Yan 工作区视图">
+        <div id="windowViewSwitcher" class="window-view-switcher" role="tablist" aria-label="Z 工作区视图">
           <button class="window-view-option active" type="button" role="tab" data-window-view="main" aria-selected="true">主界面</button>
-          <button class="window-view-option" type="button" role="tab" data-window-view="project-map" aria-selected="false">Understand Anything</button>
-          <button class="window-view-option" type="button" role="tab" data-window-view="work-gui" aria-selected="false">Yan Work GUI</button>
+          <button class="window-view-option" type="button" role="tab" data-window-view="project-map" aria-selected="false">项目地图</button>
         </div>
       </div>
       <div class="titlebar-right">
@@ -49,16 +46,19 @@
       <!-- ===== Sidebar ===== -->
       <aside id="sidebar" class="sidebar">
         <div class="sidebar-brand-shell">
-          <div class="sidebar-brand" aria-label="Yan Agent">
-            <span class="sidebar-brand-name sidebar-brand-name-default">Yan Agent</span>
-            <span class="sidebar-brand-name sidebar-brand-name-mac">YAgent</span>
-            <span class="sidebar-brand-version">v1.6.1</span>
+          <div class="sidebar-brand" aria-label="Z">
+            <span class="z-wordmark" aria-hidden="true">Z<span class="z-wordmark-dot"></span></span>
+            <div class="z-brand-caption"><span>个人工作台</span><span class="sidebar-brand-version">v1.6.1</span></div>
           </div>
         </div>
         <nav id="agentSidebarNav" class="sidebar-nav">
           <button id="newTaskNavBtn" class="sidebar-nav-item" type="button" title="新建任务">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             <span>新建任务</span>
+          </button>
+          <button id="wdMonitorNavBtn" class="sidebar-nav-item z-monitor-nav" type="button" data-rs-open-tool="watchdog" title="查看观察者运行情况" aria-controls="rs-watchdog">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+            <span>观察者</span><span class="z-nav-indicator" aria-hidden="true"></span>
           </button>
           <button class="sidebar-nav-item" data-nav="skills" title="Skill 市场">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.65 5.02a3.5 3.5 0 0 1-2.33 2.33L3 12l5.02 1.65a3.5 3.5 0 0 1 2.33 2.33L12 21l1.65-5.02a3.5 3.5 0 0 1 2.33-2.33L21 12l-5.02-1.65a3.5 3.5 0 0 1-2.33-2.33L12 3Z"/><path d="M5 3v4M3 5h4M19 17v4M17 19h4"/></svg>
@@ -290,8 +290,8 @@
         <div id="browserFocusStandbyShell" class="browser-focus-standby-shell" aria-hidden="true">
           <button id="browserFocusStandbyPill" class="browser-focus-standby-pill" type="button" aria-label="展开输入框" data-state="idle">
             <span class="browser-focus-logo" aria-hidden="true">
-              <img class="browser-focus-logo-light" src="assets/logo.png" alt="" draggable="false" />
-              <img class="browser-focus-logo-dark" src="assets/logo-light.png" alt="" draggable="false" />
+              <img class="browser-focus-logo-light" src="assets/z-mark.svg" alt="" draggable="false" />
+              <img class="browser-focus-logo-dark" src="assets/z-mark.svg" alt="" draggable="false" />
             </span>
             <span id="browserFocusStandbyLabel" class="browser-focus-standby-label">随时待命</span>
           </button>
@@ -300,8 +300,8 @@
         <div id="browserFocusMinimizedShell" class="browser-focus-minimized-shell" aria-hidden="true">
           <button id="browserFocusMinimizedButton" class="browser-focus-minimized-button" type="button" aria-label="展开输入框">
             <span class="browser-focus-logo" aria-hidden="true">
-              <img class="browser-focus-logo-light" src="assets/logo.png" alt="" draggable="false" />
-              <img class="browser-focus-logo-dark" src="assets/logo-light.png" alt="" draggable="false" />
+              <img class="browser-focus-logo-light" src="assets/z-mark.svg" alt="" draggable="false" />
+              <img class="browser-focus-logo-dark" src="assets/z-mark.svg" alt="" draggable="false" />
             </span>
           </button>
         </div>
@@ -336,7 +336,7 @@
                 <span class="vision-relay-slider" aria-hidden="true"></span>
                 <span class="vision-relay-text">
                   <strong>使用视觉中继</strong>
-                  <span id="agentPermissionVisionRelayDesc">开启后 Yan Agent 会调用免费视觉中继模型辅助定位按钮与理解界面。</span>
+                  <span id="agentPermissionVisionRelayDesc">开启后 Z 会调用免费视觉中继模型辅助定位按钮与理解界面。</span>
                 </span>
               </label>
             </div>
@@ -349,7 +349,7 @@
                 </button>
                 <label id="agentQuestionCustomField" class="agent-question-custom-field hidden" for="agentQuestionCustomInput">
                   <span class="sr-only">自拟回答</span>
-                  <input id="agentQuestionCustomInput" class="agent-question-custom" type="text" autocomplete="off" placeholder="告诉 Yan Agent 你的想法" />
+                  <input id="agentQuestionCustomInput" class="agent-question-custom" type="text" autocomplete="off" placeholder="告诉 Z 你的想法" />
                 </label>
               </div>
               <button type="button" id="agentPermissionAlways" class="primary-btn">总是允许</button>
@@ -410,11 +410,13 @@
         <!-- ===== Composer stage (empty: centered; chat: docked bottom) ===== -->
         <div id="composerStage" class="composer-stage">
           <div id="emptyHeader" class="empty-header">
-            <div class="welcome-logo">
-              <img class="welcome-logo-default" src="assets/logo.png" alt="Yan Agent" width="72" height="72" />
-              <img class="welcome-logo-mac" src="assets/logo-macos.svg" alt="YAgent" width="72" height="72" />
+            <div class="z-hero-emblem" aria-hidden="true">
+              <span class="z-emblem-line z-emblem-line-top"></span><img src="assets/z-mark.svg" alt="" width="76" height="76" /><span class="z-emblem-line z-emblem-line-bottom"></span>
             </div>
-            <h1 id="greeting">Good evening, Yanxi</h1>
+            <p class="z-eyebrow">YOUR NEXT MOVE</p>
+            <h1 id="greeting">下一步，交给 Z。</h1>
+            <p class="z-hero-copy">从一个想法到一次完成。专注创造，让过程清晰可见。</p>
+            <button id="welcomeWdBtn" type="button" class="z-watch-link" data-rs-open-tool="watchdog" aria-controls="rs-watchdog"><span class="z-watch-glyph" aria-hidden="true">↗</span>了解观察者如何工作<span class="z-watch-arrow" aria-hidden="true">→</span></button>
           </div>
 
           <div class="composer-wrap">
@@ -590,9 +592,9 @@
 
               <div class="composer-inner">
                 <div class="composer-editor">
-                  <div id="promptOptimizerStatus" class="prompt-optimizer-status hidden" role="status" aria-live="polite">Yan Prompt Optimizer正在优化你的输入，按Ctrl+Z以回退优化</div>
+                  <div id="promptOptimizerStatus" class="prompt-optimizer-status hidden" role="status" aria-live="polite">Z 正在整理你的输入，按 Ctrl+Z 撤销</div>
                   <div id="composerInput" class="composer-input" contenteditable="true" role="textbox"
-                    aria-label="消息输入" aria-multiline="true" data-placeholder="让灵感浮于纸面" spellcheck="false"></div>
+                    aria-label="消息输入" aria-multiline="true" data-placeholder="告诉 Z，你想完成什么…" spellcheck="false"></div>
                 </div>
                 <div class="composer-actions hidden">
                   <div class="attachment-action-wrap">
@@ -679,9 +681,9 @@
               </div>
             </div>
             <button id="guideHint" class="composer-guide-hint hidden" type="button" data-vision-relay-guide="yan-guide">
-              <span class="composer-guide-hint-text">点击左侧边栏</span>
+              <span class="composer-guide-hint-text">第一次使用 Z？</span>
               <span class="composer-guide-hint-key"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z"/><path d="M5 17A12 12 0 0 1 17 5"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/></svg><span>引导</span></span>
-              <span class="composer-guide-hint-text">查看引导</span>
+              <span class="composer-guide-hint-text">从这里开始</span>
             </button>
 
             </div>
@@ -692,8 +694,8 @@
 
         </div>
 
-          <section id="understandAnythingLayer" class="understand-anything-layer hidden" aria-label="Understand Anything" aria-hidden="true">
-            <iframe id="understandAnythingFrame" class="understand-anything-frame" title="Understand Anything 本地图谱" loading="eager"></iframe>
+          <section id="understandAnythingLayer" class="understand-anything-layer hidden" aria-label="项目地图" aria-hidden="true">
+            <iframe id="understandAnythingFrame" class="understand-anything-frame" title="Z · 项目地图" loading="eager"></iframe>
             <div id="understandAnythingStatus" class="understand-anything-status" hidden></div>
           </section>
         </main>
@@ -898,9 +900,6 @@
       </section>
 
 
-      <!-- ===== Main: Yan Work GUI (placeholder) ===== -->
-      <section id="pageWorkGui" class="page-view work-gui-page hidden" aria-label="Yan Work GUI"></section>
-
       <!-- Media generation is handled directly from the Agent model selector. -->
       <!-- Legacy standalone media studio removed from the application surface.
       <section id="pagePhotoVideo" class="page-view photo-video-page hidden" aria-label="媒体生成">
@@ -1043,6 +1042,9 @@
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
               </button>
               <div id="rightSidebarAddMenu" class="rs-add-menu hidden" role="menu" aria-label="新建右侧面板标签页">
+                <button type="button" role="menuitem" data-rs-open-tool="watchdog">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>观察者</span>
+                </button>
                 <button type="button" role="menuitem" data-rs-open-tool="browser">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
                   <span>浏览器</span>
@@ -1065,6 +1067,7 @@
           </button>
         </div>
         <div class="rs-content">
+          <section id="rs-watchdog" class="rs-panel wd-panel" role="tabpanel" aria-label="观察者运行情况"></section>
           <section id="rs-review" class="rs-panel rs-review-panel" role="tabpanel" aria-label="审阅" data-state="idle" data-review-disabled="false">
             <button id="reviewRefreshBtn" class="rv-icon-btn" type="button" title="刷新审阅" aria-label="刷新审阅">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -1083,9 +1086,9 @@
             <div id="interjectionScroll" class="chat-scroll auxiliary-dialogue-scroll">
               <div id="interjectionTranscript" class="messages auxiliary-dialogue-messages" aria-live="polite">
                 <div class="auxiliary-dialogue-empty" aria-hidden="true">
-                  <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-light" src="assets/logo.png" alt="" />
-                  <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-dark" src="assets/logo-light.png" alt="" />
-                  <span>Yan Agent工作期间，提问以辅助工作</span>
+                  <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-light" src="assets/z-mark.svg" alt="" />
+                  <img class="auxiliary-dialogue-logo auxiliary-dialogue-logo-dark" src="assets/z-mark.svg" alt="" />
+                  <span>Z工作期间，提问以辅助工作</span>
                 </div>
               </div>
             </div>
@@ -1130,7 +1133,7 @@
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
                       </button>
                     </div>
-                    <span class="browser-agent-status hidden" data-browser-role="agent-status" aria-hidden="true">Yan Agent正在操控Browser</span>
+                    <span class="browser-agent-status hidden" data-browser-role="agent-status" aria-hidden="true">Z 正在操作浏览器</span>
                     <div class="browser-settings-wrap" data-browser-settings-wrap>
                       <button class="tool-panel-nav-btn browser-settings-btn" data-browser-action="settings" type="button" title="浏览器设置" aria-label="浏览器设置" aria-haspopup="menu" aria-expanded="false">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
@@ -1167,7 +1170,7 @@
                     </svg>
                   </div>
                   <div class="browser-agent-control-label" data-browser-role="agent-control-label">
-                    <span>Yan Agent正在操控Browser</span>
+                    <span>Z 正在操作浏览器</span>
                     <button class="browser-agent-control-label-button" type="button" tabindex="0" aria-label="Browser 手势，点击后由用户接管" title="用户接管 Browser">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M7 11V6a2 2 0 0 1 4 0v5" />
@@ -1281,7 +1284,7 @@
             <span class="settings-brand-mark" aria-hidden="true">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </span>
-            <div><strong>设置</strong><span>Yan Agent</span></div>
+            <div><strong>设置</strong><span>Z</span></div>
           </div>
           <div class="settings-header-copy" aria-live="polite">
             <h2 id="settingsSectionTitle">关于</h2>
@@ -1478,7 +1481,7 @@
                       </section>
                       <section class="conn-page" data-conn-page="4">
                         <h4 class="conn-page-title">API Key</h4>
-                        <p class="conn-page-sub">请妥善保管你的API key，Yan Agent不会泄露它</p>
+                        <p class="conn-page-sub">请妥善保管你的API key，Z不会泄露它</p>
                         <div class="input-with-action conn-key-row">
                           <input id="connApiKey" class="input conn-page-input" type="password" placeholder="sk-..." autocomplete="off" aria-label="API Key" />
                           <button id="connToggleKey" class="provider-eye-btn" type="button" title="显示 API Key" aria-label="显示 API Key">
@@ -1654,7 +1657,7 @@
                   <div class="media-model-settings-row vision-relay-row">
                     <div class="settings-group-heading">
                       <h3>启用视觉中继</h3>
-                      <p>Yan Agent 可能把支持多模态的主模型误判为不支持，所以将决定权还给你：关闭后图片将直接发给主模型。</p>
+                      <p>Z 可能把支持多模态的主模型误判为不支持，所以将决定权还给你：关闭后图片将直接发给主模型。</p>
                     </div>
                     <label class="vision-relay-switch vision-relay-master-switch" title="启用或关闭视觉中继">
                       <input id="visionRelayEnabledCheck" type="checkbox" role="switch" aria-label="启用或关闭视觉中继" checked />
@@ -1708,7 +1711,7 @@
                 <h2 id="generalAppearanceTitle">外观与语言</h2>
                 <div class="general-settings-group">
                   <div class="settings-form-section general-card general-setting-row general-theme-card">
-                    <div class="settings-group-heading"><h3>主题</h3><p>选择 Yan Agent 的界面外观</p></div>
+                    <div class="settings-group-heading"><h3>主题</h3><p>选择 Z 的界面外观</p></div>
                     <label class="theme-switch" id="themeSegmented" title="切换深浅色主题">
                       <input id="themeModeToggle" type="checkbox" class="theme-switch__checkbox" role="switch" aria-label="切换深浅色主题" />
                       <span class="theme-switch__container" aria-hidden="true">
@@ -1725,7 +1728,7 @@
                     </label>
                   </div>
                   <div class="settings-form-section general-card general-setting-row">
-                    <div class="settings-group-heading"><h3>语言</h3><p>选择 Yan Agent 的界面语言</p></div>
+                    <div class="settings-group-heading"><h3>语言</h3><p>选择 Z 的界面语言</p></div>
                     <div class="general-language-pill" id="languageSegmented" role="radiogroup" aria-label="语言">
                         <button type="button" class="general-segment-btn" data-lang="zh-CN" role="radio" aria-checked="false"><span>中文</span></button>
                         <button type="button" class="general-segment-btn" data-lang="en" role="radio" aria-checked="false"><span>English</span></button>
@@ -1745,8 +1748,8 @@
                 <h2 id="generalUserTitle">用户</h2>
                 <div class="general-settings-group">
                   <div class="settings-form-section general-card general-setting-row general-user-card">
-                    <div class="settings-group-heading"><h3>用户名</h3><p>让 Yan Agent 记住你的名字</p></div>
-                    <input id="userNameInput" class="general-user-name-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" placeholder="让Yan Agent记住你的名字" aria-label="用户名" />
+                    <div class="settings-group-heading"><h3>用户名</h3><p>让 Z 记住你的名字</p></div>
+                    <input id="userNameInput" class="general-user-name-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" placeholder="让Z记住你的名字" aria-label="用户名" />
                   </div>
                 </div>
               </section>
@@ -1803,15 +1806,15 @@
                 <h2 id="generalApplicationTitle">应用</h2>
                 <div class="general-settings-group">
                   <div class="settings-form-section general-card general-setting-row">
-                    <div class="settings-group-heading"><h3>显示桌宠</h3><p>在桌面显示 Yan 宠物窗口</p></div>
+                    <div class="settings-group-heading"><h3>显示桌宠</h3><p>在桌面显示 Z 宠物窗口</p></div>
                     <div class="general-pet-actions">
                       <div id="generalPetPicker" class="general-pet-picker" hidden>
                         <button id="generalPetPickerTrigger" class="general-pet-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="generalPetPickerMenu">
-                          <span id="generalPetPickerLabel">Yan Agent Orb</span>
+                          <span id="generalPetPickerLabel">Z Orb</span>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
                         </button>
                         <div id="generalPetPickerMenu" class="general-pet-picker-menu hidden" role="listbox" aria-label="选择桌宠">
-                          <button class="general-pet-picker-option active" type="button" data-pet-select="orb" role="option" aria-selected="true"><span>Yan Agent Orb</span><span class="general-pet-picker-check" aria-hidden="true">✓</span></button>
+                          <button class="general-pet-picker-option active" type="button" data-pet-select="orb" role="option" aria-selected="true"><span>Z Orb</span><span class="general-pet-picker-check" aria-hidden="true">✓</span></button>
                           <button class="general-pet-picker-option" type="button" data-pet-select="yuexinmiao" role="option" aria-selected="false"><span>月薪猫</span><span class="general-pet-picker-check" aria-hidden="true">✓</span></button>
                           <button class="general-pet-picker-option" type="button" data-pet-select="deepseek" role="option" aria-selected="false"><span>大烧货</span><span class="general-pet-picker-check" aria-hidden="true">✓</span></button>
                           <button class="general-pet-picker-option" type="button" data-pet-select="claude" role="option" aria-selected="false"><span>claude</span><span class="general-pet-picker-check" aria-hidden="true">✓</span></button>
@@ -1846,7 +1849,7 @@
                 <div class="general-section-heading wallpaper-market-heading">
                   <div>
                     <h2 id="wallpaperMarketTitle">壁纸市场</h2>
-                    <p>Yan Agent提供多种壁纸供你选择，也支持上传你喜欢的壁纸</p>
+                    <p>Z提供多种壁纸供你选择，也支持上传你喜欢的壁纸</p>
                   </div>
                   <label class="wallpaper-strength-control" for="wallpaperMaterialStrength">
                     <span>材质强度</span>
@@ -1889,14 +1892,22 @@
             <section id="tab-about" class="tab-panel active">
               <div class="about about-redesign">
                 <header class="about-page-heading">
-                  <h1>关于Yan Agent</h1>
+                  <h1>认识 Z</h1>
                 </header>
+                <div class="z-about-hero">
+                  <img src="assets/z-mark.svg" alt="Z" width="64" height="64">
+                  <div>
+                    <span class="z-eyebrow">MADE FOR YOUR NEXT MOVE</span>
+                    <h2>少一点绕路，多一点完成。</h2>
+                    <p>你的目标是起点，清晰的过程是方向。</p>
+                  </div>
+                </div>
                 <div class="about-settings-stack">
                   <div class="about-settings-list general-settings-group">
                     <div class="about-settings-row about-settings-row-guide">
                       <div class="about-row-copy">
-                        <h3>可能的错误</h3>
-                        <p>右侧“常见报错”涵盖已发现的内核报错，工作出错时可查询检查</p>
+                        <h3>遇到问题，从这里排查</h3>
+                        <p>连接、工具、上下文与观察者状态的常见问题，都有下一步说明。</p>
                       </div>
                       <div class="about-row-actions">
                         <button id="aboutErrorsBtn" class="conn-pill" type="button" aria-haspopup="dialog" aria-controls="aboutErrorDialog">常见报错</button>
@@ -1904,36 +1915,31 @@
                     </div>
                     <div class="about-settings-row">
                       <div class="about-row-copy">
-                        <h3>关于YAgent v1.6.1</h3>
+                        <h3>Z 的这次更新</h3>
+                        <p>新的工作台、使用引导与观察者面板。</p>
                       </div>
                       <div class="about-row-actions">
-                        <button id="aboutReleaseNotesBtn" class="conn-pill" type="button" data-vision-relay-guide="release-notes" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog">更新文档</button>
+                        <button id="aboutReleaseNotesBtn" class="conn-pill" type="button" data-vision-relay-guide="release-notes" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog">看看新变化</button>
                       </div>
                     </div>
-                    <div class="about-settings-row about-contact-row">
-                      <div class="about-row-copy about-contact-copy">
-                        <h3>Yan Agent的</h3>
-                        <div id="aboutContactPicker" class="about-contact-picker" role="radiogroup" aria-label="选择联系方式">
-                          <button class="about-contact-option active" type="button" role="radio" aria-checked="true" data-about-contact="douyin">抖音群</button>
-                          <button class="about-contact-option" type="button" role="radio" aria-checked="false" data-about-contact="qq">QQ群</button>
-                          <button class="about-contact-option" type="button" role="radio" aria-checked="false" data-about-contact="email">邮箱</button>
-                        </div>
+                    <div class="about-settings-row">
+                      <div class="about-row-copy">
+                        <h3>开始你的第一件事</h3>
+                        <p>连接模型、选择工作区，再给 Z 一个明确的目标。</p>
                       </div>
-                      <div class="about-contact-value" role="status" aria-live="polite">
-                        <span id="aboutContactValue">994525685197</span>
-                        <button id="aboutContactCopy" class="about-copy-button" type="button" title="复制联系方式" aria-label="复制联系方式">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
+                      <div class="about-row-actions">
+                        <button class="conn-pill" type="button" data-vision-relay-guide="yan-guide" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog">打开使用指南</button>
                       </div>
                     </div>
                   </div>
                   <div class="about-settings-list about-update-panel">
                     <div class="about-settings-row">
                       <div class="about-row-copy">
-                        <h3>检查更新</h3>
+                        <h3>当前版本</h3>
+                        <p>Z · v1.6.1 · 本机工作台</p>
                       </div>
                       <div class="about-row-actions">
-                        <button id="aboutCheckUpdateBtn" class="conn-pill" type="button">检查当前版本并更新</button>
+                        <span class="z-version-tag">本地版本</span>
                       </div>
                     </div>
                   </div>
@@ -1948,7 +1954,7 @@
           <header class="provider-dialog-head">
             <div>
               <h3 id="aboutErrorTitle">常见报错</h3>
-              <p>已发现的内核报错，排除网络与服务商问题。</p>
+              <p>从实际现象出发，找到下一步的处理方法。</p>
             </div>
             <div class="conn-head-side">
               <div id="aboutErrorDots" class="conn-step-dots" aria-hidden="true"></div>
@@ -2086,6 +2092,7 @@
   <script src="browser-annotations.js"></script>
   <script src="browser-agent.js"></script>
   <script src="skill-market.js"></script>
+  <script src="z-product-content.js"></script>
   <script src="i18n.js"></script>
   <script src="../lib/thinking-text.js"></script>
   <script src="../lib/protocol-text.js"></script>
@@ -2101,8 +2108,7 @@
   <script src="../lib/subagent/workflow-state.js"></script>
   <script src="subagent-panel.js"></script>
   <script src="release-notes.js"></script>
+  <script src="wd-monitor.js"></script>
   <script src="renderer.js"></script>
-  <script src="vendor/three/three.global.js"></script>
-  <script src="work-gui/palace-host.js"></script>
 </body>
 </html>

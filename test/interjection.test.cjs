@@ -133,6 +133,7 @@ test('isolated auxiliary observer uses plain output with tools denied and a stab
   assert.equal(calls.create[0].metadata.yanInterjectionObserver, true);
   assert.equal(calls.prompt.length, 2);
   assert.deepEqual(calls.prompt[0].tools, { '*': false });
+  assert.match(calls.prompt[0].system, /你是 Z 的辅助对话子智能体/);
   assert.equal(calls.prompt[0].format, undefined);
   assert.equal(Array.isArray(JSON.parse(calls.prompt[0].parts[0].text).auxiliaryConversation), true);
   assert.equal(events.some(event => event.type === 'status'), true);

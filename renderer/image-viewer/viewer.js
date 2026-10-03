@@ -19,7 +19,7 @@ let fitScale = 1;
 let userAdjustedZoom = false;
 let downloadStatusTimer = null;
 
-document.title = '图片预览';
+document.title = 'Z · 图片预览';
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));

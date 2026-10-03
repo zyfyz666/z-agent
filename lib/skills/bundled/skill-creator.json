@@ -1,7 +1,7 @@
 {
   "id": "skill-creator",
   "name": "Skill Creator",
-  "desc": "Create and update focused Yan Agent skills with reusable scripts, references, assets, and validation",
+  "desc": "Create and update focused Z skills with reusable scripts, references, assets, and validation",
   "aliases": ["skill creator", "create skill", "更新技能", "创建技能"],
   "tags": ["agent-rules"],
   "triggers": ["创建skill", "新建skill", "开发skill", "更新skill", "skill规范", "skill creator"],

@@ -162,7 +162,7 @@ test('renderer-facing Skill catalogs never carry instruction bodies', () => {
   try {
     const cfg = { customSkills: [] };
     skillRegistry.installYanUserSkill(dataDir, {
-      id: 'metadata-demo', name: 'Metadata Demo', desc: 'demo', prompt: 'Private instruction body.'
+      id: 'metadata-demo', name: 'Metadata Demo', prompt: 'Private instruction body.'
     });
     const list = skillRegistry.getMergedSkillsForList(cfg, appRoot, dataDir);
     const catalog = skillRegistry.getAllSkillsForCatalog(cfg, appRoot, dataDir);
@@ -170,6 +170,8 @@ test('renderer-facing Skill catalogs never carry instruction bodies', () => {
     const cataloged = catalog.find(skill => skill.id === 'metadata-demo');
     assert.ok(listed);
     assert.ok(cataloged);
+    assert.equal(listed.desc, 'Z Skill metadata-demo');
+    assert.equal(cataloged.desc, 'Z Skill metadata-demo');
     assert.equal(Object.hasOwn(listed, 'prompt'), false);
     assert.equal(Object.hasOwn(cataloged, 'prompt'), false);
   } finally {

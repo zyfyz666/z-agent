@@ -2,35 +2,15 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { buildSync } = require('esbuild');
 const root = path.resolve(__dirname, '..');
 const splash = path.join(root, 'renderer', 'splash');
 
-fs.mkdirSync(path.join(splash, 'fonts'), { recursive: true });
-const fontPackage = path.join(root, 'node_modules', '@fontsource', 'source-serif-4');
-fs.copyFileSync(path.join(fontPackage, 'files', 'source-serif-4-latin-400-normal.woff2'),
-  path.join(splash, 'fonts', 'source-serif-4-latin-400-normal.woff2'));
-fs.copyFileSync(path.join(fontPackage, 'LICENSE'), path.join(splash, 'fonts', 'LICENSE'));
-// OGL distributes its Unlicense text inside README rather than a LICENSE file.
-const oglReadme = fs.readFileSync(path.join(root, 'node_modules', 'ogl', 'README.md'), 'utf8');
-const oglLicenseOffset = oglReadme.indexOf('## Unlicense');
-if (oglLicenseOffset < 0) throw new Error('OGL license notice not found');
-fs.writeFileSync(path.join(splash, 'vendor', 'ogl-LICENSE'), oglReadme.slice(oglLicenseOffset));
-for (const dependency of ['react', 'react-dom']) {
-  fs.copyFileSync(path.join(root, 'node_modules', dependency, 'LICENSE'),
-    path.join(splash, 'vendor', `${dependency}-LICENSE`));
+// The Z startup page is plain HTML/CSS and is shipped directly. Keep this
+// build entry point so existing packaging commands validate its local assets.
+const html = fs.readFileSync(path.join(splash, 'index.html'), 'utf8');
+for (const relativePath of ['./z-splash.css', '../assets/z-mark.svg']) {
+  if (!html.includes(relativePath)) throw new Error(`Startup asset is not linked: ${relativePath}`);
+  if (!fs.statSync(path.resolve(splash, relativePath)).isFile()) throw new Error(`Startup asset is missing: ${relativePath}`);
 }
-
-buildSync({
-  entryPoints: [path.join(splash, 'splash.jsx')],
-  outfile: path.join(splash, 'splash.bundle.js'),
-  bundle: true,
-  platform: 'browser',
-  format: 'iife',
-  target: ['chrome126'],
-  jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"' },
-  minify: true,
-  legalComments: 'eof'
-});
-console.log('Built offline Ghost Fibers splash');
+if (/<script\b/i.test(html)) throw new Error('The Z startup page must remain script-free');
+console.log('Z startup page is ready for packaging');

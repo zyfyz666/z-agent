@@ -1,7 +1,7 @@
 {
-  "name": "wd-agent",
+  "name": "z",
   "version": "1.6.1",
-  "description": "WD Agent: a Yan-Agent fork with the thrash-watchdog built into the opencode sidecar",
+  "description": "Z: a desktop agent based on Yan-Agent with a visible thrash-watchdog monitor",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -16,7 +16,7 @@
     "build": "npm run bundle:opencode-provider && npm run bundle:dsh-review && npm run bundle:tts && npm run bundle:splash && electron-builder --win nsis --publish never && npm run verify:packaged-runtime && npm run verify:packaged-providers && npm run verify:codegraph",
     "build:release": "npm run bundle:opencode-provider && npm run bundle:dsh-review && npm run bundle:tts && npm run bundle:splash && electron-builder --win nsis portable --publish never && npm run verify:packaged-runtime && npm run verify:packaged-providers && npm run verify:codegraph",
     "build:portable": "npm run bundle:opencode-provider && npm run bundle:dsh-review && npm run bundle:tts && npm run bundle:splash && electron-builder --win portable --publish never && npm run verify:packaged-runtime && npm run verify:packaged-providers && npm run verify:codegraph",
-    "build:mac": "npm run bundle:opencode-provider && npm run bundle:dsh-review && npm run bundle:tts && npm run bundle:splash && electron-builder --mac dmg --arm64 --publish never --config.productName=WDAgent",
+    "build:mac": "npm run bundle:opencode-provider && npm run bundle:dsh-review && npm run bundle:tts && npm run bundle:splash && electron-builder --mac dmg --arm64 --publish never --config.productName=Z",
     "bundle:splash": "node scripts/build-splash.cjs"
   },
   "author": "",
@@ -33,8 +33,8 @@
   },
   "build": {
     "appId": "io.github.zyfyz666.wdagent",
-    "productName": "WD Agent",
-    "icon": "renderer/assets/logo-light.ico",
+    "productName": "Z",
+    "icon": "renderer/assets/z-icon.ico",
     "directories": {
       "output": "dist"
     },
@@ -74,7 +74,7 @@
       "node_modules/@officecli/officecli/**/*"
     ],
     "win": {
-      "icon": "renderer/assets/logo-light.ico",
+      "icon": "renderer/assets/z-icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -128,7 +128,7 @@
       ]
     },
     "dmg": {
-      "artifactName": "WDAgent-${arch}-v${version}.${ext}"
+      "artifactName": "Z-${arch}-v${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -138,11 +138,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "WD Agent",
-      "artifactName": "WD.Agent.Setup.v${version}.${ext}"
+      "shortcutName": "Z",
+      "artifactName": "Z.Setup.v${version}.${ext}"
     },
     "portable": {
-      "artifactName": "WD.Agent.Portable.v${version}.${ext}"
+      "artifactName": "Z.Portable.v${version}.${ext}"
     }
   },
   "dependencies": {

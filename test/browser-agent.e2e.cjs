@@ -105,8 +105,8 @@ async function guestState(page, tabId) {
     }
     const kernel = await page.evaluate(() => window.yan.getConfig().then(config => config.executionKernel));
     assert.equal(kernel.id, 'yan-kernel');
-    assert.equal(kernel.name, 'Yan Kernel');
-    assert.equal(kernel.version, '1.4.0');
+    assert.equal(kernel.name, 'Z 内核');
+    assert.equal(kernel.version, require('../package.json').version);
     assert.equal(kernel.engine, 'opencode');
     assert.equal(kernel.engineVersion, '1.18.11');
 
@@ -137,9 +137,9 @@ async function guestState(page, tabId) {
         labels: [...document.querySelectorAll('#attachmentMenu .composer-add-action-name')]
           .map(element => element.textContent.trim()),
         role: document.querySelector('#attachmentMenu')?.getAttribute('role'),
-        workModeLauncherExpanded: document.querySelector('#composerSkillWorkModeAction')?.getAttribute('aria-expanded')
+        workModeLauncherExpanded: document.querySelector('#composerWorkModeAction')?.getAttribute('aria-expanded')
       }));
-      assert.deepEqual(addMenu.labels.slice(0, 3), ['添加附件', '优化你的prompt', '使用/选择技能或工作方式']);
+      assert.deepEqual(addMenu.labels.slice(0, 3), ['添加附件', '优化你的prompt', '使用/选择工作方式']);
       assert.equal(addMenu.role, 'menu');
       assert.equal(addMenu.workModeLauncherExpanded, 'false');
       await page.screenshot({ path: addMenuScreenshotPath });
@@ -202,7 +202,7 @@ async function guestState(page, tabId) {
     assert.equal(takeover.userUrlIntact, true);
     assert.equal(takeover.controlled, true);
     assert.equal(takeover.takeoverVisible, true);
-    assert.equal(takeover.label, 'Yan Agent正在操控Browser');
+    assert.equal(takeover.label, 'Z 正在操作浏览器');
     assert.equal(takeover.handButton, true);
     assert.equal(takeover.topStatusHidden, true);
     assert.equal(takeover.shieldFocused, true);

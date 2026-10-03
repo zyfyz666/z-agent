@@ -10,7 +10,7 @@ body {
 }
 
 body {
-  color: #191918;
+  color: #26352d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   user-select: none;
 }
@@ -30,10 +30,10 @@ body {
   align-items: center;
   gap: 12px;
   padding: 8px 10px 8px 14px;
-  border: 0;
+  border: 1px solid rgba(91, 119, 92, 0.42);
   border-radius: 999px;
-  background: rgba(247, 247, 243, 0.92);
-  box-shadow: none;
+  background: rgba(242, 246, 239, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
   -webkit-app-region: drag;
 }
 
@@ -46,6 +46,11 @@ body {
   border: 0;
   background: transparent;
   -webkit-app-region: drag;
+}
+
+.quick-input-pill:focus-within {
+  border-color: #7d9e63;
+  box-shadow: inset 0 0 0 1px rgba(158, 197, 110, 0.24);
 }
 
 .quick-input-drag-mark img {
@@ -61,12 +66,12 @@ body {
   border: 0;
   outline: 0;
   background: transparent;
-  color: #191918;
+  color: #26352d;
   font-size: 15px;
   -webkit-app-region: no-drag;
 }
 
-#quickInput::placeholder { color: rgba(25, 25, 24, 0.54); }
+#quickInput::placeholder { color: rgba(56, 76, 59, 0.58); }
 
 #quickSubmit {
   width: 38px;
@@ -76,8 +81,8 @@ body {
   flex: 0 0 38px;
   border: 0;
   border-radius: 50%;
-  color: #f7f7f3;
-  background: #1b1b1a;
+  color: #ccf777;
+  background: #26382b;
   opacity: 0.35;
   transition: opacity 120ms ease, transform 120ms ease;
   -webkit-app-region: no-drag;

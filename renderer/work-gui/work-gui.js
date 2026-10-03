@@ -1,7 +1,7 @@
-// Yan Work GUI · 云海群岛
+// Z 可视工作区 · 云海群岛
 // Normalized runtime events drive residents in a continuous Three.js village.
 // Work and life share one map; district navigation only moves the camera.
-// Ambient life is illustrative. Task states and progress come from Yan events.
+// Ambient life is illustrative. Task states and progress come from runtime events.
 
 (() => {
   'use strict';
@@ -154,7 +154,7 @@
       state.actors.set(id, {
         id,
         kind: id.startsWith('sub:') ? 'sub' : 'main',
-        name: id.startsWith('sub:') ? 'Sub Agent' : 'Yan Agent',
+        name: id.startsWith('sub:') ? 'Sub Agent' : 'Z',
         role: '',
         runId: '',
         state: 'idle',
@@ -186,7 +186,7 @@
   }
 
   function residentName(resident) {
-    if (resident.id === 'main' || resident.kind === 'main') return 'Yan Agent';
+    if (resident.id === 'main' || resident.kind === 'main') return 'Z';
     return (resident.role && window.YanSubagentPanel?.nameFor?.(resident.role))
       || resident.name || 'Sub Agent';
   }
@@ -529,7 +529,7 @@
     const root = document.createElement('div');
     root.className = 'wgu-root';
     root.innerHTML = [
-      '<canvas class="wgu-canvas" tabindex="0" aria-label="Yan Work GUI 世界"></canvas>',
+      '<canvas class="wgu-canvas" tabindex="0" aria-label="Z 可视工作区"></canvas>',
       '<header class="wgu-top"><div class="wgu-brand"><strong>云海群岛</strong></div>',
       '<nav class="wgu-scenes" role="tablist" aria-label="世界区域">',
       '<button class="wgu-scene" type="button" role="tab" data-scene="overview">' + icon('map') + '全景</button>',

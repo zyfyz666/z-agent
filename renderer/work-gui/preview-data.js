@@ -8,7 +8,7 @@ const previewSnapshot = {
     {runId:'preview-run-review',sessionId:'preview-review',title:'演示 · 检查界面细节',status:'completed',startedAt:previewNow-120000,finishedAt:previewNow-20000,toolCalls:4}
   ],
   agents: [
-    {id:'main',kind:'main',runId:'preview-run',name:'Yan Agent',role:'',state:'working',zone:'workshop',tool:'edit',label:'修改页面',text:'正在把工作区与任务状态连接起来。',startedAt:previewNow-90000,toolCount:8},
+    {id:'main',kind:'main',runId:'preview-run',name:'Z',role:'',state:'working',zone:'workshop',tool:'edit',label:'修改页面',text:'正在把工作区与任务状态连接起来。',startedAt:previewNow-90000,toolCount:8},
     {id:'sub:read',kind:'sub',runId:'preview-run',name:'Research Agent',role:'researcher',state:'working',zone:'library',tool:'read',label:'阅读项目资料',startedAt:previewNow-60000,toolCount:6},
     {id:'sub:test',kind:'sub',runId:'preview-run',name:'Test Agent',role:'tester',state:'working',zone:'forge',tool:'bash',label:'运行验收测试',startedAt:previewNow-45000,toolCount:3},
     {id:'sub:design',kind:'sub',runId:'preview-run',name:'Build Agent',role:'builder',state:'working',zone:'studio',tool:'image',label:'创作图像',startedAt:previewNow-30000,toolCount:2},
