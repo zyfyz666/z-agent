@@ -2,6 +2,23 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installYanI18n(global) {
   const ZH_EN = Object.freeze({
+    '从这里创建分支': 'Branch conversation from here',
+    '从这里创建分支；共享当前文件，不会回滚文件': 'Branch conversation from here; uses current files without rolling them back',
+    '对话分支来源': 'Conversation branch source', '分支来自': 'Branched from',
+    '返回原对话': 'Return to source conversation', '原对话': 'Source conversation',
+    '共享当前文件；不会回滚文件': 'Uses current files; does not roll back files',
+    '请重启 Z 后使用对话分支': 'Restart Z to use conversation branches',
+    '正在创建对话分支…': 'Creating conversation branch…',
+    '正在加载历史消息，请稍后': 'Loading conversation history. Please wait.',
+    '等待这条消息完成后再创建分支': 'Wait for this message to finish before branching',
+    '消息保存后可创建分支': 'Available after this message is saved',
+    '这条消息已变化，请重新选择分支起点': 'This message changed. Select the branch point again.',
+    '创建对话分支失败，请重试': 'Could not create the conversation branch. Try again.',
+    '对话分支已创建，可在任务列表中打开': 'Conversation branch created. Open it from the task list.',
+    '对话分支已创建，请从任务列表打开': 'Conversation branch created. Please open it from the task list.',
+    '原对话已不存在，当前分支仍可继续': 'The source conversation is no longer available. You can continue this branch.',
+    '无法打开原对话，请重试': 'Could not open the source conversation. Try again.',
+    '分支中的历史记录仅供查看': 'Inherited conversation history is read-only',
     '观察记录': 'Observer history', '选择此对话的观察记录': 'Choose an observation from this conversation',
     '正在读取观察记录…': 'Loading observer history…', '最近一轮': 'Latest run', '当前运行': 'Current run',
     '加载更早记录': 'Load earlier records', '正在加载更早记录…': 'Loading earlier records…',

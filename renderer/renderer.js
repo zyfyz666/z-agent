@@ -2330,6 +2330,7 @@ async function loadSession(id) {
     showSessionLoading('任务打开失败');
     return;
   }
+  if (!activeEntry?.sessionRef) markSessionForkMessagesSaved(s.messages);
   markSessionLoadBaseline(s);
   state.currentSession = s;
   syncAgentInteractionPanel({ resume: true });
@@ -2381,8 +2382,11 @@ async function persistCurrentSession(session) {
       if (state.currentSession?.id === session.id) syncPetFocusedSession(session);
     }
   }
+  const savedMessages = [...(session.messages || [])];
   const saved = await api.saveSession(buildSessionSavePayload(session));
   if (saved?.ok === false || saved?.error) throw new Error(saved.error || '对话保存失败');
+  markSessionForkMessagesSaved(savedMessages);
+  refreshSessionForkActions(session);
   if (saved?.id === session.id && saved.workspace) {
     session.workspace = saved.workspace;
     session.workspaceKind = saved.workspaceKind || 'selected';
@@ -2399,6 +2403,158 @@ function deriveTitle(text) {
 function displaySessionTitle(title) {
   return isDefaultSessionTitle(title) ? '新对话' : title;
 }
+
+// Conversation branches copy a saved message boundary, independently of Git.
+// Keep object identity across history prepends; a DOM index alone is not a
+// stable reference while older pages or a running reply are being added.
+const sessionForkSavedMessages = new WeakSet();
+const sessionForkRequests = new Map();
+const SESSION_FORK_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 14H7l-4 4V4h14v5"/><path d="M14 12h7v7h-4l-3 3z"/></svg>';
+
+function markSessionForkMessagesSaved(messages) {
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (message && typeof message === 'object') sessionForkSavedMessages.add(message);
+  }
+}
+
+function messageForkAnchorText(message) {
+  return JSON.stringify([message.role ?? null, message.ts ?? null, message.id ?? null,
+    message.content ?? '', message.attachments ?? [], message.agentRun?.runId ?? null]);
+}
+
+async function messageForkAnchor(message) {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(messageForkAnchorText(message)));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function sessionMessageForElement(element, session = state.currentSession) {
+  if (!session?.id || element?.dataset.sessionId !== String(session.id)) return null;
+  const messages = session.messages || [];
+  let index = Number(element.dataset.msgIndex);
+  if (element._messageRecord && messages[index] !== element._messageRecord) index = messages.indexOf(element._messageRecord);
+  if (!element._messageRecord && !element.hasAttribute('data-msg-index')) index = -1;
+  if (!Number.isInteger(index) || index < 0 || !messages[index]) return null;
+  element._messageRecord = messages[index];
+  element.dataset.msgIndex = String(index);
+  return { message: messages[index], index, messageIndex: (Number(session.messagesStart) || 0) + index };
+}
+
+function sessionForkDisabledReason(session, target) {
+  if (typeof api.forkSession !== 'function') return '请重启 Z 后使用对话分支';
+  if (sessionForkRequests.has(session?.id)) return '正在创建对话分支…';
+  if (sessionHistoryLoads.has(session)) return '正在加载历史消息，请稍后';
+  const message = target?.message;
+  if (!message || !['user', 'assistant'].includes(message.role)
+      || message.streaming === true || message.pending === true
+      || ['running', 'working', 'pending', 'waiting', 'queued', 'thinking'].includes(message.agentRun?.status)) {
+    return '等待这条消息完成后再创建分支';
+  }
+  if (!sessionForkSavedMessages.has(message)) return '消息保存后可创建分支';
+  return '';
+}
+
+function syncMessageForkAction(element) {
+  if (!element?.matches('.msg.user, .msg.assistant')) return;
+  const target = sessionMessageForElement(element);
+  let actions = element.querySelector(':scope > .msg-actions');
+  if (!actions && !target) return;
+  if (!actions) {
+    actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    element.appendChild(actions);
+  }
+  let button = actions.querySelector('[data-act="fork"]');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'msg-action-btn msg-fork-btn';
+    button.dataset.act = 'fork';
+    button.innerHTML = SESSION_FORK_ICON;
+    button.addEventListener('click', () => { void forkSessionFromMessage(element); });
+    actions.appendChild(button);
+  }
+  const reason = sessionForkDisabledReason(state.currentSession, target);
+  button.disabled = !!reason;
+  button.title = reason || '从这里创建分支；共享当前文件，不会回滚文件';
+  button.setAttribute('aria-label', '从这里创建分支');
+  button.setAttribute('aria-busy', String(sessionForkRequests.has(state.currentSession?.id)));
+}
+
+function refreshSessionForkActions(session = state.currentSession) {
+  if (state.currentSession !== session) return;
+  $$('#messages .msg').forEach(syncMessageForkAction);
+}
+
+async function forkSessionFromMessage(element) {
+  const session = state.currentSession;
+  const target = sessionMessageForElement(element, session);
+  if (!session || !target || !element.isConnected) return null;
+  const disabled = sessionForkDisabledReason(session, target);
+  if (disabled) { toast(disabled); return null; }
+  const loadToken = sessionLoadToken;
+  const anchorText = messageForkAnchorText(target.message);
+  const operation = {};
+  sessionForkRequests.set(session.id, operation);
+  refreshSessionForkActions(session);
+  let created = null;
+  try {
+    // Only wait for a save already in progress. Creating a branch must not
+    // save an unfinished reply, alter a draft, or cancel the source task.
+    const pendingSave = sessionSaveQueues.get(session.id);
+    if (pendingSave) await pendingSave;
+    const localIndex = session.messages.indexOf(target.message);
+    if (localIndex < 0 || localIndex + (Number(session.messagesStart) || 0) !== target.messageIndex
+        || messageForkAnchorText(target.message) !== anchorText) {
+      throw new Error('这条消息已变化，请重新选择分支起点');
+    }
+    const messageAnchor = await messageForkAnchor(target.message);
+    const result = await api.forkSession({ sessionId: session.id, messageIndex: target.messageIndex, messageAnchor });
+    if (result?.ok === false || !result?.session?.id) throw new Error(result?.error || '创建对话分支失败，请重试');
+    created = result.session;
+    try { await refreshSessions(); } catch (error) { console.warn('[session-fork] list refresh failed:', error); }
+    // A completed fork remains in the task list, but cannot steal focus after
+    // the user navigated elsewhere (even away and back to the same source).
+    if (loadToken === sessionLoadToken && state.currentSession === session) {
+      await loadSession(created.id);
+    } else {
+      toast('对话分支已创建，可在任务列表中打开');
+    }
+    return created;
+  } catch (error) {
+    toast(created ? '对话分支已创建，请从任务列表打开' : (error?.message || '创建对话分支失败，请重试'));
+    return created;
+  } finally {
+    if (sessionForkRequests.get(session.id) === operation) sessionForkRequests.delete(session.id);
+    refreshSessionForkActions();
+  }
+}
+
+function renderSessionForkOrigin() {
+  const bar = $('#sessionForkOrigin');
+  if (!bar) return;
+  const origin = state.currentSession?.forkedFrom;
+  const visible = !!origin?.sessionId && !observerPendingSessionId;
+  bar.classList.toggle('hidden', !visible);
+  if (!visible) return;
+  const sourceTitle = state.sessions.find(session => session.id === origin.sessionId)?.title || origin.title || '原对话';
+  $('#sessionForkSourceTitle').textContent = displaySessionTitle(sourceTitle);
+  $('#sessionForkMessageNumber').textContent = Number.isInteger(origin.messageIndex) ? `#${origin.messageIndex + 1}` : '';
+  $('#sessionForkSourceBtn').dataset.sessionId = String(origin.sessionId);
+}
+
+async function openSessionForkSource() {
+  const origin = state.currentSession?.forkedFrom;
+  if (!origin?.sessionId) return;
+  const loadToken = sessionLoadToken;
+  try {
+    const source = await api.getSession(origin.sessionId, { messageLimit: 1 });
+    if (loadToken !== sessionLoadToken) return;
+    if (!source) { toast('原对话已不存在，当前分支仍可继续'); return; }
+    await loadSession(origin.sessionId);
+  } catch { if (loadToken === sessionLoadToken) toast('无法打开原对话，请重试'); }
+}
+
+$('#sessionForkSourceBtn')?.addEventListener('click', () => { void openSessionForkSource(); });
 
 // ============================================================
 // Sidebar toggle
@@ -2463,6 +2619,7 @@ function clearMessages() {
   stopSessionEntryFollow?.();
   historyPrependToken++;
   $('#messages').innerHTML = '';
+  renderSessionForkOrigin();
   invalidateConversationTurns();
   renderTurnScaleNavigation();
 }
@@ -2473,6 +2630,7 @@ function clearMessages() {
 function showSessionLoading(label = '正在打开任务…') {
   stopSessionEntryFollow?.();
   historyPrependToken++;
+  $('#sessionForkOrigin')?.classList.add('hidden');
   const wrap = $('#messages');
   if (!wrap) return;
   wrap.innerHTML = `<div class="session-loading" role="status" aria-live="polite"><span class="session-loading-spinner" aria-hidden="true"></span><span class="session-loading-label">${escapeHtml(label)}</span></div>`;
@@ -2483,6 +2641,13 @@ function showSessionLoading(label = '正在打开任务…') {
 // Rendering a long conversation in one synchronous pass blocked the renderer
 // main thread for hundreds of milliseconds — the comment above on
 function buildHistoryMessageElement(message, index) {
+  // Pages can arrive between animation-frame chunks. Resolve the message in
+  // the current array so an older chunk cannot reuse pre-prepend indices.
+  const currentMessages = state.currentSession?.messages;
+  if (currentMessages && currentMessages[index] !== message) {
+    const currentIndex = currentMessages.indexOf(message);
+    if (currentIndex >= 0) index = currentIndex;
+  }
   const element = appendMessage(
     message.role,
     message.content,
@@ -2677,8 +2842,12 @@ async function loadSessionHistoryBackwards(session, { render = false, maxPages =
   }
   const loading = loadSessionHistoryPages(session, { render, maxPages });
   sessionHistoryLoads.set(session, loading);
+  refreshSessionForkActions(session);
   try { return await loading; }
-  finally { if (sessionHistoryLoads.get(session) === loading) sessionHistoryLoads.delete(session); }
+  finally {
+    if (sessionHistoryLoads.get(session) === loading) sessionHistoryLoads.delete(session);
+    refreshSessionForkActions(session);
+  }
 }
 
 async function loadSessionHistoryPages(session, { render = false, maxPages = 500 } = {}) {
@@ -2702,6 +2871,7 @@ async function loadSessionHistoryPages(session, { render = false, maxPages = 500
     if (pageStart < requestStart || pageStart + page.length !== cursor) {
       throw new Error('历史分页结果不连续，请重启 Z 后重试');
     }
+    markSessionForkMessagesSaved(page);
     session.messages = [...page, ...(Array.isArray(session.messages) ? session.messages : [])];
     session.messagesStart = pageStart;
     if (pageStart <= 0) delete session.messagesTruncated;
@@ -2740,7 +2910,7 @@ function prependRenderedHistory(page, startIndex) {
   try {
     const oldest = wrap.querySelector('.msg');
     const builtBefore = wrap.children.length;
-    for (let i = 0; i < page.length; i++) buildHistoryMessageElement(page[i], startIndex + i);
+    for (let i = 0; i < page.length; i++) buildHistoryMessageElement(page[i], i);
     if (oldest) {
       const fragment = document.createDocumentFragment();
       while (wrap.children.length > builtBefore) fragment.appendChild(wrap.children[builtBefore]);
@@ -2986,8 +3156,11 @@ const subagentPanel = window.YanSubagentPanel?.create?.({
     const runs = new Map();
     for (const [index, message] of (session.messages || []).entries()) {
       if (!message.agentRun) continue;
-      const run = message.agentRun;
-      run.runId ||= session.id + ':history:' + (message.ts || index);
+      // Presentation-only identities must not mutate a saved message: its
+      // original run ID is part of the branch boundary anchor.
+      const run = { ...message.agentRun,
+        runId: message.agentRun.runId || session.id + ':history:' + (message.ts || index),
+        ...(message.forkedHistory ? { forkedHistory: true } : {}) };
       runs.set(run.runId, run);
     }
     const live = getRunCtx(session.id)?.activeAgentRun;
@@ -4824,7 +4997,10 @@ function appendMessage(role, content, attachments = [], animate = true, msgIndex
   const wrap = $('#messages');
   const el = document.createElement('div');
   el.className = `msg ${role}`;
+  el.dataset.sessionId = String(state.currentSession?.id || '');
   if (msgIndex >= 0) el.dataset.msgIndex = msgIndex;
+  if (msgIndex >= 0) el._messageRecord = state.currentSession?.messages?.[msgIndex] || null;
+  if (el._messageRecord?.forkedHistory && agentRun) agentRun = { ...agentRun, forkedHistory: true };
   if (ts) el.dataset.ts = ts;
   if (!animate) el.style.animation = 'none';
 
@@ -4865,6 +5041,7 @@ function appendMessage(role, content, attachments = [], animate = true, msgIndex
   }
 
   el.innerHTML = avatar + bodyHtml + actionsHtml;
+  if (el._messageRecord?.forkedHistory) el.querySelector('[data-act="edit"]')?.remove();
   if (role === 'user' && liveGuidance) renderLiveGuidanceStatus(el, liveGuidance);
   wrap.appendChild(el);
   bindSkillLogoFallbacks(el);
@@ -4888,6 +5065,7 @@ function appendMessage(role, content, attachments = [], animate = true, msgIndex
     btn.addEventListener('click', () => handleMessageAction(btn.dataset.act, el));
   });
   if (role === 'assistant') bindAgentWorkToggle(el);
+  syncMessageForkAction(el);
 
   invalidateConversationTurns();
   if (!suppressChatAutoScroll && (role === 'assistant' || (role === 'user' && animate))) {
@@ -4925,14 +5103,20 @@ function formatHandledDuration(ms) {
 }
 
 async function handleMessageAction(action, el) {
-  const msgIndex = Number(el.dataset.msgIndex);
+  if (action === 'fork') return forkSessionFromMessage(el);
+  const target = sessionMessageForElement(el);
+  const msgIndex = target?.index ?? -1;
   const msgs = state.currentSession?.messages || [];
-  const msg = msgs[msgIndex];
+  const msg = target?.message;
   if (action === 'speak') {
     toggleMessageSpeech(el, el.querySelector('[data-act="speak"]'));
     return;
   }
   if (!msg) return;
+  if (msg.forkedHistory && ['edit', 'rollback'].includes(action)) {
+    toast('分支中的历史记录仅供查看');
+    return;
+  }
 
   if (action === 'copy') {
     try {
@@ -7987,6 +8171,7 @@ function appendAssistantActions(assistantEl, duration, ts = null) {
     btn.addEventListener('click', () => handleMessageAction(btn.dataset.act, assistantEl));
   });
   assistantEl.appendChild(actionsContainer);
+  syncMessageForkAction(assistantEl);
 }
 
 async function attachAgentRunChangeSummary(agentRun, session) {
@@ -10150,6 +10335,8 @@ function syncSessionOpenCodeIdAfterRun(session, agentRun) {
 async function runOpenCodeLoop(session, assistantEl, runCtx) {
   const latestUserMessage = runCtx.requestMessage
     || [...(session.messages || [])].reverse().find(message => message.role === 'user') || {};
+  const requestHistory = runCtx.requestHistory || (session.messages || []).slice(0, -1);
+  const requestMessageIndex = (Number(session.messagesStart) || 0) + requestHistory.length;
   const modelSelection = normalizeModelSelectionSnapshot(runCtx.modelSelection || latestUserMessage.modelSelection || getAgentModelSelection(session));
   setRunModelPresentation(runCtx, modelSelection);
   runCtx.currentRequest = String(latestUserMessage.content || '').trim();
@@ -10165,6 +10352,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
       resolve({ content: agentRun.textContent || '', agentRun });
     });
     try {
+      const requestMessageAnchor = session.forkedFrom ? await messageForkAnchor(latestUserMessage) : '';
       const start = await api.openCodeStartRun({
         runId: openCodeRunId,
         yanSessionId: session.id,
@@ -10173,9 +10361,10 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         modelSelection,
         prompt: String(latestUserMessage.content || ''),
         attachments: latestUserMessage.attachments || [],
+        ...(session.forkedFrom ? { requestMessageIndex, requestMessageAnchor } : {}),
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
         subagentRoles: Array.isArray(latestUserMessage.subagentRoles) ? latestUserMessage.subagentRoles : [],
-        history: (runCtx.requestHistory || (session.messages || []).slice(0, -1)).map(message => {
+        history: requestHistory.map(message => {
           let mediaAssets = Array.isArray(message.mediaAssets)
             ? message.mediaAssets
             : extractMediaAssetsFromAgentRun(message.agentRun);
@@ -11030,10 +11219,12 @@ function renderAssistantMessageActions(assistantEl, agentRun, duration, ts = nul
   actions.querySelectorAll('.msg-action-btn').forEach(btn => {
     btn.addEventListener('click', () => handleMessageAction(btn.dataset.act, assistantEl));
   });
+  syncMessageForkAction(assistantEl);
   return actions;
 }
 
 async function rollbackMessageRun(msg, el) {
+  if (msg.forkedHistory) { toast('分支中的历史记录仅供查看'); return; }
   const ws = state.currentSession?.workspace || state.config?.workspace;
   const sid = state.currentSession?.id;
   const runId = msg.agentRun?.runId;
@@ -11068,6 +11259,7 @@ async function rollbackMessageRun(msg, el) {
       btn.addEventListener('click', () => handleMessageAction(btn.dataset.act, el));
     });
   }
+  syncMessageForkAction(el);
   const messageBody = el.querySelector('.msg-body');
   renderRunChangeSummary(messageBody?.querySelector('.agent-activity-body') || messageBody, msg.agentRun);
   await renderRightSidebarReview({ force: true });
@@ -12365,6 +12557,10 @@ function buildRunChangeSummaryElement(agentRun) {
   const panel = document.createElement('section');
   panel.className = 'run-change-summary' + (rolledBack ? ' is-rolled-back' : '');
   panel.setAttribute('aria-label', `${rolledBack ? '已撤销' : '已编辑'} ${count} 个文件`);
+  const rollbackHtml = agentRun.forkedHistory ? '' : `
+      <button class="run-change-rollback" type="button" data-run-change-rollback title="${rolledBack ? '本轮改动已撤销' : `撤销本轮 ${count} 个文件改动`}" ${rolledBack ? 'disabled' : ''}>
+        <span>${rolledBack ? '已撤销' : '撤销'}</span>${ICONS.arrowUTurnLeft}
+      </button>`;
   panel.innerHTML = `
     <header class="run-change-header">
       <span class="run-change-icon">${ICONS.circleProgressCheck}</span>
@@ -12375,9 +12571,7 @@ function buildRunChangeSummaryElement(agentRun) {
           <span class="run-change-del">-${deletions}</span>
         </span>
       </span>
-      <button class="run-change-rollback" type="button" data-run-change-rollback title="${rolledBack ? '本轮改动已撤销' : `撤销本轮 ${count} 个文件改动`}" ${rolledBack ? 'disabled' : ''}>
-        <span>${rolledBack ? '已撤销' : '撤销'}</span>${ICONS.arrowUTurnLeft}
-      </button>
+      ${rollbackHtml}
     </header>
     <div class="run-change-list">
       ${files.map((file, fileIndex) => {
@@ -12416,7 +12610,7 @@ function buildRunChangeSummaryElement(agentRun) {
         const file = files[fileIndex];
         if (file) {
           const messageEl = panel.closest('.msg.assistant');
-          openRunChangeReview(agentRun, file.path, () => {
+          openRunChangeReview(agentRun, file.path, agentRun.forkedHistory ? null : () => {
             if (messageEl) void handleMessageAction('rollback', messageEl);
           });
         }
@@ -12444,7 +12638,7 @@ function renderRunChangeSummary(bodyEl, agentRun) {
     existing?.remove();
     return null;
   }
-  const signature = JSON.stringify({ rolledBack: !!agentRun.rolledBack, changeSummary: agentRun.changeSummary });
+  const signature = JSON.stringify({ rolledBack: !!agentRun.rolledBack, forkedHistory: !!agentRun.forkedHistory, changeSummary: agentRun.changeSummary });
   if (existing && agentElementRenderState.get(existing)?.signature === signature) return existing;
   const wasExpanded = existing?.classList.contains('is-expanded') === true;
   const summary = buildRunChangeSummaryElement(agentRun);
@@ -22702,6 +22896,7 @@ function bindTaskActions() {
 
 // Update the task bar (title + folder + buttons)
 function updateTaskBar() {
+  renderSessionForkOrigin();
   const bar = $('#taskBar');
   if (!bar) return;
   closeTaskActionsMenu();

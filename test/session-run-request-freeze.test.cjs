@@ -58,6 +58,7 @@ function fixture() {
     buildModelSwitchNotice: () => '', syncCurrentSessionAgentUi() {},
     appendMessage: () => ({}), appendModelSwitchNoticeElement() {}, setEmptyState() {},
     buildSessionSavePayload: session => structuredClone(session), refreshSessions: async () => {}, updateTaskBar() {},
+    markSessionForkMessagesSaved() {}, refreshSessionForkActions() {},
     initOpenCodeRunState() {},
     attachOpenCodeRunEventListeners(_run, callback) { complete = callback; return () => {}; },
     openCodeResultToAgentRun: value => value,

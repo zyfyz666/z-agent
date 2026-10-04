@@ -10,6 +10,7 @@ const crypto = require('node:crypto');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
 const { taskWorkspaceRoot, ensureTaskWorkspace } = require('../lib/task-workspace');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
+const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -51,7 +52,7 @@ function fixture(t) {
       return fs.promises.writeFile(...args);
     } }, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
-    sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue,
+    sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
     MODEL_PROVIDERS: providers,
     loadConfig: () => structuredClone(config),
     saveConfig() { throw new Error('session model changes must not write global config'); },

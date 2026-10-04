@@ -30,7 +30,7 @@ test('an older delayed conversation cannot replace the chosen chat or observer',
     'syncAgentBrowserVisibility', 'syncPetFocusedSession', 'restoreComposerDraftForSession', 'renderMessages',
     'setEmptyState', 'ensureEarlierMessagesBar', 'syncCurrentSessionAgentUi', 'showTyping',
     'renderRightSidebarReview', 'updateTaskBar', 'updateSendState', 'renderSessionList', 'renderModelBadge',
-    'syncAgentInteractionPanel']) context[name] = () => {};
+    'syncAgentInteractionPanel', 'markSessionForkMessagesSaved']) context[name] = () => {};
   vm.createContext(context);
   vm.runInContext(renderer.slice(renderer.indexOf('async function loadSession(id)'), renderer.indexOf('async function saveCurrentSession(')), context);
   const b = context.loadSession('B');
@@ -49,6 +49,7 @@ test('an older delayed conversation cannot replace the chosen chat or observer',
 function pagingContext(session, getPage) {
   const context = { state: { currentSession: session }, sessionHistoryLoads: new WeakMap(), EARLIER_MESSAGES_PAGE: 60,
     api: { getSessionMessages: getPage },
+    markSessionForkMessagesSaved() {}, refreshSessionForkActions() {},
     rebaseRenderedMessageIndices() {}, prependRenderedHistory() {}, ensureEarlierMessagesBar() {}, renderWdMonitor() {} };
   vm.createContext(context);
   vm.runInContext(renderer.slice(renderer.indexOf('async function loadSessionHistoryBackwards('),

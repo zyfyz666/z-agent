@@ -271,6 +271,16 @@
           </div>
         </div>
 
+        <div id="sessionForkOrigin" class="session-fork-origin hidden" aria-label="对话分支来源">
+          <span class="session-fork-label">分支来自</span>
+          <button id="sessionForkSourceBtn" class="session-fork-source" type="button" title="返回原对话" aria-label="返回原对话">
+            <span id="sessionForkSourceTitle" data-preserve-language></span>
+            <span id="sessionForkMessageNumber" class="session-fork-position"></span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 10-4-4 4-4M5 6h9a5 5 0 0 1 0 10h-2"/></svg>
+          </button>
+          <span class="session-fork-files">共享当前文件；不会回滚文件</span>
+        </div>
+
         <div id="browserFocusConversationDock" class="browser-focus-conversation-dock collapsed">
           <div class="browser-focus-conversation-surface conversation-preview-shell">
             <button id="browserFocusChatToggle" class="browser-focus-chat-toggle conversation-preview-row" type="button" aria-expanded="false" aria-controls="chatScroll">

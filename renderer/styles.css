@@ -5113,6 +5113,45 @@ body.is-mac .welcome-logo-mac { display: block; filter: none; }
   color: var(--text);
 }
 .msg-action-btn.is-reading { color: var(--accent); }
+.msg-fork-btn:disabled { opacity: .4; cursor: default; }
+.msg-fork-btn:disabled:hover { background: transparent; color: var(--text-faint); }
+.msg-fork-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.session-fork-origin {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 4px 7px;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.session-fork-source {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: min(58%, 420px);
+  gap: 5px;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.session-fork-source:hover { color: var(--text); background: var(--bg-hover); }
+.session-fork-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#sessionForkSourceTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-fork-source svg, .session-fork-position { flex: 0 0 auto; }
+.session-fork-position { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.session-fork-files { margin-left: auto; }
+@media (max-width: 700px) {
+  .session-fork-origin { padding-inline: 12px; }
+  .session-fork-files { flex-basis: 100%; margin-left: 0; }
+}
 .msg-action-btn.is-reading svg { animation: tts-speaker-pulse 1.1s ease-in-out infinite; }
 @keyframes tts-speaker-pulse {
   0%, 100% { opacity: 1; }

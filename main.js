@@ -95,6 +95,7 @@ const { detectVsCode, launchVsCode } = require('./lib/vscode-launcher');
 const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
 const { normalizeObserverSettings } = require('./lib/observer-model');
+const { forkBoundary, createSessionForkRecord, isForkSession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
 const workspaceSandbox = require('./lib/workspace-sandbox');
 const { classifyDelegatedShellCommand } = require('./lib/shell-command-risk');
 const {
@@ -6978,6 +6979,7 @@ function toSessionSummary(data) {
     workspaceKind: data.workspaceKind || (data.workspace ? 'selected' : 'default'),
     parentSessionId: data.parentSessionId || '',
     hasHandoff: !!data.handoff,
+    ...(data.forkedFrom ? { forkedFrom: data.forkedFrom } : {}),
     pinned: !!data.pinned,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
@@ -7017,6 +7019,49 @@ async function createFreshSessionRecord(options = {}) {
   Object.assign(session, await ensureTaskWorkspace(session, { root: defaultTasksRoot }));
   await fsp.writeFile(sessionPath(id), JSON.stringify(session, null, 2));
   return session;
+}
+
+async function forkSessionRecord(boundary = {}) {
+  const sourceId = String(boundary.sessionId || '');
+  if (!isSafeSessionId(sourceId)) throw Object.assign(new Error('来源对话 ID 无效。'), { code: 'SESSION_FORK_SOURCE_NOT_FOUND' });
+  return withSessionWrite(sourceId, async () => {
+    ensureDirs();
+    // Read the durable record directly: legacy read migrations must not edit
+    // the source conversation as a side effect of creating its branch.
+    const text = await fsp.readFile(sessionPath(sourceId), 'utf8').catch(error => {
+      if (error.code === 'ENOENT') throw Object.assign(new Error('来源对话不存在。'), { code: 'SESSION_FORK_SOURCE_NOT_FOUND' });
+      throw error;
+    });
+    const source = JSON.parse(text);
+    forkBoundary(source, boundary);
+    const resolved = await ensureTaskWorkspace(source, { root: defaultTasksRoot, dataDirectory: dataDir });
+    const workspaceStat = await fsp.stat(resolved.workspace).catch(() => null);
+    if (!workspaceStat?.isDirectory()) throw Object.assign(new Error('来源任务文件夹不存在，无法共享文件创建分支。'), { code: 'SESSION_FORK_WORKSPACE_UNAVAILABLE' });
+    const cfg = loadConfig();
+    const candidates = composerConnections(cfg).flatMap(connection => connection.models.map(model => ({
+      providerId: connection.providerId, supplierId: connection.supplierId, modelId: model.id
+    })));
+    const id = `sess_${Date.now().toString(36)}${crypto.randomBytes(6).toString('hex')}`;
+    const session = createSessionForkRecord(source, boundary, { id, workspace: resolved.workspace,
+      defaultSelection: cfg.agentModel, candidates });
+    await writeSessionFileAtomic(sessionPath(id), JSON.stringify(session, null, 2));
+    await refreshSessionSummaryCache(id, session);
+    notifyDesktopSessionUpdate({ id, reason: 'fork-created', sourceSessionId: sourceId });
+    const { tail, messagesStart } = selectTailMessages(session.messages, 40);
+    return { ok: true, session: messagesStart > 0 ? { ...session, messages: tail,
+      totalMessages: session.messages.length, messagesStart, messagesTruncated: true } : session };
+  });
+}
+
+async function persistForkKernelBinding(sessionId, openCodeSessionId) {
+  if (!isSafeSessionId(sessionId) || !String(openCodeSessionId || '').trim()) return;
+  return withSessionWrite(sessionId, async () => {
+    const stored = await readSessionRecord(sessionId, { sessionLocked: true });
+    if (!isForkSession(stored) || stored.openCodeSessionId === openCodeSessionId) return;
+    const updated = { ...stored, openCodeSessionId: String(openCodeSessionId) };
+    await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(updated, null, 2));
+    await refreshSessionSummaryCache(sessionId, updated);
+  });
 }
 
 async function validateHandoffTarget(sourceWorkspace, targetWorkspace) {
@@ -7269,6 +7314,11 @@ ipcMain.handle('session:create', async (_e, options = {}) => {
   return result.session;
 });
 
+ipcMain.handle('session:fork', async (_e, boundary = {}) => {
+  try { return await forkSessionRecord(boundary); }
+  catch (error) { return { ok: false, error: error.message, code: error.code || 'SESSION_FORK_FAILED' }; }
+});
+
 // Session JSON is the only durable copy of the conversation. Write to a
 // temporary file and rename so a crash mid-write cannot truncate it.
 // 保存/改名/置顶等写操作后,顺手刷新摘要缓存,
@@ -7317,6 +7367,7 @@ ipcMain.handle('session:save', async (_e, session) => {
         delete persisted.totalMessages;
       }
     }
+    persisted = preserveForkAuthority(stored, persisted);
     Object.assign(persisted, await ensureTaskWorkspace(persisted, {
       root: defaultTasksRoot, dataDirectory: dataDir, previousSession: stored
     }));
@@ -9348,6 +9399,9 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     if (request.yanSessionId && !authoritativeSession && request.utility !== true) {
       throw Object.assign(new Error('会话不存在，请重新打开对话。'), { code: 'session-not-found' });
     }
+    delete request.forkHistory;
+    const forkContext = forkRunContext(authoritativeSession, request);
+    if (forkContext) Object.assign(request, forkContext);
     const cfg = loadConfig();
     const requestedModel = Object.prototype.hasOwnProperty.call(request, 'modelSelection')
       ? request.modelSelection : (authoritativeSession?.modelSelection || (request.utility === true ? null : cfg.agentModel));
@@ -9408,7 +9462,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     for (const key of Object.keys(request)) if (!(key in isolated)) delete request[key];
     Object.assign(request, isolated);
     const agiMode = agiEnabled(request);
-    const retrievedMemory = request.utility
+    const retrievedMemory = request.utility || forkContext
       ? { context: '' }
       : longTermMemory.query({
         query: memoryQuery,
@@ -9637,7 +9691,15 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         ? { reasoningSpeed: raiseReasoningSpeed(cfg.api?.reasoningSpeed, escalationHint.steps) }
         : {})
     });
+    let forkBindingWrite = Promise.resolve();
+    const recordForkBinding = nativeId => {
+      if (!forkContext || !nativeId) return forkBindingWrite;
+      forkBindingWrite = forkBindingWrite.then(() => persistForkKernelBinding(yanSessionId, nativeId))
+        .catch(error => console.warn('[session-fork] Kernel binding could not be saved:', error?.message || error));
+      return forkBindingWrite;
+    };
     const emitOpenCodeEvent = event => {
+      if (event?.type === 'yan.opencode.started') void recordForkBinding(event.data?.sessionID);
       if (event?.type === 'yan.delivery.contract.updated') {
         const activeRun = openCodeActiveRuns.get(runId);
         if (activeRun) activeRun.deliveryContract = event.data?.contract || null;
@@ -9703,9 +9765,9 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       behaviorPolicies,
       visionRelay: relayed.relay,
       visionRelayEnabled: cfg.api?.visionRelayEnabled !== false,
-      handoff: authoritativeSession?.handoff || null,
+      handoff: forkContext ? null : authoritativeSession?.handoff || null,
       memoryContext: retrievedMemory.context || '',
-      harnessContext
+      harnessContext: forkContext ? '' : harnessContext
     }, emitOpenCodeEvent);
     openCodeActiveRuns.set(runId, {
       ...openCodeActiveRuns.get(runId),
@@ -9719,6 +9781,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       prompt: relayed.prompt || prompt
     });
     task.then(async result => {
+      await recordForkBinding(result?.openCodeSessionId);
       if (coreTurnStarted) yanCore.completeTurn(runId, result);
       try {
         if (evolutionMode) recordAgiTrajectory({ runId, workspace, result });
