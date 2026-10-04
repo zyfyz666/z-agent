@@ -24,8 +24,27 @@ async function launch() {
   assert.equal(path.resolve(await application.evaluate(({ app }) => app.getPath('userData'))), path.resolve(profile));
 }
 async function open(mode) {
-  await page.locator(mode === 'main' ? '#zApiPill' : '#zObserverPill').click();
+  if (mode === 'main') {
+    await page.locator('#modelPill').click();
+    await page.waitForFunction(() => !document.querySelector('#modelQuickMenu').classList.contains('hidden') && document.querySelector('#modelQuickMenu').getAttribute('aria-busy') === 'false');
+    assert.equal(await page.locator('#modelQuickSupplier').isVisible(), true);
+    assert.equal(await page.locator('#modelQuickList').isVisible(), true);
+    assert.equal(await page.locator('#reasoningSpeedSlider').isVisible(), true);
+    await page.locator('#modelQuickMenu').evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished.catch(() => {}))));
+    return;
+  }
+  await page.locator('#zObserverPill').click();
   await page.waitForFunction(() => document.querySelector('#zConnectionDialog').open && !document.querySelector('#zConnectionSelect').disabled);
+}
+async function selectMain(connection) {
+  await open('main');
+  await page.locator('#modelQuickSupplier').selectOption(key(connection));
+  const choices = page.locator('#modelQuickList [data-model-picker-model]');
+  assert.equal(await choices.count(), 1);
+  assert.equal(await choices.first().getAttribute('data-model-picker-provider'), connection.providerId);
+  await choices.first().click();
+  await page.waitForFunction(provider => state.config.agentModel.providerId === provider && !modelPickerSaving, connection.providerId);
+  await page.locator('#modelPill').click();
 }
 async function save() {
   await page.locator('#zConnectionSave').click();
@@ -38,7 +57,8 @@ async function publicState() { return page.evaluate(async () => {
   try {
     await launch();
     await page.evaluate(() => applyTheme('dark'));
-    assert.equal(await page.locator('#zApiPill').isVisible(), true);
+    assert.equal(await page.locator('#zApiPill').count(), 0, 'no separate API button');
+    assert.equal(await page.locator('#modelPill').isVisible(), true);
     assert.equal(await page.locator('#zObserverPill').isVisible(), true);
     await open('observer');
     assert.equal(await page.locator('#zConnectionSelect').inputValue(), 'rules');
@@ -58,8 +78,11 @@ async function publicState() { return page.evaluate(async () => {
     const safe = await page.evaluate(() => yan.listModelConnections());
     assert.doesNotMatch(JSON.stringify(safe), /isolated-test-secret|127\.0\.0\.1/);
     await open('main');
-    await page.locator('#zConnectionSelect').selectOption(key(main));
-    await save();
+    await page.locator('#modelQuickSupplier').selectOption(key(observer));
+    await shot('00-supplier-model-menu');
+    await page.keyboard.press('Escape');
+    assert.equal((await publicState()).agentModel.providerId, main.providerId, 'browsing a supplier does not change the active connection');
+    await selectMain(main);
     assert.equal((await publicState()).agentModel.providerId, main.providerId);
     report.checks.push('composer API selection');
     await open('observer');
@@ -78,12 +101,15 @@ async function publicState() { return page.evaluate(async () => {
     assert.equal(cfg.observer.judgeEvery, 3);
     assert.equal(cfg.agentModel.providerId, main.providerId);
     report.checks.push('independent model and interval');
-    await open('main');
-    await page.locator('#zConnectionSelect').selectOption(key(observer)); await save();
+    await selectMain(observer);
     assert.equal((await publicState()).observer.model.providerId, observer.providerId);
-    await open('main'); await page.locator('#zConnectionSelect').selectOption(key(main)); await save();
+    await selectMain(main);
     assert.equal((await publicState()).observer.judgeEvery, 3);
     await page.evaluate(() => applyLanguage('en'));
+    await open('main');
+    assert.equal(await page.locator('label[for="modelQuickSupplier"]').innerText(), 'Provider');
+    await shot('00-supplier-model-english');
+    await page.keyboard.press('Escape');
     await open('observer');
     assert.equal(await page.locator('#zConnectionTitle').innerText(), 'Observer settings');
     assert.equal(await page.locator('#zObserverDetails summary').innerText(), 'Details');
@@ -106,11 +132,16 @@ async function publicState() { return page.evaluate(async () => {
       const rect = document.querySelector('#modelPill').getBoundingClientRect();
       return rect.bottom <= innerHeight;
     });
-    for (const selector of ['#zApiPill', '#zObserverPill', '#modelPill']) {
+    for (const selector of ['#zObserverPill', '#modelPill']) {
       const box = await page.locator(selector).boundingBox();
       assert.ok(box && box.x >= 0 && box.x + box.width <= 1000 && box.y + box.height <= 760, `${selector} remains inside the window`);
     }
     await shot('04-narrow');
+    await open('main');
+    const menuBox = await page.locator('#modelQuickMenu').boundingBox();
+    assert.ok(menuBox.x >= 0 && menuBox.y >= 0 && menuBox.x + menuBox.width <= 1000 && menuBox.y + menuBox.height <= 760);
+    await shot('05-narrow-model-menu');
+    await page.keyboard.press('Escape');
     await page.locator('[data-observer-config]').click();
     await page.waitForFunction(() => document.querySelector('#zConnectionDialog').open);
     await page.locator('#zConnectionCancel').click();

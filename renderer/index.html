@@ -468,7 +468,6 @@
 
               <!-- Composer controls share one bottom toolbar. -->
               <div class="composer-toolbar-controls">
-                <button id="zApiPill" class="ws-pill z-connection-pill" type="button" aria-haspopup="dialog" aria-controls="zConnectionDialog" title="切换 API 连接">API · <span id="zApiName">选择连接</span></button>
                 <button id="zObserverPill" class="ws-pill z-connection-pill" type="button" aria-haspopup="dialog" aria-controls="zConnectionDialog" title="配置观察者模型和检查间隔">观察者 · <span id="zObserverName">规则</span></button>
                 <div id="modelPickerWrap" class="model-picker-wrap">
                   <button id="modelPill" class="ws-pill model-pill" type="button" title="选择模型与推理强度" aria-haspopup="dialog" aria-controls="modelQuickMenu" aria-expanded="false">
@@ -486,6 +485,10 @@
                     <span id="modelPillSpeed" class="model-pill-speed">中</span>
                   </button>
                   <section id="modelQuickMenu" class="model-quick-menu hidden" role="dialog" aria-label="模型与推理强度" aria-hidden="true" aria-busy="false" data-view="control">
+                    <div class="model-quick-supplier-field">
+                      <label for="modelQuickSupplier">供应商</label>
+                      <select id="modelQuickSupplier" disabled></select>
+                    </div>
                     <div id="modelQuickDefaultView" class="model-quick-view">
                       <button id="modelQuickModelRoute" class="model-quick-route" type="button" aria-controls="modelQuickModelsView" aria-expanded="false" aria-label="选择模型">
                         <span id="modelQuickRouteModel" class="model-quick-route-label">—</span>
@@ -500,6 +503,7 @@
                       <div id="modelQuickBillingNote" class="reasoning-speed-billing is-empty"></div>
                     </div>
                     <div id="modelQuickModelsView" class="model-quick-view hidden" aria-label="可选模型">
+                      <span class="model-quick-field-label">模型</span>
                       <div id="modelQuickList" class="model-quick-list" role="listbox" aria-label="可用模型"></div>
                     </div>
                     <div id="modelPickerMenuNotice" class="model-selector-notice" role="status" aria-live="polite" hidden></div>

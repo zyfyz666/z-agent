@@ -21252,12 +21252,21 @@ function renderModelPickerChoices() {
     .filter(Boolean);
   if (!lists.length) return;
   const models = quickTextModels();
+  const suppliers = $('#modelQuickSupplier');
+  const connections = quickModelsCache?.connections || [];
+  const supplierKey = item => JSON.stringify([item.providerId, item.supplierId]);
+  const selectedConnection = connections.find(item => supplierKey(item) === supplierKey(modelPickerDraft)) || connections[0];
+  if (suppliers) {
+    suppliers.replaceChildren(...connections.map(item => new Option(item.name, supplierKey(item))));
+    if (selectedConnection) suppliers.value = supplierKey(selectedConnection);
+    suppliers.disabled = !connections.length || modelPickerSaving;
+  }
   if (!models.length) {
     const empty = `<div class="model-picker-empty">${escapeHtml(quickModelsCache?.notice || '当前没有可用的文本模型。')}</div>`;
     lists.forEach(list => { list.innerHTML = empty; });
     return;
   }
-  const menuHtml = models.map(model => {
+  const menuHtml = models.filter(model => selectedConnection && supplierKey(model) === supplierKey(selectedConnection)).map(model => {
     const providerId = String(model.providerId || '');
     const supplierId = String(model.supplierId || '');
     const modelId = String(model.id || '');
@@ -21351,9 +21360,13 @@ async function refreshQuickModels({ showLoading = false } = {}) {
     list.innerHTML = '<div class="model-picker-empty">正在读取模型…</div>';
   }
   try {
-    const payload = await api.listQuickModels();
+    const payload = await api.listModelConnections();
     if (sequence !== modelPickerRefreshSequence) return null;
-    quickModelsCache = payload && Array.isArray(payload.models) ? payload : { models: [] };
+    const connections = payload?.connections || [];
+    quickModelsCache = { connections, models: connections.flatMap(connection => connection.models.map(model => ({
+      ...model, modelType: 'text', providerId: connection.providerId, supplierId: connection.supplierId,
+      providerName: connection.name, supplierName: connection.name
+    }))) };
     renderModelPickerWizard();
     setModelPickerMenuNotice();
     return payload;
@@ -21381,8 +21394,9 @@ function setModelQuickView(view = 'control', { focus = true } = {}) {
   const route = $('#modelQuickModelRoute');
   modelQuickView = nextView;
   menu?.setAttribute('data-view', nextView);
-  defaultView?.classList.toggle('hidden', nextView !== 'control');
-  modelsView?.classList.toggle('hidden', nextView !== 'models');
+  // Supplier, models and reasoning remain together in this one popover.
+  defaultView?.classList.remove('hidden');
+  modelsView?.classList.remove('hidden');
   route?.setAttribute('aria-expanded', String(nextView === 'models'));
   if (nextView === 'models') {
     const list = $('#modelQuickList');
@@ -21472,6 +21486,7 @@ async function selectModelFromMenu(option) {
   }
   setModelPickerMenuNotice();
   modelPickerSaving = true;
+  $('#modelQuickSupplier').disabled = true;
   option.setAttribute('aria-busy', 'true');
   try {
     const nextConfig = await api.setModelRole(
@@ -21496,6 +21511,7 @@ async function selectModelFromMenu(option) {
   } finally {
     modelPickerSaving = false;
     option.removeAttribute('aria-busy');
+    renderModelPickerChoices();
   }
 }
 
@@ -21552,7 +21568,6 @@ async function saveModelPicker() {
 
 function renderModelBadge() {
   window.ZConnectionControls?.mount({ api, config: state.config, onNotice: toast, onLayoutChange: scheduleComposerGrow,
-    onMainChange: config => { state.config = config; quickModelsCache = null; renderModelBadge(); },
     onObserverChange: observer => { state.config.observer = observer; renderModelBadge(); }
   });
   const selection = getAgentModelSelection();
@@ -22888,6 +22903,16 @@ function bindUI() {
     else closeModelPicker({ restoreFocus: true });
   });
   $('#modelQuickMenu')?.addEventListener('click', event => event.stopPropagation());
+  $('#modelQuickSupplier')?.addEventListener('change', event => {
+    if (isModelPickerBusy()) return;
+    const connection = quickModelsCache?.connections.find(item => JSON.stringify([item.providerId, item.supplierId]) === event.target.value);
+    if (!connection) return;
+    const current = getAgentModelSelection();
+    Object.assign(modelPickerDraft, { providerId: connection.providerId, supplierId: connection.supplierId,
+      modelId: current.providerId === connection.providerId && current.supplierId === connection.supplierId ? current.modelId : '' });
+    setModelPickerMenuNotice();
+    renderModelPickerChoices();
+  });
   $('#modelQuickModelRoute')?.addEventListener('click', event => {
     event.stopPropagation();
     setModelQuickView('models');
