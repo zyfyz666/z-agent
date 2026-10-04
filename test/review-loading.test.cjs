@@ -11,10 +11,10 @@ const { summarizeOpenCodeToolChanges, collectWorkspaceFileSweep } = require('../
 const { OpenCodeSidecar } = require('../lib/opencode-sidecar');
 
 function workspace(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-loading-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-loading-'));
   t.after(() => {
     assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(root).startsWith('yan-review-loading-'));
+    assert.ok(path.basename(root).startsWith('z-review-loading-'));
     fs.rmSync(root, { recursive: true, force: true });
   });
   return root;

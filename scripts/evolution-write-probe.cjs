@@ -4,7 +4,7 @@
 // "模型想进化 → 被 AGENTS.md 拒绝 → 硬性写入 → 刚写入就被清空".
 //
 // Boots the real kernel with the coding-environment plugin in a workspace
-// that has AGENTS.md + a pre-seeded .yanagent/harness/harness-state.json,
+// that has AGENTS.md + a pre-seeded .zagent/harness/harness-state.json,
 // drives a run whose task is a direct evolution write, then replays the
 // post-run harness normalization (continual-harness load → apply review →
 // atomicWrite) and checks whether the model's entry survived.
@@ -18,12 +18,12 @@ const { OpenCodeSidecar, buildOpenCodeConfig, stageCodingEnvironmentModule } = r
 const continualHarness = require('../lib/continual-harness');
 
 const appRoot = path.resolve(__dirname, '..');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-evo-probe-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-evo-probe-'));
 const workspace = path.join(root, 'workspace');
-fs.mkdirSync(path.join(workspace, '.yanagent', 'harness'), { recursive: true });
-fs.writeFileSync(path.join(workspace, 'AGENTS.md'), 'EVO_RULE_741: keep entries inside .yanagent/harness.\n');
+fs.mkdirSync(path.join(workspace, '.zagent', 'harness'), { recursive: true });
+fs.writeFileSync(path.join(workspace, 'AGENTS.md'), 'EVO_RULE_741: keep entries inside .zagent/harness.\n');
 
-const statePath = path.join(workspace, '.yanagent', 'harness', 'harness-state.json');
+const statePath = path.join(workspace, '.zagent', 'harness', 'harness-state.json');
 const seeded = {
   version: 1,
   entries: { memory: {}, prompt: {}, skill: {}, subagent: {} },
@@ -99,7 +99,7 @@ const server = http.createServer((req, res) => {
     const result = await sidecar.run({
       runId: 'evo-741', providerId: 'fixture', modelId: 'evo-fixture',
       workspace, hasUserWorkspace: true, workMode: 'normal', accessMode: 'full',
-      openCodeConfig: config, prompt: 'EVO_TASK_741 把进化记录写入 .yanagent/harness/harness-state.json'
+      openCodeConfig: config, prompt: 'EVO_TASK_741 把进化记录写入 .zagent/harness/harness-state.json'
     });
     assert.equal(result.status, 'done', result.error);
 
@@ -112,7 +112,7 @@ const server = http.createServer((req, res) => {
     const { ContinualHarnessStore } = continualHarness;
     const harnessStore = new ContinualHarnessStore({
       globalPath: path.join(dataDir, 'harness', 'harness-state.json'),
-      yanagentDir: '.yanagent'
+      zagentDir: '.zagent'
     });
     const state = harnessStore.load({ scope: 'workspace', workspace });
     state.entries.memory = state.entries.memory || {};

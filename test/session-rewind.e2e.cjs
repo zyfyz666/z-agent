@@ -104,8 +104,8 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -170,7 +170,7 @@ async function switchTo(id) {
   await page.waitForFunction(id => state.currentSession?.id === id && !observerPendingSessionId, id);
 }
 
-async function readSession(id) { return page.evaluate(id => yan.getSession(id), id); }
+async function readSession(id) { return page.evaluate(id => z.getSession(id), id); }
 
 function anchor(message) {
   return crypto.createHash('sha256').update(JSON.stringify([message.role ?? null, message.ts ?? null,
@@ -187,12 +187,12 @@ async function runDirect(session, action, extra = {}) {
   await page.evaluate(({ session, action, runId, extra }) => {
     window.rewindDirectRuns ||= {};
     window.rewindDirectRuns[runId] = { pending: true };
-    const stop = yan.onOpenCodeCompleted(detail => {
+    const stop = z.onOpenCodeCompleted(detail => {
       if (detail.runId !== runId) return;
       window.rewindDirectRuns[runId] = detail.result;
       stop();
     });
-    yan.openCodeStartRun({ runId, yanSessionId: session.id, utility: true,
+    z.openCodeStartRun({ runId, zSessionId: session.id, utility: true,
       conversationRevision: session.conversationRevision || 0,
       openCodeSessionId: session.openCodeSessionId || '', history: session.messages,
       handoff: session.handoff || null, prompt: `REWIND_RUN_${action}_8264: Reply with the fixture confirmation.`,
@@ -346,14 +346,14 @@ function historicalContent(messages) {
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     await launch();
-    assert.equal(await page.evaluate(() => typeof yan.rewindSession), 'function');
-    assert.equal(await page.evaluate(() => typeof yan.restoreSessionRewind), 'function');
+    assert.equal(await page.evaluate(() => typeof z.rewindSession), 'function');
+    assert.equal(await page.evaluate(() => typeof z.restoreSessionRewind), 'function');
     const selections = await page.evaluate(async ({ port, modelIds }) => {
-      const saved = await yan.connectionsSave({ name: 'Session rewind fixture', preset: 'openai', apiFormat: 'openai',
+      const saved = await z.connectionsSave({ name: 'Session rewind fixture', preset: 'openai', apiFormat: 'openai',
         baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'local-fixture-only' });
       if (!saved.ok) throw new Error(saved.error);
-      await yan.setConfig({ api: { reasoningSpeed: 'low' }, agent: { accessMode: 'full' } });
-      state.config = await yan.getConfig(); renderModelBadge();
+      await z.setConfig({ api: { reasoningSpeed: 'low' }, agent: { accessMode: 'full' } });
+      state.config = await z.getConfig(); renderModelBadge();
       return Object.fromEntries(Object.entries(modelIds).map(([name, modelId]) => [name,
         { providerId: saved.connection.providerId, supplierId: saved.connection.supplierId,
           modelId, modelType: 'text', name: modelId, capabilities: {} }]));
@@ -361,7 +361,7 @@ function historicalContent(messages) {
     const originalWatchdog = observerSnapshot(markers.originalObserver, 1_800_000_000_053);
     const laterWatchdog = observerSnapshot(markers.futureObserver, 1_800_000_000_111);
     ({ source, other } = await page.evaluate(async ({ markers, cutoff, originalWatchdog, laterWatchdog, selections }) => {
-      const session = await yan.createSession(true);
+      const session = await z.createSession(true);
       session.title = 'Rewind source fixture';
       session.messages = Array.from({ length: 112 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user',
         content: `Earlier rewind fixture message ${index}`, ts: 1_800_000_000_000 + index }));
@@ -379,30 +379,30 @@ function historicalContent(messages) {
       session.handoff = { id: 'rewind-future-handoff', context: markers.handoff,
         messages: [{ role: 'user', content: markers.future }], sourceSessionId: 'fixture-prior-source',
         sourceTitle: 'Earlier handoff', targetWorkspace: session.workspace };
-      await yan.saveSession(session);
-      const modelResult = await yan.setSessionModel(session.id, selections.later);
+      await z.saveSession(session);
+      const modelResult = await z.setSessionModel(session.id, selections.later);
       if (!modelResult.ok) throw new Error(modelResult.error);
-      await yan.setSessionPinned(session.id, true);
-      const other = await yan.createSession(true);
+      await z.setSessionPinned(session.id, true);
+      const other = await z.createSession(true);
       other.messages = [{ role: 'user', content: 'Other retained task context', ts: 1_800_000_001_000 },
         { role: 'assistant', content: 'Other completed task response', ts: 1_800_000_001_001 }];
-      await yan.saveSession(other);
-      await yan.renameSession(other.id, 'Independent navigation fixture');
+      await z.saveSession(other);
+      await z.renameSession(other.id, 'Independent navigation fixture');
       await refreshSessions();
-      return { source: await yan.getSession(session.id), other };
+      return { source: await z.getSession(session.id), other };
     }, { markers, cutoff, originalWatchdog, laterWatchdog, selections }));
     assert.ok(path.resolve(source.workspace).startsWith(path.resolve(profile) + path.sep));
     markerFile = path.join(source.workspace, 'current-file-marker.txt');
     fs.writeFileSync(markerFile, markers.file);
     const seeded = await runDirect(source, 'SOURCE_SEED');
     source = await page.evaluate(async ({ id, nativeId }) => {
-      const saved = await yan.getSession(id);
+      const saved = await z.getSession(id);
       saved.openCodeSessionId = nativeId;
-      await yan.saveSession(saved);
-      return yan.getSession(id);
+      await z.saveSession(saved);
+      return z.getSession(id);
     }, { id: source.id, nativeId: seeded.openCodeSessionId });
     compressionArmed = true;
-    const compressed = await page.evaluate(id => yan.openCodeCompressSession(id), source.id);
+    const compressed = await page.evaluate(id => z.openCodeCompressSession(id), source.id);
     compressionArmed = false;
     assert.equal(compressed.ok, true, compressed.error);
     report.originalNative = await inspectNative(source);
@@ -420,7 +420,7 @@ function historicalContent(messages) {
     await page.evaluate(text => setComposerText(text), markers.sourceDraft);
     const staleTail = await page.evaluate(() => structuredClone(state.currentSession));
     await installResponseGate();
-    const beforeCount = (await page.evaluate(() => yan.listSessions())).length;
+    const beforeCount = (await page.evaluate(() => z.listSessions())).length;
     await application.evaluate(() => { globalThis.rewindTestGate.hold = true; });
     await clickSelectedRewind(true);
     await waitGate();
@@ -434,7 +434,7 @@ function historicalContent(messages) {
     await page.waitForFunction(id => !sessionRewindRequests.has(id), source.id);
     assert.equal(await page.evaluate(() => state.currentSession.id), other.id, 'late rewind response does not steal navigation');
     assert.equal(await page.evaluate(() => getComposerText()), markers.otherDraft);
-    assert.equal((await page.evaluate(() => yan.listSessions())).length, beforeCount + 1);
+    assert.equal((await page.evaluate(() => z.listSessions())).length, beforeCount + 1);
     source = await readSession(source.id);
     assert.equal(source.id, original.id);
     assert.equal(source.conversationRevision, 1);
@@ -466,7 +466,7 @@ function historicalContent(messages) {
 
     for (const stale of [original, staleTail]) {
       const result = await page.evaluate(async stale => {
-        try { return await yan.saveSession(stale); }
+        try { return await z.saveSession(stale); }
         catch (error) { return { error: error.message, code: error.code }; }
       }, stale);
       assert.ok(result.ok === false || result.error, 'stale save is explicitly rejected');
@@ -474,8 +474,8 @@ function historicalContent(messages) {
       assert.equal((await readSession(source.id)).messages.length, cutoff + 1);
     }
     const requestsBeforeStale = report.requests.length;
-    const staleStart = await page.evaluate(({ session, prompt }) => yan.openCodeStartRun({
-      runId: 'rewind-stale-start', utility: true, yanSessionId: session.id,
+    const staleStart = await page.evaluate(({ session, prompt }) => z.openCodeStartRun({
+      runId: 'rewind-stale-start', utility: true, zSessionId: session.id,
       conversationRevision: session.conversationRevision || 0, openCodeSessionId: session.openCodeSessionId,
       history: session.messages, prompt
     }), { session: original, prompt: runMarker('STALE') });
@@ -527,13 +527,13 @@ function historicalContent(messages) {
     assert.ok(heldRun, 'the actual native run is active');
     const activeRunId = await page.evaluate(id => getRunCtx(id).runId, source.id);
     const busySource = await readSession(source.id);
-    const busy = await page.evaluate(payload => yan.rewindSession(payload), boundary(busySource));
+    const busy = await page.evaluate(payload => z.rewindSession(payload), boundary(busySource));
     assert.equal(busy.ok, false);
     assert.equal(busy.code, 'SESSION_REWIND_BUSY');
     await page.evaluate(text => { setComposerText(text); updateSendState(); }, `${runMarker('QUEUED')}: Reply with the queued fixture confirmation.`);
     await page.locator('#queueTurnBtn').click();
     await page.waitForFunction(id => state.queuedTurns.has(id), source.id);
-    const busyQueued = await page.evaluate(payload => yan.rewindSession(payload), boundary(busySource));
+    const busyQueued = await page.evaluate(payload => z.rewindSession(payload), boundary(busySource));
     assert.equal(busyQueued.ok, false);
     assert.equal(busyQueued.code, 'SESSION_REWIND_BUSY');
     assert.equal(await page.evaluate(({ id, runId }) => getRunCtx(id)?.runId === runId
@@ -554,11 +554,11 @@ function historicalContent(messages) {
     assertFileUnchanged();
     other = await readSession(other.id);
     const queuedOnly = await page.evaluate(async ({ id, payload }) => {
-      const result = await yan.yanCoreEnqueueIntent({ threadId: id, conversationRevision: 0, intentId: 'rewind-queued-only-fixture',
+      const result = await z.zCoreEnqueueIntent({ threadId: id, conversationRevision: 0, intentId: 'rewind-queued-only-fixture',
         intent: { prompt: 'A synthetic pending task with no active run', workMode: 'text' } });
       if (!result.ok) throw new Error(result.error);
-      const rewind = await yan.rewindSession(payload);
-      const deleted = await yan.yanCoreDeleteIntent('rewind-queued-only-fixture', 'fixture_finished');
+      const rewind = await z.rewindSession(payload);
+      const deleted = await z.zCoreDeleteIntent('rewind-queued-only-fixture', 'fixture_finished');
       return { rewind, deleted };
     }, { id: other.id, payload: boundary(other, 0) });
     assert.equal(queuedOnly.rewind.ok, false);
@@ -599,8 +599,8 @@ function historicalContent(messages) {
   } finally {
     if (heldRun && !heldRun.released) { heldRun.released = true; heldRun.response.destroy(); }
     if (page && !page.isClosed()) await page.evaluate(async () => {
-      const active = await yan.openCodeSyncActiveRuns();
-      for (const run of active?.runs || []) await yan.openCodeCancelRun(run.runId).catch(() => {});
+      const active = await z.openCodeSyncActiveRuns();
+      for (const run of active?.runs || []) await z.openCodeCancelRun(run.runId).catch(() => {});
     }).catch(() => {});
     await close().catch(() => {});
     server.closeAllConnections?.();

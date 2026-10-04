@@ -20,7 +20,7 @@ function fixture(options = {}) {
     review: async (_connection, input) => ({ action: 'observe', message: `步骤 ${input.totalActions} 正常推进。` }),
     onState: state => {
       monitor.modelStatus(state);
-      emitted.push({ type: 'yan.thrash.watchdog.status', data: monitor.snapshot() });
+      emitted.push({ type: 'z.thrash.watchdog.status', data: monitor.snapshot() });
     },
     onGuidance: result => {
       delivered.push(result);

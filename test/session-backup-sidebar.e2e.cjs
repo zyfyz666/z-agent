@@ -14,7 +14,7 @@ let application, page;
 const report = { ok: false, checks: [], pageErrors: [] };
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile, YAN_E2E_PARENT_PID: String(process.pid),
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile, Z_E2E_PARENT_PID: String(process.pid),
     OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
@@ -31,8 +31,8 @@ async function launch() {
 }
 
 async function refresh() { await page.evaluate(() => refreshSessions()); }
-async function allSessions() { return page.evaluate(() => yan.listSessions()); }
-async function read(id) { return page.evaluate(id => yan.getSession(id), id); }
+async function allSessions() { return page.evaluate(() => z.listSessions()); }
+async function read(id) { return page.evaluate(id => z.getSession(id), id); }
 async function checkVisible(sourceId, branchId) {
   await refresh();
   const visible = await page.evaluate(() => state.sessions.map(session => session.id).sort());
@@ -51,11 +51,11 @@ async function checkVisible(sourceId, branchId) {
       const session = state.currentSession;
       session.title = '读取最近一次对话并继续处理一个很长很长很长的任务名称，测试分支标记不受标题截断影响';
       session.messages = Array.from({ length: 6 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `Stored original message ${index}`, ts: index + 1 }));
-      await yan.saveSession(session);
-      await yan.renameSession(session.id, session.title);
-      return yan.getSession(session.id);
+      await z.saveSession(session);
+      await z.renameSession(session.id, session.title);
+      return z.getSession(session.id);
     });
-    const branchResult = await page.evaluate(boundary => yan.forkSession(boundary), {
+    const branchResult = await page.evaluate(boundary => z.forkSession(boundary), {
       sessionId: source.id, messageIndex: 5, messageAnchor: messageForkAnchor(source.messages[5])
     });
     assert.equal(branchResult.ok, true, branchResult.error);
@@ -63,12 +63,12 @@ async function checkVisible(sourceId, branchId) {
     const originalHistory = branch.messages.map(message => message.content);
     const backups = [];
     for (let cycle = 0; cycle < 2; cycle++) {
-      const rewound = await page.evaluate(boundary => yan.rewindSession(boundary), {
+      const rewound = await page.evaluate(boundary => z.rewindSession(boundary), {
         sessionId: branch.id, messageIndex: 3, messageAnchor: messageForkAnchor(branch.messages[3]),
         conversationRevision: branch.conversationRevision || 0
       });
       assert.equal(rewound.ok, true, rewound.error); backups.push(rewound.backupSessionId);
-      const restored = await page.evaluate(payload => yan.restoreSessionRewind(payload), {
+      const restored = await page.evaluate(payload => z.restoreSessionRewind(payload), {
         sessionId: branch.id, conversationRevision: rewound.session.conversationRevision
       });
       assert.equal(restored.ok, true, restored.error); backups.push(restored.backupSessionId);
@@ -114,13 +114,13 @@ async function checkVisible(sourceId, branchId) {
     // become discoverable as a branch without changing the source or snapshot.
     const continued = await read(backups[0]);
     continued.messages.push({ role: 'user', content: 'Deliberately continue this saved version', ts: Date.now() });
-    await page.evaluate(session => yan.saveSession(session), continued);
+    await page.evaluate(session => z.saveSession(session), continued);
     await refresh();
     assert.equal(await page.evaluate(id => state.sessions.some(session => session.id === id), continued.id), true);
     assert.equal(await page.locator(`.recent-session-list [data-id="${continued.id}"] .session-kind-badge`).innerText(), '分支');
     assert.deepEqual((await read(branch.id)).messages.map(message => message.content), originalHistory);
     report.checks.push('a deliberately continued snapshot becomes a visible independent branch; source content remains unchanged');
-    await page.evaluate(id => { state.config.language = 'en'; window.YanI18n.apply('en'); openSessionRewindBackups(id); }, branch.id);
+    await page.evaluate(id => { state.config.language = 'en'; window.ZI18n.apply('en'); openSessionRewindBackups(id); }, branch.id);
     await page.waitForFunction(() => document.querySelector('#sessionRewindBackupsTitle')?.textContent === 'Rewind backups');
     assert.doesNotMatch(await page.locator('#sessionRewindBackupsDialog').innerText(), /[\u3400-\u9fff]/u);
     report.checks.push('the backup dialog, branch badge and dynamic message counts have English translations');

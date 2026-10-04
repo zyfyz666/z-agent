@@ -8,11 +8,11 @@ const test = require('node:test');
 const { ContinualHarnessStore, normalizeState, readState } = require('../lib/continual-harness');
 
 function makeStore(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-direct-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-direct-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return new ContinualHarnessStore({
     globalPath: path.join(root, 'global-harness-state.json'),
-    yanagentDir: '.yanagent'
+    zagentDir: '.zagent'
   });
 }
 
@@ -47,9 +47,9 @@ test('direct-written scalars, contentless objects, unknown kinds and keys all su
 
 test('store round-trip preserves direct-written state across load and rewrite', t => {
   const store = makeStore(t);
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-direct-ws-'));
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-direct-ws-'));
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
-  const statePath = path.join(workspace, '.yanagent', 'harness', 'harness-state.json');
+  const statePath = path.join(workspace, '.zagent', 'harness', 'harness-state.json');
   fs.mkdirSync(path.dirname(statePath), { recursive: true });
   fs.writeFileSync(statePath, JSON.stringify(DIRECT_WRITE_STATE, null, 2));
 

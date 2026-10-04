@@ -2,8 +2,8 @@
 
 (() => {
   const MONACO_VS_PATH = '../node_modules/monaco-editor/min/vs';
-  const THEME_DARK = 'yan-review-dark';
-  const THEME_LIGHT = 'yan-review-light';
+  const THEME_DARK = 'z-review-dark';
+  const THEME_LIGHT = 'z-review-light';
   let loadPromise = null;
   let themesRegistered = false;
   let activeTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
@@ -140,7 +140,7 @@
     modelSequence += 1;
     return monaco.Uri.from({
       scheme: 'inmemory',
-      authority: 'yan-review',
+      authority: 'z-review',
       path: `/${modelSequence}/${role}/${fileName}`
     });
   }
@@ -166,7 +166,7 @@
       ];
       for (const [side, editor] of sources) {
         this.disposables.push(editor.addAction({
-          id: `yan-review-comment-${this.instanceId}-${side}`,
+          id: `z-review-comment-${this.instanceId}-${side}`,
           label: '添加行内评论',
           contextMenuGroupId: 'navigation',
           contextMenuOrder: 1,
@@ -301,7 +301,7 @@
     }
   }
 
-  globalThis.YanReviewEditor = Object.freeze({
+  globalThis.ZReviewEditor = Object.freeze({
     create: container => new ReviewDiffEditor(container),
     load: loadMonaco,
     setTheme(theme) {

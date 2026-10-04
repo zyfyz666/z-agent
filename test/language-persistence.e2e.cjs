@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-language-persistence-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-language-persistence-e2e-'));
 
 async function launch() {
   return electron.launch({
@@ -16,8 +16,8 @@ async function launch() {
     cwd: appRoot,
     env: {
       ...process.env,
-      YAN_E2E_MODE: '1',
-      YAN_E2E_USER_DATA_DIR: userDataDir
+      Z_E2E_MODE: '1',
+      Z_E2E_USER_DATA_DIR: userDataDir
     }
   });
 }
@@ -25,7 +25,7 @@ async function launch() {
 async function waitForRendererReady(page, language = '') {
   await page.waitForFunction(() => (
     document.readyState === 'complete'
-      && typeof yan !== 'undefined'
+      && typeof z !== 'undefined'
       && document.documentElement.dataset.language
   ));
   if (language) {
@@ -38,18 +38,18 @@ async function waitForRendererReady(page, language = '') {
   try {
     application = await launch();
     let page = await application.firstWindow();
-    await page.waitForFunction(() => typeof yan !== 'undefined');
+    await page.waitForFunction(() => typeof z !== 'undefined');
     await page.locator('#settingsBtn').click();
     await page.locator('[data-tab="general"]').click();
     await page.locator('#languageSegmented [data-lang="en"]').click();
     await page.waitForFunction(() => document.documentElement.dataset.language === 'en');
-    const saved = await page.evaluate(() => yan.getConfig());
+    const saved = await page.evaluate(() => z.getConfig());
     assert.equal(saved.language, 'en');
     await page.reload();
     await waitForRendererReady(page, 'en');
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
     assert.equal(await page.locator('html').getAttribute('data-language'), 'en');
-    const config = await page.evaluate(() => yan.getConfig());
+    const config = await page.evaluate(() => z.getConfig());
     assert.equal(config.language, 'en');
 
     await page.locator('#languageSegmented [data-lang="en"]').waitFor({ state: 'attached' });

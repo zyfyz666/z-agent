@@ -13,7 +13,7 @@ const snapshot = overrides => ({
   judgedSteps: 6, checks: 1, interventions: 1, streak: 1, updatedAt: 1000,
   events: [trigger()], ...overrides
 });
-const statusEvent = data => ({ type: 'yan.thrash.watchdog.status', data });
+const statusEvent = data => ({ type: 'z.thrash.watchdog.status', data });
 
 test('authoritative snapshots replace replayed events and keep delivery updates', () => {
   const initial = monitor.reduce(null, statusEvent(snapshot()));
@@ -23,7 +23,7 @@ test('authoritative snapshots replace replayed events and keep delivery updates'
   const delivered = monitor.reduce(replay, statusEvent(snapshot({ updatedAt: 1001, events: [trigger({ delivery: 'delivered' })] })));
   assert.equal(delivered.events.length, 1);
   assert.equal(delivered.events[0].delivery, 'delivered');
-  const legacyReplay = monitor.reduce(delivered, { type: 'yan.thrash.watchdog', data: trigger({ ts: undefined, delivery: 'pending' }) });
+  const legacyReplay = monitor.reduce(delivered, { type: 'z.thrash.watchdog', data: trigger({ ts: undefined, delivery: 'pending' }) });
   assert.equal(legacyReplay.events[0].delivery, 'delivered');
   assert.equal(legacyReplay.events[0].ts, 1000);
   assert.equal(initial.events[0].delivery, 'queued');
@@ -31,7 +31,7 @@ test('authoritative snapshots replace replayed events and keep delivery updates'
 });
 
 test('legacy events remain useful without inventing missing counters or delivery', () => {
-  const event = { type: 'yan.thrash.watchdog', data: { action: 'remind', rules: ['R1_loop'], advisories: [], streak: 1 } };
+  const event = { type: 'z.thrash.watchdog', data: { action: 'remind', rules: ['R1_loop'], advisories: [], streak: 1 } };
   const first = monitor.reduce(null, event);
   const replay = monitor.reduce(first, event);
   assert.equal(replay.events.length, 1);

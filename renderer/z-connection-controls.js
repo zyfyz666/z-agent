@@ -3,7 +3,7 @@
   let host, initialized = false, entries = [], loading = 0, saving = false;
   const $ = id => document.getElementById(id);
   const key = value => JSON.stringify([value.providerId, value.supplierId]);
-  const t = value => document.documentElement.lang === 'en' ? root.YanI18n?.translate(value) || value : value;
+  const t = value => document.documentElement.lang === 'en' ? root.ZI18n?.translate(value) || value : value;
   const option = (value, label) => { const node = document.createElement('option'); node.value = value; node.textContent = label; return node; };
   const reasoningLabels = Object.freeze({ low: '轻度', medium: '中', high: '高', xhigh: '极高', max: '最高' });
   const reasoningEffort = value => {

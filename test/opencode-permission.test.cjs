@@ -108,11 +108,11 @@ test('permission.updated events expose the permission type and request id', () =
     type: 'permission.updated',
     properties: {
       id: 'per_updated',
-      type: 'yan_browser_open_builtin_browser',
+      type: 'z_browser_open_builtin_browser',
       metadata: { reason: 'policy gate' }
     }
   };
   assert.equal(isPermissionAskedEvent(event), true);
-  assert.equal(permissionNameFromEvent(event), 'yan_browser_open_builtin_browser');
+  assert.equal(permissionNameFromEvent(event), 'z_browser_open_builtin_browser');
   assert.equal(permissionRequestID(event), 'per_updated');
 });

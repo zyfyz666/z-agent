@@ -1,6 +1,6 @@
 'use strict';
 
-// Yan Work GUI acceptance inside the real window: the page mounts on its tab,
+// Z Work GUI acceptance inside the real window: the page mounts on its tab,
 // renders the work island from normalized events, tracks subagent helpers,
 // switches districts, and preserves the world across titlebar navigation.
 
@@ -11,7 +11,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-work-gui-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-work-gui-e2e-'));
 
 function buildFixture(sessionId) {
   const now = Date.now();
@@ -66,12 +66,12 @@ function buildFixture(sessionId) {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await page.waitForFunction(() => (
-      !!window.YanWorkGui
+      !!window.ZWorkGui
       && typeof showWindowView === 'function'
       && typeof state !== 'undefined'
       && !!state.currentSession
@@ -86,12 +86,12 @@ function buildFixture(sessionId) {
       // The page refreshes its own snapshot on open; let it settle, then apply
       // the deterministic fixture so the checks below are reproducible.
       await sleep(500);
-      const liveHome = window.YanWorkGui.getState().home;
-      window.YanWorkGui.applySnapshot(snapshot);
-      window.YanWorkGui.ingest({ events });
+      const liveHome = window.ZWorkGui.getState().home;
+      window.ZWorkGui.applySnapshot(snapshot);
+      window.ZWorkGui.ingest({ events });
       await sleep(900);
-      const worldState = window.YanWorkGui.getState();
-      const render3d = window.YanWorkGui.debug3d();
+      const worldState = window.ZWorkGui.getState();
+      const render3d = window.ZWorkGui.debug3d();
       const panelCount = document.querySelectorAll('.wgu-side,.wgu-card,.wgu-session').length;
       const worldTitle = document.querySelector('.wgu-brand')?.textContent || '';
 
@@ -99,7 +99,7 @@ function buildFixture(sessionId) {
       const homeTab = document.querySelector('.wgu-scene[data-scene="home"]');
       homeTab.click();
       await sleep(120);
-      const sceneAfterSwitch = window.YanWorkGui.getState().scene;
+      const sceneAfterSwitch = window.ZWorkGui.getState().scene;
       // Returning to the task remains an explicit titlebar action.
       const stayedInWorld = !document.querySelector('#pageWorkGui').classList.contains('hidden');
       document.querySelector('[data-window-view="main"]').click();
@@ -112,7 +112,7 @@ function buildFixture(sessionId) {
       await sleep(500);
       // Reopening the page keeps the projected world; only the snapshot needs
       // restoring because the page refresh replaced it with live (empty) data.
-      window.YanWorkGui.applySnapshot(snapshot);
+      window.ZWorkGui.applySnapshot(snapshot);
       await sleep(400);
       const backToWorld = !document.querySelector('#pageWorkGui').classList.contains('hidden');
       const canvas = document.querySelector('.wgu-canvas');
@@ -121,7 +121,7 @@ function buildFixture(sessionId) {
       return {
         probe: {
           three: typeof window.THREE,
-          sceneModule: typeof window.YanWorkGuiScene,
+          sceneModule: typeof window.ZWorkGuiScene,
           webgl2: !!probeCanvas.getContext('webgl2'),
           webgl1: !!probeCanvas.getContext('webgl'),
           threeStatus,

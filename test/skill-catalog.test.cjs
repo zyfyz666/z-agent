@@ -6,6 +6,7 @@ const vm = require('vm');
 
 const appRoot = path.resolve(__dirname, '..');
 const skillRegistry = require('../lib/skill-registry');
+const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
 const categoryIds = [
   'code-assist',
   'ui-beautify',
@@ -22,12 +23,12 @@ const requiredVisibleIds = [
   'remotion-best-practices',
   'greensock-gsap',
   'ui-ux-pro-max',
-  'yan-codegraph',
-  'yan-prompt-optimizer',
-  'yan-react-bits',
-  'yan-serena',
-  'yan-uiverse',
-  'yan-understand-anything'
+  'z-codegraph',
+  'z-prompt-optimizer',
+  'z-react-bits',
+  'z-serena',
+  'z-uiverse',
+  'z-understand-anything'
 ].sort();
 const requiredInternalIds = [
   'gsap',
@@ -122,10 +123,10 @@ function assertHallmarkPackageIntegrity() {
 }
 
 function assertBundledPackageMigration() {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-bundled-shadow-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-bundled-shadow-'));
   try {
     const hallmark = loadBundledConfig().find(skill => skill.id === 'hallmark');
-    const stale = skillRegistry.installYanUserSkill(dataDir, hallmark);
+    const stale = skillRegistry.installZUserSkill(dataDir, hallmark);
     assert.strictEqual(stale.ok, true);
     assert.strictEqual(fs.readdirSync(stale.directory).length, 2, 'fixture must reproduce the legacy two-file shadow');
 
@@ -140,7 +141,7 @@ function assertBundledPackageMigration() {
     assert.deepStrictEqual(migrated.removedIds, ['hallmark']);
     assert.strictEqual(fs.existsSync(stale.directory), false);
 
-    const userOwned = skillRegistry.installYanUserSkill(dataDir, {
+    const userOwned = skillRegistry.installZUserSkill(dataDir, {
       id: 'hallmark',
       name: 'User Hallmark',
       desc: 'A user-owned same-name fixture',
@@ -179,7 +180,7 @@ function assertRetiredMigration() {
   const retainedIds = [...builtin, ...bundled].map(skill => skill.id).sort();
   const visibleIds = [...builtin, ...bundled].filter(skill => !skill.hidden).map(skill => skill.id).sort();
   const internalIds = [...builtin, ...bundled].filter(skill => skill.hidden).map(skill => skill.id).sort();
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-skill-catalog-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skill-catalog-'));
   try {
     const retiredSkill = {
       id: 'market-pr-review',
@@ -195,16 +196,16 @@ function assertRetiredMigration() {
       prompt: 'Keep this user-owned Skill.',
       source: 'custom'
     };
-    assert.ok(skillRegistry.installYanUserSkill(dataDir, retiredSkill).ok);
-    assert.ok(skillRegistry.installYanUserSkill(dataDir, customSkill).ok);
+    assert.ok(skillRegistry.installZUserSkill(dataDir, retiredSkill).ok);
+    assert.ok(skillRegistry.installZUserSkill(dataDir, customSkill).ok);
 
     const cfg = { customSkills: [...bundled, retiredSkill, customSkill] };
     const result = skillRegistry.pruneRetiredSkills(cfg, appRoot, dataDir);
     assert.strictEqual(result.changed, true);
     assert.ok(!cfg.customSkills.some(skill => skill.id === retiredSkill.id));
     assert.ok(cfg.customSkills.some(skill => skill.id === customSkill.id));
-    assert.ok(!skillRegistry.scanYanUserSkills(dataDir).some(skill => skill.id === retiredSkill.id));
-    assert.ok(skillRegistry.scanYanUserSkills(dataDir).some(skill => skill.id === customSkill.id));
+    assert.ok(!skillRegistry.scanZUserSkills(dataDir).some(skill => skill.id === retiredSkill.id));
+    assert.ok(skillRegistry.scanZUserSkills(dataDir).some(skill => skill.id === customSkill.id));
 
     const installed = skillRegistry.getInstalledSkills(cfg, appRoot, dataDir);
     for (const id of retainedIds) assert.ok(installed.some(skill => skill.id === id), `${id} must load`);
@@ -216,10 +217,11 @@ function assertRetiredMigration() {
     for (const id of internalIds) assert.ok(!catalog.installed.some(skill => skill.id === id), `${id} must stay internal`);
 
     const displayed = skillRegistry.getAllSkillsForCatalog(cfg, appRoot, dataDir);
-    assert.strictEqual(displayed.find(skill => skill.id === 'yan-prompt-optimizer').name, 'Z Prompt Optimizer');
-    assert.strictEqual(displayed.find(skill => skill.id === 'yan-understand-anything').name, '项目地图');
+    assert.strictEqual(displayed.find(skill => skill.id === 'z-prompt-optimizer').name, 'Z Prompt Optimizer');
+    assert.strictEqual(displayed.find(skill => skill.id === 'z-understand-anything').name, '项目地图');
+    const obsoleteBrand = new RegExp(`\\b${LEGACY_NAMESPACE.title}(?:[ -]Agent)?\\b`, 'i');
     for (const skill of displayed.filter(skill => !skill.hidden)) {
-      assert.ok(!/\bYan(?:[ -]Agent)?\b/i.test(`${skill.name} ${skill.desc}`), `${skill.id} exposes obsolete product branding`);
+      assert.ok(!obsoleteBrand.test(`${skill.name} ${skill.desc}`), `${skill.id} exposes obsolete product branding`);
     }
 
     const companion = skillRegistry.readSkill('hyperframes-cli', 'render this composition', cfg, appRoot, dataDir);
@@ -228,7 +230,7 @@ function assertRetiredMigration() {
 
     const hyperframes = skillRegistry.readSkill('hyperframes', 'create a short video', cfg, appRoot, dataDir);
     assert.strictEqual(hyperframes.ok, true);
-    assert.ok(hyperframes.prompt.includes('Yan Agent already bundles the complete HyperFrames companion set.'));
+    assert.ok(hyperframes.prompt.includes('Z Agent already bundles the complete HyperFrames companion set.'));
     assert.ok(hyperframes.prompt.includes(path.join(appRoot, 'lib', 'skills', 'hyperframes')));
 
     const remotion = skillRegistry.readSkill('remotion-best-practices', 'create an animated chart', cfg, appRoot, dataDir);

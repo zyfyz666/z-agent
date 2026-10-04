@@ -1,4 +1,4 @@
-// Yan Work GUI — a continuous riverside settlement, driven by real runtime events.
+// Z Work GUI — a continuous riverside settlement, driven by real runtime events.
 // Geometry/materials are shared; static scenery is instanced before the first frame.
 (() => {
   'use strict';
@@ -24,7 +24,7 @@
     lighthouse: { x: 39, z: -24, label: '交付灯塔', activity: '成果与交付' }
   };
   const stationName = zone => ZONES[zone]?.label || zone;
-  window.YanWorkGuiScene = { stationName };
+  window.ZWorkGuiScene = { stationName };
   if (!T) return;
   const LIFE = [
     { x: 27, z: 22, activity: '在咖啡庭院休息', pose: 'coffee' },
@@ -529,7 +529,7 @@
     }
     function routeBetween(start,end){
       const nearest=p=>nodes.reduce((best,n,i)=>Math.hypot(n[0]-p.x,n[1]-p.z)<Math.hypot(nodes[best][0]-p.x,nodes[best][1]-p.z)?i:best,0);
-      const path=window.YanWorldPath.find_path(graph,nearest(start),nearest(end))
+      const path=window.ZWorldPath.find_path(graph,nearest(start),nearest(end))
         .map(index=>({x:nodes[index][0],z:nodes[index][1]}));
       path.push({x:end.x,z:end.z});return path;
     }
@@ -770,5 +770,5 @@
       emitSparks:zone=>emit(zone,C.gold),emitBoat:()=>emit('dock',C.roof),
       emitBeam:()=>emit('lighthouse',C.gold),emitConfetti:()=>emit('hall',C.gold)};
   }
-  window.YanWorkGuiScene={create,stationName};
+  window.ZWorkGuiScene={create,stationName};
 })();

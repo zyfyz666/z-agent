@@ -22,8 +22,8 @@ fs.mkdirSync(outputDir, { recursive: true });
 workspaces.forEach(workspace => fs.mkdirSync(workspace, { recursive: true }));
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -54,7 +54,7 @@ async function switchTo(id) {
   await page.waitForFunction(id => state.currentSession?.id === id && !observerPendingSessionId, id);
 }
 
-async function readSession(id) { return page.evaluate(id => yan.getSession(id), id); }
+async function readSession(id) { return page.evaluate(id => z.getSession(id), id); }
 
 async function preservedUi() {
   return page.evaluate(() => ({ id: state.currentSession?.id, workspace: state.currentSession?.workspace,
@@ -103,16 +103,16 @@ async function saveRename(id, title) {
       const initialId = state.currentSession.id;
       const results = [];
       for (let index = 0; index < 13; index++) {
-        const session = await yan.createSession(true, workspaces[index % workspaces.length]);
+        const session = await z.createSession(true, workspaces[index % workspaces.length]);
         session.messages = [{ role: 'user', content: `Sidebar saved prompt ${index}`, ts: 1_800_000_000_000 + index },
           { role: 'assistant', content: `Sidebar saved answer ${index}`, ts: 1_800_000_001_000 + index }];
-        const saved = await yan.saveSession(session);
+        const saved = await z.saveSession(session);
         if (saved.ok === false) throw new Error(saved.error);
-        await yan.renameSession(session.id, `Sidebar fixture ${String(index).padStart(2, '0')}`);
-        if (index === 5) await yan.setSessionPinned(session.id, true);
-        results.push(await yan.getSession(session.id));
+        await z.renameSession(session.id, `Sidebar fixture ${String(index).padStart(2, '0')}`);
+        if (index === 5) await z.setSessionPinned(session.id, true);
+        results.push(await z.getSession(session.id));
       }
-      const removed = await yan.deleteSession(initialId, true);
+      const removed = await z.deleteSession(initialId, true);
       if (removed.ok === false) throw new Error(removed.error);
       await refreshSessions();
       return results;
@@ -152,7 +152,7 @@ async function saveRename(id, title) {
     report.checks.push('Confirmed background rename persists and synchronizes Recent and Projects immediately; special characters remain plain text');
 
     stale.messages.push({ role: 'assistant', content: 'Continuation saved from a pre-rename session snapshot', ts: Date.now() });
-    const staleSave = await page.evaluate(session => yan.saveSession(session), stale);
+    const staleSave = await page.evaluate(session => z.saveSession(session), stale);
     assert.notEqual(staleSave.ok, false, 'the ordinary continuation still persists');
     const afterStaleSave = await readSession(target.id);
     assert.equal(afterStaleSave.title, title, 'an in-flight pre-rename save cannot restore the old title');

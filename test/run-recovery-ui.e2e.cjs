@@ -6,7 +6,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-run-recovery-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-run-recovery-'));
 
 // A transient provider failure (e.g. an unrecoverable DSML parse attempt) that
 // OpenCode retried successfully must not surface as a task failure.
@@ -18,7 +18,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-run-recovery-'));
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -47,7 +47,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-run-recovery-'));
       const recoveredCtx = buildCtx();
       applyOpenCodeEvent(recoveredCtx, { type: 'session.error', data: { error: { message } } });
       const latched = recoveredCtx.openCodeError;
-      applyOpenCodeEvent(recoveredCtx, { type: 'yan.model.recovered', data: { error: message } });
+      applyOpenCodeEvent(recoveredCtx, { type: 'z.model.recovered', data: { error: message } });
       const cleared = recoveredCtx.openCodeError;
       recoveredCtx.openCodeError = message;
       const recovered = openCodeResultToAgentRun({

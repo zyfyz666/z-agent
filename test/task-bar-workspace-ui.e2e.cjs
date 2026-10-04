@@ -1,6 +1,6 @@
 'use strict';
 
-// Task-bar acceptance: Yanxi Code removed from the workspace-tools menu, the
+// Task-bar acceptance: the former code app is absent from the tools menu, the
 // automatic task folder is ready without a mandatory folder choice, and the task title
 // opens the rename dialog on double click.
 const assert = require('node:assert/strict');
@@ -8,9 +8,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
+const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
+const previousCodeApp = `${LEGACY_NAMESPACE.title}xi Code`;
+const previousCodeAppSelector = `#taskBar${LEGACY_NAMESPACE.title}xiCode`;
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-task-bar-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-task-bar-e2e-'));
 
 (async () => {
   let application;
@@ -21,20 +24,20 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-task-bar-e2e-'));
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
     await page.locator('#taskBar:not(.hidden)').waitFor();
 
-    assert.equal(await page.locator('#taskBarYanxiCode').count(), 0, 'Yanxi Code entry must be removed');
-    assert.equal(await page.locator('.task-tool-item', { hasText: 'Yanxi Code' }).count(), 0);
+    assert.equal(await page.locator(previousCodeAppSelector).count(), 0, 'the former code app entry must be removed');
+    assert.equal(await page.locator('.task-tool-item', { hasText: previousCodeApp }).count(), 0);
 
     await page.locator('#taskToolsMenuToggle').click();
     await page.locator('#taskToolsMenu:not(.hidden)').waitFor();
     const labels = await page.locator('#taskToolsMenu .task-tool-item strong').allInnerTexts();
-    assert.ok(!labels.includes('Yanxi Code'), `tools menu still lists Yanxi Code: ${labels.join(', ')}`);
+    assert.ok(!labels.includes(previousCodeApp), `tools menu still lists the former code app: ${labels.join(', ')}`);
     assert.ok(labels.includes('终端') && labels.includes('资源管理器'));
     assert.ok(labels.includes('VS Code'));
     await page.keyboard.press('Escape');

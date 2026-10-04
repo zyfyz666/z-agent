@@ -8,7 +8,7 @@ const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
 const outputDir = path.join(appRoot, 'output', 'playwright');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-restored-session-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-restored-session-e2e-'));
 
 function run(runId, text, callId, output) {
   return {
@@ -41,10 +41,10 @@ const session = {
   ]
 };
 
-const sessionsDir = path.join(userDataDir, 'YanData', 'sessions');
+const sessionsDir = path.join(userDataDir, 'ZData', 'sessions');
 fs.mkdirSync(sessionsDir, { recursive: true });
 fs.writeFileSync(path.join(sessionsDir, `${session.id}.json`), JSON.stringify(session), 'utf8');
-fs.writeFileSync(path.join(userDataDir, 'YanData', 'config.json'), JSON.stringify({ theme: 'dark', language: 'zh-CN' }), 'utf8');
+fs.writeFileSync(path.join(userDataDir, 'ZData', 'config.json'), JSON.stringify({ theme: 'dark', language: 'zh-CN' }), 'utf8');
 
 (async () => {
   let application;
@@ -55,7 +55,7 @@ fs.writeFileSync(path.join(userDataDir, 'YanData', 'config.json'), JSON.stringif
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => pageErrors.push(error.message));

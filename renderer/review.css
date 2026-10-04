@@ -1,4 +1,4 @@
-/* Hallmark · component: review workbench · genre: modern-minimal · theme: Yan/Codex workbench
+/* Hallmark · component: review workbench · genre: modern-minimal · theme: Z/Codex workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R4 V5 · contrast: pass · designed-as-app
  */
@@ -533,7 +533,7 @@ body.review-tree-resizing * { cursor: col-resize !important; user-select: none !
 @keyframes review-spin { to { transform: rotate(360deg); } }
 @keyframes review-pulse { 50% { opacity: .4; } }
 
-/* Monaco review surface. The surrounding workbench remains Yan-owned. */
+/* Monaco review surface. The surrounding workbench remains Z-owned. */
 .rv-diff-body {
   position: relative;
   display: flex;

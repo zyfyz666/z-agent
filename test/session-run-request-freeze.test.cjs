@@ -119,14 +119,14 @@ for (const switchConversation of [false, true]) {
     await steering;
     assert.equal(f.starts.length, 1);
     const request = f.starts[0];
-    assert.equal(request.yanSessionId, f.a.id);
+    assert.equal(request.zSessionId, f.a.id);
     assert.equal(request.prompt, 'Implement the original task.');
     assert.deepEqual(request.attachments, attachments);
     assert.deepEqual(request.selectedSkills, skills);
     assert.deepEqual(request.history.map(item => ({ role: item.role, content: item.content })), f.prior);
     assert.equal(request.modelSelection.modelId, 'model-a');
     assert.equal(f.guidance.length, 1);
-    assert.equal(f.guidance[0].yanSessionId, f.a.id);
+    assert.equal(f.guidance[0].zSessionId, f.a.id);
     assert.equal(f.guidance[0].text, 'Preserve the initial API signatures.');
     assert.equal(f.a.messages.filter(item => item.content === 'Implement the original task.').length, 1);
     assert.equal(f.a.messages.at(-1).liveGuidance.status, 'delivered');

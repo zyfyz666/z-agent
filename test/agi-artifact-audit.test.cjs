@@ -67,7 +67,7 @@ test('interaction counts controls, not decorative elements', () => {
 });
 
 test('auditArtifactFile reads from disk and survives missing files', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-audit-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-audit-'));
   try {
     const file = path.join(dir, 'page.html');
     fs.writeFileSync(file, FULL_HTML, 'utf8');

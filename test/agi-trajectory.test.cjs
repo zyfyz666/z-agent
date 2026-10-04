@@ -9,7 +9,7 @@ const path = require('node:path');
 const { createTrajectoryStore } = require('../lib/agi/trajectory');
 
 function withTempDir(run) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-trajectory-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-trajectory-'));
   try {
     return run(dir);
   } finally {

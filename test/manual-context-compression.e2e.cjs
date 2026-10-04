@@ -5,11 +5,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const root = path.resolve(__dirname, '..');
-const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-manual-compression-'));
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'z-manual-compression-'));
 (async () => {
  let app;
  try {
-  app = await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,YAN_E2E_MODE:'1',YAN_E2E_USER_DATA_DIR:userData}});
+  app = await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,Z_E2E_MODE:'1',Z_E2E_USER_DATA_DIR:userData}});
   const page = await app.firstWindow();
   await page.waitForFunction(() => typeof setupContextRing === 'function' && state.currentSession);
   await app.evaluate(({ipcMain}) => {

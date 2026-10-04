@@ -14,7 +14,7 @@ Thumbs.db
 .playwright-cli/
 .playwright-mcp/
 .reasonix/
-.yanagent/
+.zagent/
 .hallmark/
 .trae-html-share-packages/
 opencode-runtime/

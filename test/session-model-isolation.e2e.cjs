@@ -69,8 +69,8 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -84,7 +84,7 @@ async function launch() {
   page.on('pageerror', error => report.pageErrors.push(error.message));
   await page.waitForFunction(() => typeof quickInputHandlerReady !== 'undefined' && quickInputHandlerReady && state.currentSession && state.config);
   assert.equal(path.resolve(await application.evaluate(({ app }) => app.getPath('userData'))), path.resolve(profile));
-  assert.equal(await page.evaluate(() => typeof yan.setSessionModel), 'function');
+  assert.equal(await page.evaluate(() => typeof z.setSessionModel), 'function');
 }
 
 async function openModelMenu() {
@@ -104,7 +104,7 @@ async function selectModel(sessionId, connection, modelId) {
   { sessionId, providerId: connection.providerId, modelId });
   assert.equal(await page.locator('#modelPillName').textContent(), modelId);
   await page.keyboard.press('Escape');
-  const saved = await page.evaluate(id => yan.getSession(id), sessionId);
+  const saved = await page.evaluate(id => z.getSession(id), sessionId);
   assert.deepEqual(identity(saved.modelSelection), [connection.providerId, connection.supplierId, modelId, 'text']);
 }
 
@@ -125,13 +125,13 @@ async function runBackend(sessionId, marker, modelSelection) {
   const runId = `session-model-${marker.toLowerCase()}`;
   await page.evaluate(({ sessionId, marker, runId, modelSelection }) => {
     window.sessionModelDirectRuns ||= {};
-    const stop = yan.onOpenCodeCompleted(detail => {
+    const stop = z.onOpenCodeCompleted(detail => {
       if (detail.runId !== runId) return;
       window.sessionModelDirectRuns[runId] = { result: detail.result };
       stop();
     });
     window.sessionModelDirectRuns[runId] = { pending: true };
-    yan.openCodeStartRun({ runId, yanSessionId: sessionId, utility: true, prompt: `${marker}: Reply with the model fixture result.`,
+    z.openCodeStartRun({ runId, zSessionId: sessionId, utility: true, prompt: `${marker}: Reply with the model fixture result.`,
       ...(modelSelection ? { modelSelection } : {}) }).then(started => {
       if (!started.ok) { window.sessionModelDirectRuns[runId] = { error: started.error }; stop(); }
     }).catch(error => { window.sessionModelDirectRuns[runId] = { error: error.message }; stop(); });
@@ -150,25 +150,25 @@ async function runBackend(sessionId, marker, modelSelection) {
     const connections = await page.evaluate(async port => {
       const result = [];
       for (const gateway of ['a', 'b']) {
-        const saved = await yan.connectionsSave({ name: `Fixture ${gateway.toUpperCase()}`, preset: 'openai', apiFormat: 'openai',
+        const saved = await z.connectionsSave({ name: `Fixture ${gateway.toUpperCase()}`, preset: 'openai', apiFormat: 'openai',
           baseUrl: `http://127.0.0.1:${port}/${gateway}/v1`, apiKey: `local-fixture-key-${gateway}`, streamEnabled: true });
         if (!saved.ok) throw new Error(saved.error || 'Fixture connection could not be saved');
         result.push(saved.connection);
       }
-      state.config = await yan.getConfig();
+      state.config = await z.getConfig();
       renderModelBadge();
       return result;
     }, server.address().port);
     const [aConnection, bConnection] = connections;
-    const globalDefault = await page.evaluate(() => yan.getConfig().then(config => config.agentModel));
+    const globalDefault = await page.evaluate(() => z.getConfig().then(config => config.agentModel));
     assert.deepEqual(identity(globalDefault), [aConnection.providerId, aConnection.supplierId, 'route-a-one', 'text']);
     const sessions = await page.evaluate(async () => {
       const result = [];
       for (const name of ['Conversation A', 'Conversation B']) {
-        const session = await yan.createSession(true);
+        const session = await z.createSession(true);
         session.title = name;
         session.messages = [{ role: 'user', content: `Keep ${name} for model isolation`, ts: Date.now() }];
-        await yan.saveSession(session);
+        await z.saveSession(session);
         result.push(session);
       }
       await refreshSessions(); renderSessionList();
@@ -185,37 +185,37 @@ async function runBackend(sessionId, marker, modelSelection) {
       await verifySelected(sessionA.id, aConnection, 'route-a-two');
       await verifySelected(sessionB.id, bConnection, 'route-b-one');
     }
-    assert.deepEqual(identity(await page.evaluate(() => yan.getConfig().then(config => config.agentModel))), identity(globalDefault));
+    assert.deepEqual(identity(await page.evaluate(() => z.getConfig().then(config => config.agentModel))), identity(globalDefault));
     report.checks.push('A/B menus, supplier selection and badges remain independent through repeated navigation');
 
     await selectModel(sessionA.id, aConnection, 'route-a-one');
     await verifySelected(sessionB.id, bConnection, 'route-b-one');
     await selectModel(sessionA.id, aConnection, 'route-a-two');
-    assert.deepEqual(identity(await page.evaluate(() => yan.getConfig().then(config => config.agentModel))), identity(globalDefault));
+    assert.deepEqual(identity(await page.evaluate(() => z.getConfig().then(config => config.agentModel))), identity(globalDefault));
     report.checks.push('changing A affects neither B nor the global new-conversation default');
 
-    const snapshotSession = await page.evaluate(() => yan.createSession(true));
+    const snapshotSession = await page.evaluate(() => z.createSession(true));
     assert.deepEqual(identity(snapshotSession.modelSelection), identity(globalDefault));
-    await page.evaluate(connection => yan.setModelRole(connection.providerId, 'route-b-one', 'text', connection.supplierId), bConnection);
-    const snapshotStill = await page.evaluate(id => yan.getSession(id), snapshotSession.id);
+    await page.evaluate(connection => z.setModelRole(connection.providerId, 'route-b-one', 'text', connection.supplierId), bConnection);
+    const snapshotStill = await page.evaluate(id => z.getSession(id), snapshotSession.id);
     assert.deepEqual(identity(snapshotStill.modelSelection), identity(globalDefault));
-    const newerSession = await page.evaluate(() => yan.createSession(true));
+    const newerSession = await page.evaluate(() => z.createSession(true));
     assert.deepEqual(identity(newerSession.modelSelection), [bConnection.providerId, bConnection.supplierId, 'route-b-one', 'text']);
     await verifySelected(sessionA.id, aConnection, 'route-a-two');
-    await page.evaluate(connection => yan.setModelRole(connection.providerId, 'route-a-one', 'text', connection.supplierId), aConnection);
+    await page.evaluate(connection => z.setModelRole(connection.providerId, 'route-a-one', 'text', connection.supplierId), aConnection);
     report.checks.push('new conversations take a one-time default snapshot, unaffected by later global changes');
 
     await application.close(); application = null; page = null;
     await launch();
     await verifySelected(sessionA.id, aConnection, 'route-a-two');
     await verifySelected(sessionB.id, bConnection, 'route-b-one');
-    assert.deepEqual(identity(await page.evaluate(() => yan.getConfig().then(config => config.agentModel))), identity(globalDefault));
+    assert.deepEqual(identity(await page.evaluate(() => z.getConfig().then(config => config.agentModel))), identity(globalDefault));
     report.checks.push('conversation model choices and global default survive a full app restart');
 
     // Submit A from the background while B is selected. Neither call passes an
     // explicit model override: each must freeze its own session's selection.
     await page.evaluate(async ({ aId, bId }) => {
-      const a = await yan.getSession(aId);
+      const a = await z.getSession(aId);
       const b = state.currentSession;
       if (b.id !== bId) throw new Error('Conversation B must be visible');
       window.sessionModelSubmissions = {};
@@ -232,7 +232,7 @@ async function runBackend(sessionId, marker, modelSelection) {
     assert.ok(report.requests.some(item => item.marker === 'SESSION_ROUTE_A_4197' && item.gateway === 'a' && item.model === 'route-a-two'));
     assert.ok(report.requests.some(item => item.marker === 'SESSION_ROUTE_B_4197' && item.gateway === 'b' && item.model === 'route-b-one'));
     for (const [session, model] of [[sessionA, 'route-a-two'], [sessionB, 'route-b-one']]) {
-      const saved = await page.evaluate(id => yan.getSession(id), session.id);
+      const saved = await page.evaluate(id => z.getSession(id), session.id);
       assert.equal(saved.modelSelection.modelId, model);
       assert.ok(saved.messages.some(message => message.role === 'assistant' && message.content.includes(`MODEL_REPLY_${model}`)));
       assert.equal(saved.messages.findLast(message => message.role === 'user').modelSelection.modelId, model);
@@ -246,7 +246,7 @@ async function runBackend(sessionId, marker, modelSelection) {
     assert.match(snapshot.text, /MODEL_REPLY_route-a-one/);
     await verifySelected(sessionA.id, aConnection, 'route-a-two');
     await verifySelected(sessionB.id, bConnection, 'route-b-one');
-    assert.deepEqual(identity(await page.evaluate(() => yan.getConfig().then(config => config.agentModel))), identity(globalDefault));
+    assert.deepEqual(identity(await page.evaluate(() => z.getConfig().then(config => config.agentModel))), identity(globalDefault));
     report.checks.push('backend session routing and a frozen per-turn override do not mutate saved or global choices');
     assert.deepEqual(fixtureErrors, []);
     assert.deepEqual(report.pageErrors, []);
@@ -264,8 +264,8 @@ async function runBackend(sessionId, marker, modelSelection) {
   } finally {
     // Shut down only this launch, never another desktop app or kernel process.
     if (page && !page.isClosed()) await page.evaluate(async () => {
-      const runs = await yan.openCodeSyncActiveRuns();
-      for (const run of runs?.runs || []) await yan.openCodeCancelRun(run.runId).catch(() => {});
+      const runs = await z.openCodeSyncActiveRuns();
+      for (const run of runs?.runs || []) await z.openCodeCancelRun(run.runId).catch(() => {});
     }).catch(() => {});
     await application?.close().catch(() => {});
     server.closeAllConnections();

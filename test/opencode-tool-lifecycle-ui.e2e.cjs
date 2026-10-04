@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-tool-lifecycle-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-tool-lifecycle-e2e-'));
 const screenshotDir = path.join(appRoot, 'output', 'playwright');
 const expandedDarkScreenshotPath = path.join(screenshotDir, 'tool-activity-expanded-dark.png');
 const collapsedLightScreenshotPath = path.join(screenshotDir, 'tool-activity-collapsed-light.png');
@@ -23,8 +23,8 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -69,7 +69,7 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
       const thinkingDot = thinkingProbe.querySelector('.thinking-orb-dot');
       const thinking = {
         label: thinkingProbe.querySelector('.thinking-label')?.textContent,
-        englishLabel: window.YanI18n?.translate('深度求索中……', 'en'),
+        englishLabel: window.ZI18n?.translate('深度求索中……', 'en'),
         variant: thinkingProbe.querySelector('.thinking-orb-helix')?.dataset.variant,
         dotCount: thinkingProbe.querySelectorAll('.thinking-orb-dot').length,
         animationName: thinkingDot ? getComputedStyle(thinkingDot).animationName : '',
@@ -240,7 +240,7 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
       };
       const relayEl = appendMessage('assistant', '');
       applyOpenCodeEvent(relayRunCtx, {
-        type: 'yan.vision.relay.started',
+        type: 'z.vision.relay.started',
         data: {
           modelId: 'glm-4.6v-flash',
           modelName: 'GLM-4.6V-Flash',
@@ -257,7 +257,7 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
         iconPath: relayRunningNote?.querySelector('.vision-relay-icon svg path')?.getAttribute('d')
       };
       applyOpenCodeEvent(relayRunCtx, {
-        type: 'yan.vision.relay.completed',
+        type: 'z.vision.relay.completed',
         data: {
           modelId: 'glm-4.6v-flash',
           modelName: 'GLM-4.6V-Flash',
@@ -283,23 +283,23 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
       };
       const policyEl = appendMessage('assistant', '');
       applyOpenCodeEvent(policyRunCtx, {
-        type: 'yan.policy.acceptance.started',
+        type: 'z.policy.acceptance.started',
         data: {
           callID: 'policy-acceptance:e2e',
-          tool: 'yan_policy_acceptance',
+          tool: 'z_policy_acceptance',
           input: { policyCount: 1, policies: ['prompt-search-routing'] }
         }
       }, { deferEffects: true });
       applyOpenCodeEvent(policyRunCtx, {
-        type: 'yan.policy.acceptance.passed',
+        type: 'z.policy.acceptance.passed',
         data: {
           callID: 'policy-acceptance:e2e',
-          tool: 'yan_policy_acceptance',
+          tool: 'z_policy_acceptance',
           output: { ok: true, policyCount: 1, findings: [] }
         }
       }, { deferEffects: true });
       renderAgentRunBody(policyEl.querySelector('.msg-body'), policyRunCtx.activeAgentRun);
-      const policyStep = policyEl.querySelector('.tool-step[data-tool="yan_policy_acceptance"]');
+      const policyStep = policyEl.querySelector('.tool-step[data-tool="z_policy_acceptance"]');
       const policyAcceptance = {
         callCount: policyRunCtx.activeAgentRun.timeline.filter(item => item.type === 'tool_call').length,
         resultCount: policyRunCtx.activeAgentRun.timeline.filter(item => item.type === 'tool_result').length,
@@ -319,7 +319,7 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
       };
       const reconnectEl = appendMessage('assistant', '');
       applyOpenCodeEvent(reconnectRunCtx, {
-        type: 'yan.opencode.reconnecting',
+        type: 'z.opencode.reconnecting',
         data: {
           attempt: 1,
           maxAttempts: 5,
@@ -343,7 +343,7 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
         detail: reconnectNote?.querySelector('.stream-reconnect-detail')?.textContent
       };
       applyOpenCodeEvent(reconnectRunCtx, {
-        type: 'yan.opencode.reconnecting',
+        type: 'z.opencode.reconnecting',
         data: {
           attempt: 3,
           maxAttempts: 5,
@@ -357,13 +357,13 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
         stillOpen: reconnectEl.querySelector('.stream-reconnect-note')?.open === true
       };
       applyOpenCodeEvent(reconnectRunCtx, {
-        type: 'yan.opencode.reconnected',
+        type: 'z.opencode.reconnected',
         data: { attempt: 3, maxAttempts: 5 }
       }, { deferEffects: true });
       renderAgentRunBody(reconnectEl.querySelector('.msg-body'), reconnectRunCtx.activeAgentRun);
       const reconnectCleared = reconnectEl.querySelector('.stream-reconnect-note') == null;
       applyOpenCodeEvent(reconnectRunCtx, {
-        type: 'yan.opencode.reconnecting',
+        type: 'z.opencode.reconnecting',
         data: {
           attempt: 1,
           maxAttempts: 5,
@@ -380,12 +380,12 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
         { type: 'tool_call', callId: 'read-a', name: 'read', args: { path: 'a.txt' } },
         { type: 'tool_call', callId: 'read-b', name: 'read', args: { path: 'b.txt' } },
         { type: 'progress', variant: 'agent-loader', content: '' },
-        { type: 'tool_call', callId: 'browser-a', name: 'yan_browser_browser_snapshot', args: {} },
-        { type: 'tool_call', callId: 'browser-b', name: 'yan_browser_browser_click', args: { target: 'button' } },
+        { type: 'tool_call', callId: 'browser-a', name: 'z_browser_browser_snapshot', args: {} },
+        { type: 'tool_call', callId: 'browser-b', name: 'z_browser_browser_click', args: { target: 'button' } },
         { type: 'tool_result', callId: 'read-a', name: 'read', output: 'a', ok: true },
         { type: 'tool_result', callId: 'read-b', name: 'read', output: 'b', ok: true },
-        { type: 'tool_result', callId: 'browser-a', name: 'yan_browser_browser_snapshot', output: 'snapshot', ok: true },
-        { type: 'tool_result', callId: 'browser-b', name: 'yan_browser_browser_click', output: 'clicked', ok: true },
+        { type: 'tool_result', callId: 'browser-a', name: 'z_browser_browser_snapshot', output: 'snapshot', ok: true },
+        { type: 'tool_result', callId: 'browser-b', name: 'z_browser_browser_click', output: 'clicked', ok: true },
         { type: 'thinking', content: '已经取得上下文。' }
       ];
       renderAgentRunBody(groupedEl.querySelector('.msg-body'), {
@@ -436,9 +436,9 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
           .map(element => element.dataset.icon),
         readLabels: Array.from(groupedEl.querySelectorAll('.tool-step[data-tool="read"] .tc-name'))
           .map(element => element.textContent),
-        browserLabels: Array.from(groupedEl.querySelectorAll('.tool-step[data-tool^="yan_browser_"] .tc-name'))
+        browserLabels: Array.from(groupedEl.querySelectorAll('.tool-step[data-tool^="z_browser_"] .tc-name'))
           .map(element => element.textContent),
-        browserIcons: Array.from(groupedEl.querySelectorAll('.tool-step[data-tool^="yan_browser_"] .tc-icon-svg'))
+        browserIcons: Array.from(groupedEl.querySelectorAll('.tool-step[data-tool^="z_browser_"] .tc-icon-svg'))
           .map(element => element.dataset.icon),
         recoveredCalls: recoveredTimeline.filter(item => item.type === 'tool_call').map(item => item.callId),
         recoveredResults: recoveredTimeline.filter(item => item.type === 'tool_result').map(item => item.callId),
@@ -788,21 +788,21 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
         ['question', 'message-plus'],
         ['todowrite', 'circle-more-horizontal'],
         ['task', 'square-more-horizontal'],
-        ['yan_skills_find_skills', 'eye'],
-        ['yan_skills_install_skill', 'download'],
-        ['yan_skills_list_installed_skills', 'filter'],
-        ['yan_skills_read_skill_resource', 'file'],
-        ['yan_skills_remove_skill', 'bin'],
-        ['yan_media_read_image', 'image-check'],
-        ['mcp__yan_media__generate_image', 'image-plus'],
-        ['yan_media_generate_video', 'list-video'],
-        ['yan_browser_browser_click', 'globe-cursor'],
-        ['yan_session_create_handoff', 'folder-arrow-left'],
-        ['yan_session_read_source_context', 'folder-arrow-up'],
+        ['z_skills_find_skills', 'eye'],
+        ['z_skills_install_skill', 'download'],
+        ['z_skills_list_installed_skills', 'filter'],
+        ['z_skills_read_skill_resource', 'file'],
+        ['z_skills_remove_skill', 'bin'],
+        ['z_media_read_image', 'image-check'],
+        ['mcp__z_media__generate_image', 'image-plus'],
+        ['z_media_generate_video', 'list-video'],
+        ['z_browser_browser_click', 'globe-cursor'],
+        ['z_session_create_handoff', 'folder-arrow-left'],
+        ['z_session_read_source_context', 'folder-arrow-up'],
         ['mcp_default_serena_find_symbol', 'file-check'],
         ['mcp_default_codegraph_codegraph_explore', 'folder-check'],
         ['mcp_default_playwright_browser_click', 'terminal-cursor'],
-        ['yan_harness_schedule_refinement', 'sliders-horizontal'],
+        ['z_harness_schedule_refinement', 'sliders-horizontal'],
         ['mcp__custom_server__custom_action', 'monitor'],
         ['unknown_native_tool', 'square-more-horizontal']
       ].map(([tool, expected]) => ({
@@ -828,11 +828,11 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
         ['read', 'read'],
         ['write', 'write'],
         ['bash', 'bash'],
-        ['yan_browser_browser_click', 'Yan-builtin-browser-Control'],
-        ['mcp_default_serena_find_symbol', 'Yan-Serena-MCP'],
-        ['mcp_default_codegraph_codegraph_explore', 'Yan-CodeGraph-MCP'],
-        ['mcp_default_playwright_browser_click', 'Yan-Playwright-MCP'],
-        ['yan_harness_schedule_refinement', 'Yan-Continual-Harness']
+        ['z_browser_browser_click', 'Z-builtin-browser-Control'],
+        ['mcp_default_serena_find_symbol', 'Z-Serena-MCP'],
+        ['mcp_default_codegraph_codegraph_explore', 'Z-CodeGraph-MCP'],
+        ['mcp_default_playwright_browser_click', 'Z-Playwright-MCP'],
+        ['z_harness_schedule_refinement', 'Z-Continual-Harness']
       ].map(([tool, expected]) => ({ tool, expected, actual: getToolDisplayName(tool) }));
 
       state.activeRuns.delete(session.id);
@@ -1005,14 +1005,14 @@ const genericPanelScreenshotPath = path.join(screenshotDir, 'tool-result-panel-d
     assert.notEqual(states.groupedState.innerLabelColor, states.groupedState.skillColor);
     assert.deepEqual(states.groupedState.parallelLabels, [
       'read（并行·2）',
-      'Yan-builtin-browser-Control（并行·2）'
+      'Z-builtin-browser-Control（并行·2）'
     ]);
     assert.deepEqual(states.groupedState.parallelCounts, [2, 2]);
     assert.deepEqual(states.groupedState.readIcons, ['file-text', 'file-text']);
     assert.deepEqual(states.groupedState.readLabels, ['read', 'read']);
     assert.deepEqual(states.groupedState.browserLabels, [
-      'Yan-builtin-browser-Control',
-      'Yan-builtin-browser-Control'
+      'Z-builtin-browser-Control',
+      'Z-builtin-browser-Control'
     ]);
     assert.deepEqual(states.groupedState.browserIcons, ['globe-cursor', 'globe-cursor']);
     assert.deepEqual(states.groupedState.recoveredCalls, ['read-a', 'read-b', 'browser-a', 'browser-b']);

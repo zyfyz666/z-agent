@@ -144,5 +144,5 @@
     setWorkspace(hooks.getWorkspace?.() || '');
   }
 
-  window.YanUnderstandAnything = { init, open: openViewer, refresh, close, isOpen, handleWorkspaceChanged, bindWorkspace: setWorkspace };
+  window.ZUnderstandAnything = { init, open: openViewer, refresh, close, isOpen, handleWorkspaceChanged, bindWorkspace: setWorkspace };
 })();

@@ -4,18 +4,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseText, StreamTracker, stripReviews, stripProtocolBlocks } = require('../lib/delivery-contract');
 
-const contract = '<yan-delivery-contract>\nintent: presentable（单文件）\nartifact: frontend\nscope: 2D 鹈鹕骑自行车 HTML\ndirection:\n海边悠闲骑行\ndecisions:\n- 近景快、远景慢\n- 踩踏与车轮协调\nacceptance: 观察主体和运动关系\n</yan-delivery-contract>';
+const contract = '<z-delivery-contract>\nintent: presentable（单文件）\nartifact: frontend\nscope: 2D 鹈鹕骑自行车 HTML\ndirection:\n海边悠闲骑行\ndecisions:\n- 近景快、远景慢\n- 踩踏与车轮协调\nacceptance: 观察主体和运动关系\n</z-delivery-contract>';
 
 test('multiline creative decisions and partial revisions share one schema', () => {
   const parsed = parseText(contract);
   assert.equal(parsed.intent, 'presentable');
   assert.equal(parsed.direction, '海边悠闲骑行');
   assert.equal(parsed.decisions, '- 近景快、远景慢\n- 踩踏与车轮协调');
-  const revised = parseText(contract + '\n<yan-delivery-contract>\ndirection: 公园骑行\n</yan-delivery-contract>');
+  const revised = parseText(contract + '\n<z-delivery-contract>\ndirection: 公园骑行\n</z-delivery-contract>');
   assert.equal(revised.direction, '公园骑行');
   assert.equal(revised.scope, parsed.scope);
   assert.equal(revised.decisions, parsed.decisions);
-  assert.equal(parseText('<yan-delivery-contract>\nintent: invalid\n</yan-delivery-contract>'), null);
+  assert.equal(parseText('<z-delivery-contract>\nintent: invalid\n</z-delivery-contract>'), null);
 });
 
 test('streaming publishes a contract once it closes and keeps later revisions', () => {
@@ -26,7 +26,7 @@ test('streaming publishes a contract once it closes and keeps later revisions', 
   assert.equal(ready.direction, '海边悠闲骑行');
   assert.equal(publish(contract), null);
   assert.equal(tracker.observe({ type: 'message.part.updated', data: { part: {
-    id: 'p2', type: 'text', text: '<yan-delivery-contract>\ndirection: 公园骑行\n</yan-delivery-contract>'
+    id: 'p2', type: 'text', text: '<z-delivery-contract>\ndirection: 公园骑行\n</z-delivery-contract>'
   } } }).scope, ready.scope);
   assert.equal(tracker.contract.direction, '公园骑行');
 });
@@ -40,17 +40,17 @@ test('reasoning and tool outputs cannot create a delivery contract', () => {
 });
 
 test('review records stay out of narration even while their opening tag streams', () => {
-  const opening = '<yan-delivery-review>';
+  const opening = '<z-delivery-review>';
   for (let length = 1; length <= opening.length; length++) {
     assert.equal(stripReviews('正文\n' + opening.slice(0, length)), '正文\n');
   }
-  assert.equal(stripReviews('正文<yan-delivery-review>{"criteria":{}}</yan-delivery-review>结论'), '正文结论');
+  assert.equal(stripReviews('正文<z-delivery-review>{"criteria":{}}</z-delivery-review>结论'), '正文结论');
 });
 
 test('stripProtocolBlocks removes contract and review blocks in any state', () => {
   assert.equal(stripProtocolBlocks('前文\n' + contract + '\n后文'), '前文\n\n后文');
-  assert.equal(stripProtocolBlocks('前文<yan-delivery-review>{"criteria":{}}</yan-delivery-review>后文'), '前文后文');
-  assert.equal(stripProtocolBlocks('正文<yan-delivery-contract>\nintent: presentable'), '正文');
-  assert.equal(stripProtocolBlocks('正文<yan-delivery-cont'), '正文');
+  assert.equal(stripProtocolBlocks('前文<z-delivery-review>{"criteria":{}}</z-delivery-review>后文'), '前文后文');
+  assert.equal(stripProtocolBlocks('正文<z-delivery-contract>\nintent: presentable'), '正文');
+  assert.equal(stripProtocolBlocks('正文<z-delivery-cont'), '正文');
   assert.equal(stripProtocolBlocks('普通正文'), '普通正文');
 });

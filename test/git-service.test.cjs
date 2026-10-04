@@ -9,7 +9,7 @@ const test = require('node:test');
 const git = require('../lib/git-service');
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-git-service-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-git-service-'));
 }
 
 function write(filePath, content) {
@@ -34,10 +34,10 @@ test('full local Git workflow supports staging, commits, branches and diffs', as
   let status = await git.initRepository(repo);
   assert.equal(status.isRepository, true);
   assert.equal(status.currentBranch, 'main');
-  await git.setIdentity(repo, 'Yan Test', 'yan@example.com');
+  await git.setIdentity(repo, 'Z Test', 'z@example.com');
 
-  write(path.join(repo, 'README.md'), '# Yan\n');
-  write(path.join(repo, '.yanagent', 'memory.json'), '{"internal":true}\n');
+  write(path.join(repo, 'README.md'), '# Z\n');
+  write(path.join(repo, '.zagent', 'memory.json'), '{"internal":true}\n');
   status = await git.repositoryStatus(repo);
   assert.equal(status.changes.length, 1);
   assert.equal(status.changes[0].status, 'untracked');
@@ -48,7 +48,7 @@ test('full local Git workflow supports staging, commits, branches and diffs', as
   status = await git.unstageFiles(repo, ['README.md']);
   assert.equal(status.stagedCount, 0);
   await git.stageFiles(repo, [], true);
-  assert.equal(execFileSync('git', ['-C', repo, 'ls-files', '.yanagent'], { encoding: 'utf8', windowsHide: true }).trim(), '');
+  assert.equal(execFileSync('git', ['-C', repo, 'ls-files', '.zagent'], { encoding: 'utf8', windowsHide: true }).trim(), '');
   status = await git.unstageFiles(repo, [], true);
   assert.equal(status.stagedCount, 0);
   await git.stageFiles(repo, [], true);
@@ -58,7 +58,7 @@ test('full local Git workflow supports staging, commits, branches and diffs', as
 
   status = await git.createBranch(repo, 'feature/git-ui');
   assert.equal(status.currentBranch, 'feature/git-ui');
-  write(path.join(repo, 'README.md'), '# Yan\n\nGit UI\n');
+  write(path.join(repo, 'README.md'), '# Z\n\nGit UI\n');
   status = await git.repositoryStatus(repo);
   assert.deepEqual(status.diffStats, { added: 2, deleted: 0, binaryFiles: 0 });
   const unstagedDiff = await git.diff(repo, 'README.md');
@@ -79,7 +79,7 @@ test('full local Git workflow supports staging, commits, branches and diffs', as
   assert.ok(log.some(commit => commit.subject === 'Add Git UI'));
   assert.ok(log.some(commit => commit.refs.includes('origin/pr-1')));
 
-  write(path.join(repo, 'README.md'), '# Yan\n\nReviewed Git UI\n');
+  write(path.join(repo, 'README.md'), '# Z\n\nReviewed Git UI\n');
   write(path.join(repo, 'NEW.md'), 'new file\n');
   const review = await git.review(repo);
   assert.equal(review.count, 2);
@@ -97,7 +97,7 @@ test('review documents resolve HEAD, index, worktree, untracked and deleted cont
   fs.mkdirSync(repo);
 
   await git.initRepository(repo);
-  await git.setIdentity(repo, 'Yan Review', 'review@example.com');
+  await git.setIdentity(repo, 'Z Review', 'review@example.com');
   write(path.join(repo, 'tracked.txt'), 'base\n');
   write(path.join(repo, 'deleted.txt'), 'remove me\n');
   await git.stageFiles(repo, [], true);
@@ -147,7 +147,7 @@ test('remote workflow supports push, clone, fetch and fast-forward pull', async 
   fs.mkdirSync(source);
 
   await git.initRepository(source);
-  await git.setIdentity(source, 'Yan Source', 'source@example.com');
+  await git.setIdentity(source, 'Z Source', 'source@example.com');
   write(path.join(source, 'app.txt'), 'one\n');
   await git.stageFiles(source, [], true);
   await git.commit(source, 'Initial');
@@ -159,7 +159,7 @@ test('remote workflow supports push, clone, fetch and fast-forward pull', async 
 
   const cloned = await git.cloneRepository(remote, clone);
   assert.equal(cloned.status.currentBranch, 'main');
-  await git.setIdentity(clone, 'Yan Clone', 'clone@example.com');
+  await git.setIdentity(clone, 'Z Clone', 'clone@example.com');
   write(path.join(clone, 'app.txt'), 'one\ntwo\n');
   await git.stageFiles(clone, [], true);
   await git.commit(clone, 'Update from clone');
@@ -182,18 +182,18 @@ test('validation rejects option injection and paths outside the repository', asy
   assert.throws(() => git.validateRemoteName('-origin'), { code: 'INVALID_REMOTE' });
   assert.throws(() => git.validateRemoteUrl('--upload-pack=evil'), { code: 'INVALID_REMOTE_URL' });
   await assert.rejects(() => git.stageFiles(repo, [path.join(root, 'outside.txt')]), { code: 'PATH_OUTSIDE_REPOSITORY' });
-  await assert.rejects(() => git.stageFiles(repo, ['.yanagent/memory.json']), { code: 'INVALID_REPOSITORY_PATH' });
-  assert.equal(git.remoteWebUrl('git@github.com:666-gy/Yan-Agent.git'), 'https://github.com/666-gy/Yan-Agent');
+  await assert.rejects(() => git.stageFiles(repo, ['.zagent/memory.json']), { code: 'INVALID_REPOSITORY_PATH' });
+  assert.equal(git.remoteWebUrl('git@github.com:666-gy/Z-Agent.git'), 'https://github.com/666-gy/Z-Agent');
   assert.equal(
-    git.remoteWebUrl('https://oauth2:super-secret@github.com/666-gy/Yan-Agent.git'),
-    'https://github.com/666-gy/Yan-Agent'
+    git.remoteWebUrl('https://oauth2:super-secret@github.com/666-gy/Z-Agent.git'),
+    'https://github.com/666-gy/Z-Agent'
   );
 
-  await git.addRemote(repo, 'secure', 'https://oauth2:super-secret@github.com/666-gy/Yan-Agent.git');
+  await git.addRemote(repo, 'secure', 'https://oauth2:super-secret@github.com/666-gy/Z-Agent.git');
   const status = await git.repositoryStatus(repo);
   const secureRemote = status.remotes.find(remote => remote.name === 'secure');
-  assert.equal(secureRemote.fetchUrl, 'https://github.com/666-gy/Yan-Agent.git');
-  assert.equal(secureRemote.webUrl, 'https://github.com/666-gy/Yan-Agent');
+  assert.equal(secureRemote.fetchUrl, 'https://github.com/666-gy/Z-Agent.git');
+  assert.equal(secureRemote.webUrl, 'https://github.com/666-gy/Z-Agent');
   assert.equal(secureRemote.credentialsHidden, true);
 });
 
@@ -264,9 +264,9 @@ test('status derives branch facts from the porcelain header', async t => {
   assert.equal(unborn.detached, false);
   assert.equal(unborn.ahead, 0);
 
-  await git.setIdentity(repo, 'Yan Header', 'header@example.com');
+  await git.setIdentity(repo, 'Z Header', 'header@example.com');
   // Heavy status (identity among it) must be fresh right after the mutation.
-  assert.equal((await git.repositoryStatus(repo)).identity.name, 'Yan Header');
+  assert.equal((await git.repositoryStatus(repo)).identity.name, 'Z Header');
 
   write(path.join(repo, 'app.txt'), 'one\n');
   await git.stageFiles(repo, [], true);
@@ -290,8 +290,8 @@ test('status derives branch facts from the porcelain header', async t => {
   const twin = path.join(root, 'twin');
   execFileSync('git', ['--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/main'], { windowsHide: true });
   execFileSync('git', ['clone', '--quiet', remote, twin], { windowsHide: true });
-  execFileSync('git', ['-C', twin, 'config', 'user.name', 'Yan Test'], { windowsHide: true });
-  execFileSync('git', ['-C', twin, 'config', 'user.email', 'yan@example.com'], { windowsHide: true });
+  execFileSync('git', ['-C', twin, 'config', 'user.name', 'Z Test'], { windowsHide: true });
+  execFileSync('git', ['-C', twin, 'config', 'user.email', 'z@example.com'], { windowsHide: true });
   execFileSync('git', ['-C', twin, 'commit', '--allow-empty', '-m', 'Twin side'], { windowsHide: true });
   execFileSync('git', ['-C', twin, 'push', '--quiet'], { windowsHide: true });
   status = await git.fetchRemote(repo);
@@ -318,7 +318,7 @@ test('review reports rename content edits instead of full add/delete counts', as
   fs.mkdirSync(repo);
 
   await git.initRepository(repo);
-  await git.setIdentity(repo, 'Yan Rename', 'rename@example.com');
+  await git.setIdentity(repo, 'Z Rename', 'rename@example.com');
   write(path.join(repo, 'old.txt'), 'l1\nl2\nl3\n');
   await git.stageFiles(repo, [], true);
   await git.commit(repo, 'Base');

@@ -1,10 +1,10 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {_electron:electron}=require('playwright');
 (async()=>{let app;try{
- const root=path.resolve(__dirname,'..');app=await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,YAN_E2E_MODE:'1',YAN_E2E_USER_DATA_DIR:fs.mkdtempSync(path.join(os.tmpdir(),'yan-stars-'))}});
+ const root=path.resolve(__dirname,'..');app=await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,Z_E2E_MODE:'1',Z_E2E_USER_DATA_DIR:fs.mkdtempSync(path.join(os.tmpdir(),'z-stars-'))}});
  const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(/Shader Error|VALIDATE_STATUS|Error compiling|FRAGMENT shader|VERTEX shader/i.test(m.text()))errors.push(m.text());});
- await page.waitForFunction(()=>window.YanTiangongHost&&typeof showWindowView==='function'&&state.currentSession);
- await page.evaluate(()=>showWindowView('work-gui'));const frame=page.frameLocator('.yan-palace-frame');
+ await page.waitForFunction(()=>window.ZTiangongHost&&typeof showWindowView==='function'&&state.currentSession);
+ await page.evaluate(()=>showWindowView('work-gui'));const frame=page.frameLocator('.z-palace-frame');
  await frame.getByRole('button',{name:'推 门 入 阙',exact:false}).click();await frame.locator('#palace-entry').waitFor({state:'detached'});
  await frame.locator('#music-replay.playing').waitFor();
  await frame.getByRole('button',{name:'重播入阙音乐',exact:true}).click();await frame.locator('#music-replay.playing').waitFor();

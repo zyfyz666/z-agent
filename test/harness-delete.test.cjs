@@ -6,15 +6,15 @@ const os = require('node:os');
 const path = require('node:path');
 const { ContinualHarnessStore } = require('../lib/continual-harness');
 const { policyId } = require('../lib/behavior-policy');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-delete-'));
-process.env.YAN_HARNESS_GLOBAL_STATE_PATH = path.join(root, 'global.json');
-process.env.YAN_HARNESS_TEST_EXPORTS = '1';
-delete process.env.YAN_HARNESS_CONTEXT_DIR;
-const { deleteEntry } = require('../lib/yan-harness-mcp');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-delete-'));
+process.env.Z_HARNESS_GLOBAL_STATE_PATH = path.join(root, 'global.json');
+process.env.Z_HARNESS_TEST_EXPORTS = '1';
+delete process.env.Z_HARNESS_CONTEXT_DIR;
+const { deleteEntry } = require('../lib/z-harness-mcp');
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 test('deletion survives recovery, stale review and reload; explicit rollback restores it', async () => {
-  const store = new ContinualHarnessStore({ globalPath: process.env.YAN_HARNESS_GLOBAL_STATE_PATH });
+  const store = new ContinualHarnessStore({ globalPath: process.env.Z_HARNESS_GLOBAL_STATE_PATH });
   const content = '以后搜索优先使用 AnySearch 工具。';
   const id = `prompt-${policyId(content).replace(/^user-policy-/, '')}`;
   const failed = await store.apply({ trigger: `Agent-requested refinement: ${content}`, edits: [] }, { source: 'agent_refine' });

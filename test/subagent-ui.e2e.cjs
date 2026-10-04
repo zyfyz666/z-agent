@@ -5,11 +5,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-subagent-ui-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-subagent-ui-'));
 const output = path.join(appRoot, 'output', 'playwright');
 fs.mkdirSync(output, { recursive: true });
 const launch = () => electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot,
-  env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir } });
+  env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir } });
 
 (async () => {
   let app;
@@ -37,7 +37,7 @@ const launch = () => electron.launch({ executablePath: require('electron'), args
         state: { status, input: { subagent_type: 'explorer', description: call === 'a' ? '读取 taste skill 的设计规范' : '检查子代理 UI 事件与持久化', prompt: 'Inspect the assigned files.' },
           metadata: { sessionId: `child-${call}` }, output: result }
       } } });
-      window.subagentTestChild = (call, event) => ({ type: 'yan.subagent.event', data: { callId: call, childSessionID: `child-${call}`, subagentType: 'explorer', event } });
+      window.subagentTestChild = (call, event) => ({ type: 'z.subagent.event', data: { callId: call, childSessionID: `child-${call}`, subagentType: 'explorer', event } });
       applyOpenCodeEvent(ctx, subagentTestTask('a'));
       renderOpenCodeRunNow(ctx);
       renderSubagentUi();
@@ -151,7 +151,7 @@ const launch = () => electron.launch({ executablePath: require('electron'), args
       const record = { id: 'perf-child', role: 'mapper', status: 'running', startedAt: Date.now(), timeline: [], revision: 0, outputRevision: 0 };
       const run = { subagents: [record], subagentWorkflowVersion: 1, timeline: [] };
       let renders = 0;
-      const controller = YanSubagentPanel.create({ getSessionId: () => 'perf', getRuns: () => [run],
+      const controller = ZSubagentPanel.create({ getSessionId: () => 'perf', getRuns: () => [run],
         renderNative: () => { renders++; }, renderActions: () => {}, openSidebar: () => {}, escapeHtml });
       controller.open('perf-child');
       const colors = {};

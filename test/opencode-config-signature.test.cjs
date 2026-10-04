@@ -15,12 +15,12 @@ const Module = require('node:module');
 const crypto = require('node:crypto');
 
 const appRoot = path.resolve(__dirname, '..');
-const stubDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-main-stub-'));
+const stubDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-main-stub-'));
 
 const electronStub = {
   app: {
     getPath: () => stubDataDir,
-    getName: () => 'yan-agent',
+    getName: () => 'z-agent',
     getVersion: () => '1.4.0',
     getLocale: () => 'zh',
     getPreferredSystemLanguages: () => ['zh-CN'],
@@ -64,7 +64,7 @@ Module._load = function stubbedLoad(request, parent, isMain) {
 
 let main;
 try {
-  process.env.YAN_MAIN_TEST_EXPORTS = '1';
+  process.env.Z_MAIN_TEST_EXPORTS = '1';
   main = require(path.join(appRoot, 'main.js'));
 } finally {
   Module._load = originalLoad;
@@ -88,13 +88,13 @@ test('real builders: config signature is identical across tasks with different w
   const configA = main.__test.getOpenCodeRuntimeConfig({}, {
     mcpServers: mcpA,
     workspace: workspaceA,
-    taskId: 'yan-task-alpha',
+    taskId: 'z-task-alpha',
     skillOnly: false
   });
   const configB = main.__test.getOpenCodeRuntimeConfig({}, {
     mcpServers: mcpB,
     workspace: workspaceB,
-    taskId: 'yan-task-beta-different',
+    taskId: 'z-task-beta-different',
     skillOnly: false
   });
   assert.equal(signatureOf(configA), signatureOf(configB));
@@ -146,10 +146,10 @@ test('real builders: context settings enter the OpenCode config signature', () =
 });
 
 test('media MCP env carries no per-run workspace and points at the registry', () => {
-  const server = main.__test.buildYanMediaMcpServer({}, appRoot, { workspace: 'C:\\should-not-appear' });
+  const server = main.__test.buildZMediaMcpServer({}, appRoot, { workspace: 'C:\\should-not-appear' });
   assert.ok(server, 'media server not built');
-  assert.ok(server.env.YAN_MEDIA_WORKSPACE_REGISTRY, 'registry env missing');
-  const decoded = JSON.parse(Buffer.from(server.env.YAN_MEDIA_RUNTIME, 'base64').toString('utf8'));
+  assert.ok(server.env.Z_MEDIA_WORKSPACE_REGISTRY, 'registry env missing');
+  const decoded = JSON.parse(Buffer.from(server.env.Z_MEDIA_RUNTIME, 'base64').toString('utf8'));
   assert.equal(decoded.access.workspace, undefined, 'per-run workspace leaked into media runtime env');
   assert.equal(JSON.stringify(server.env).includes('should-not-appear'), false);
 });
@@ -182,8 +182,8 @@ test('real runtime config declares native image input when visual relay is disab
   assert.equal(model.attachment, true);
   assert.deepEqual(model.modalities.input, ['text', 'image']);
 
-  const mediaServer = main.__test.buildYanMediaMcpServer(cfg, appRoot);
-  const mediaRuntime = JSON.parse(Buffer.from(mediaServer.env.YAN_MEDIA_RUNTIME, 'base64').toString('utf8'));
+  const mediaServer = main.__test.buildZMediaMcpServer(cfg, appRoot);
+  const mediaRuntime = JSON.parse(Buffer.from(mediaServer.env.Z_MEDIA_RUNTIME, 'base64').toString('utf8'));
   assert.equal(mediaRuntime.vision.enabled, false);
 });
 
@@ -211,11 +211,11 @@ test('self-evolution mode alone exposes the Harness MCP to a run', () => {
     workMode: 'evolution',
     evolutionMode: true
   });
-  assert.equal(normal.find(server => server.id === 'yan_harness').taskEnabled, false);
-  assert.equal(evolution.find(server => server.id === 'yan_harness').taskEnabled, true);
+  assert.equal(normal.find(server => server.id === 'z_harness').taskEnabled, false);
+  assert.equal(evolution.find(server => server.id === 'z_harness').taskEnabled, true);
   // Management listings keep the Harness visible when no run context decides.
   const management = main.__test.getOpenCodeMcpServers({}, { includeInactiveSerena: true });
-  assert.notEqual(management.find(server => server.id === 'yan_harness').taskEnabled, false);
+  assert.notEqual(management.find(server => server.id === 'z_harness').taskEnabled, false);
   // The per-run task flag never enters the shared kernel signature.
   const normalConfig = main.__test.getOpenCodeRuntimeConfig({}, { mcpServers: normal });
   const evolutionConfig = main.__test.getOpenCodeRuntimeConfig({}, { mcpServers: evolution });
@@ -223,7 +223,7 @@ test('self-evolution mode alone exposes the Harness MCP to a run', () => {
 });
 
 test('task MCP trimming uses only construction-level signals, never prompt text', () => {
-  // v1.6.0 regression: prompt-keyword trimming silently denied yan_media for
+  // v1.6.0 regression: prompt-keyword trimming silently denied z_media for
   // Chinese requests like "画一张海报" that missed the keyword list. A wrong
   // deny is a hard capability loss, so trimming must stay exact: builtins
   // only disappear when they cannot exist for this run, and workspace

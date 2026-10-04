@@ -8,17 +8,17 @@ const { execFileSync } = require('node:child_process');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-git-ui-e2e-'));
+const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-git-ui-e2e-'));
 const userDataDir = path.join(testRoot, 'user-data');
 const workspace = path.join(testRoot, 'workspace');
 const nonRepoWorkspace = path.join(testRoot, 'non-repo-workspace');
 const remote = path.join(testRoot, 'remote.git');
 const outputDir = path.join(appRoot, 'output', 'playwright');
-const dialogScreenshotPath = path.join(outputDir, `yan-git-commit-dialog-${Date.now()}.png`);
-const graphScreenshotPath = path.join(outputDir, `yan-git-graph-${Date.now()}.png`);
-const reviewScreenshotPath = path.join(outputDir, `yan-review-sidebar-codex-${Date.now()}.png`);
-const reviewLightScreenshotPath = path.join(outputDir, `yan-review-sidebar-light-${Date.now()}.png`);
-const reviewNarrowScreenshotPath = path.join(outputDir, `yan-review-sidebar-narrow-${Date.now()}.png`);
+const dialogScreenshotPath = path.join(outputDir, `z-git-commit-dialog-${Date.now()}.png`);
+const graphScreenshotPath = path.join(outputDir, `z-git-graph-${Date.now()}.png`);
+const reviewScreenshotPath = path.join(outputDir, `z-review-sidebar-codex-${Date.now()}.png`);
+const reviewLightScreenshotPath = path.join(outputDir, `z-review-sidebar-light-${Date.now()}.png`);
+const reviewNarrowScreenshotPath = path.join(outputDir, `z-review-sidebar-narrow-${Date.now()}.png`);
 
 function runGit(args) {
   return execFileSync('git', args, { cwd: workspace, encoding: 'utf8', windowsHide: true }).trim();
@@ -29,7 +29,7 @@ fs.mkdirSync(workspace, { recursive: true });
 fs.mkdirSync(nonRepoWorkspace, { recursive: true });
 fs.mkdirSync(outputDir, { recursive: true });
 runGit(['init', '-b', 'main']);
-runGit(['config', 'user.name', 'Yan UI Test']);
+runGit(['config', 'user.name', 'Z UI Test']);
 runGit(['config', 'user.email', 'git-ui@example.com']);
 fs.writeFileSync(path.join(workspace, 'README.md'), '# Git workbench\n', 'utf8');
 fs.mkdirSync(path.join(workspace, 'src'), { recursive: true });
@@ -61,8 +61,8 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -74,9 +74,9 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
     await page.locator('#taskBar:not(.hidden)').waitFor();
 
     await page.evaluate(async targetWorkspace => {
-      const updated = await window.yan.setSessionWorkspace(state.currentSession.id, targetWorkspace, false);
+      const updated = await window.z.setSessionWorkspace(state.currentSession.id, targetWorkspace, false);
       state.currentSession.workspace = updated.workspace;
-      state.config = await window.yan.activateWorkspace(updated.workspace);
+      state.config = await window.z.activateWorkspace(updated.workspace);
       syncCurrentSessionWorkspace(updated.workspace);
       updateTaskBar();
       await refreshTaskGitStatus({ force: true });
@@ -93,13 +93,13 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
     assert.equal(await page.locator('#taskGitDiffStats').textContent(), '+3-1');
     await page.locator('#taskGitChangesBtn').click();
     await page.locator('#rs-review.active').waitFor();
-    await page.locator('#yanDshReviewFrame').waitFor();
-    const reviewFrame = page.frameLocator('#yanDshReviewFrame');
+    await page.locator('#zDshReviewFrame').waitFor();
+    const reviewFrame = page.frameLocator('#zDshReviewFrame');
     await reviewFrame.locator('.sidenav .navitem').first().waitFor();
     // Review diffs load lazily per file (the panel only receives the manifest
     // up front): open the first file and wait for its diff before asserting.
     await reviewFrame.locator('.sidenav .navitem').first().click();
-    await reviewFrame.locator('#file-0[data-yan-state="loaded"]').waitFor({ timeout: 20_000 });
+    await reviewFrame.locator('#file-0[data-z-state="loaded"]').waitFor({ timeout: 20_000 });
     const initialReviewText = await reviewFrame.locator('body').textContent();
     assert.match(initialReviewText, /README\.md/);
     assert.match(initialReviewText, /Pending change/);
@@ -107,12 +107,12 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
     const reviewOpenWidth = await page.locator('#rs-review').evaluate(panel => panel.getBoundingClientRect().width);
     assert.ok(reviewOpenWidth >= 560, `review sidebar did not expand: ${reviewOpenWidth}`);
     const initialEmbeddedLayout = await reviewFrame.locator('html').evaluate(root => ({
-      filebarWidth: parseFloat(getComputedStyle(root).getPropertyValue('--yan-review-filebar-width')) || 0,
+      filebarWidth: parseFloat(getComputedStyle(root).getPropertyValue('--z-review-filebar-width')) || 0,
       navLeft: getComputedStyle(document.querySelector('.sidenav')).left,
       navRight: getComputedStyle(document.querySelector('.sidenav')).right,
       mainMarginLeft: getComputedStyle(document.querySelector('main')).marginLeft,
       mainMarginRight: getComputedStyle(document.querySelector('main')).marginRight,
-      hasResizer: !!document.querySelector('#yan-review-filebar-resizer')
+      hasResizer: !!document.querySelector('#z-review-filebar-resizer')
     }));
     assert.equal(initialEmbeddedLayout.navRight, '0px');
     assert.match(initialEmbeddedLayout.navLeft, /\d+(?:\.\d+)?px/);
@@ -121,7 +121,7 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
     assert.equal(initialEmbeddedLayout.mainMarginRight, `${initialEmbeddedLayout.filebarWidth}px`);
     assert.equal(initialEmbeddedLayout.hasResizer, true);
 
-    let resizerBox = await reviewFrame.locator('#yan-review-filebar-resizer').boundingBox();
+    let resizerBox = await reviewFrame.locator('#z-review-filebar-resizer').boundingBox();
     assert.ok(resizerBox);
     await page.mouse.move(resizerBox.x + resizerBox.width / 2, resizerBox.y + 24);
     await page.mouse.down();
@@ -130,14 +130,14 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
     const widenedFilebar = await reviewFrame.locator('.sidenav').evaluate(element => parseFloat(getComputedStyle(element).width));
     assert.ok(widenedFilebar > initialEmbeddedLayout.filebarWidth, `filebar did not widen: ${initialEmbeddedLayout.filebarWidth} -> ${widenedFilebar}`);
 
-    await reviewFrame.locator('#yan-review-filebar-resizer').dispatchEvent('pointerdown', { pointerId: 11, clientX: 99999, bubbles: true });
-    await reviewFrame.locator('#yan-review-filebar-resizer').dispatchEvent('pointerup', { pointerId: 11, clientX: 99999, bubbles: true });
+    await reviewFrame.locator('#z-review-filebar-resizer').dispatchEvent('pointerdown', { pointerId: 11, clientX: 99999, bubbles: true });
+    await reviewFrame.locator('#z-review-filebar-resizer').dispatchEvent('pointerup', { pointerId: 11, clientX: 99999, bubbles: true });
     const collapsedByDragWidth = await reviewFrame.locator('.sidenav').evaluate(element => parseFloat(getComputedStyle(element).width));
     assert.ok(collapsedByDragWidth < widenedFilebar, `filebar did not shrink: ${widenedFilebar} -> ${collapsedByDragWidth}`);
-    await reviewFrame.locator('html').evaluate(root => { root.style.setProperty('--yan-review-filebar-width', '0px'); root.classList.add('yan-filebar-zero'); });
+    await reviewFrame.locator('html').evaluate(root => { root.style.setProperty('--z-review-filebar-width', '0px'); root.classList.add('z-filebar-zero'); });
     const zeroFilebarWidth = await reviewFrame.locator('.sidenav').evaluate(element => parseFloat(getComputedStyle(element).width));
     assert.equal(zeroFilebarWidth, 0);
-    await reviewFrame.locator('html').evaluate((root, width) => { root.style.setProperty('--yan-review-filebar-width', `${width}px`); root.classList.remove('yan-filebar-zero'); }, initialEmbeddedLayout.filebarWidth);
+    await reviewFrame.locator('html').evaluate((root, width) => { root.style.setProperty('--z-review-filebar-width', `${width}px`); root.classList.remove('z-filebar-zero'); }, initialEmbeddedLayout.filebarWidth);
     const commentLineNumber = reviewFrame.locator('#file-0 .dsh-cr-num-new[data-cr-line]').first();
     await commentLineNumber.hover();
     const commentHoverStyle = await commentLineNumber.evaluate(element => {
@@ -155,7 +155,7 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
     assert.equal(await longNav.getAttribute('href'), '#file-1');
     await longNav.click();
     // Lazy review loads the file's diff on demand; wait for the rows to land.
-    await reviewFrame.locator('#file-1[data-yan-state="loaded"]').waitFor({ timeout: 20_000 });
+    await reviewFrame.locator('#file-1[data-z-state="loaded"]').waitFor({ timeout: 20_000 });
     assert.ok(await reviewFrame.locator('#file-1 .dsh-cr-row').count() > 0);
 
     const darkReviewBackground = await reviewFrame.locator('body').evaluate(element => getComputedStyle(element).backgroundColor);
@@ -192,7 +192,7 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
       return {
         panelOverflow: panel.scrollWidth > panel.clientWidth + 1,
         panelWidth: panel.getBoundingClientRect().width,
-        frameWidth: document.querySelector('#yanDshReviewFrame')?.getBoundingClientRect().width || 0
+        frameWidth: document.querySelector('#zDshReviewFrame')?.getBoundingClientRect().width || 0
       };
     });
     assert.equal(narrowReviewGeometry.panelOverflow, false, JSON.stringify(narrowReviewGeometry));
@@ -253,9 +253,9 @@ fs.writeFileSync(path.join(workspace, 'src', 'long.js'), `${longSource.join('\n'
 
     await page.locator('#taskGitGraphCloseBtn').click();
     await page.evaluate(async targetWorkspace => {
-      const updated = await window.yan.setSessionWorkspace(state.currentSession.id, targetWorkspace, false);
+      const updated = await window.z.setSessionWorkspace(state.currentSession.id, targetWorkspace, false);
       state.currentSession.workspace = updated.workspace;
-      state.config = await window.yan.activateWorkspace(updated.workspace);
+      state.config = await window.z.activateWorkspace(updated.workspace);
       syncCurrentSessionWorkspace(updated.workspace);
       updateTaskBar();
       await refreshTaskGitStatus({ force: true });

@@ -1,11 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $runner = Join-Path $PSScriptRoot 'officecli-runner.js'
 
-if ($env:YAN_ELECTRON_RUNTIME) {
+if ($env:Z_ELECTRON_RUNTIME) {
   $previousMode = $env:ELECTRON_RUN_AS_NODE
   try {
     $env:ELECTRON_RUN_AS_NODE = '1'
-    & $env:YAN_ELECTRON_RUNTIME $runner @args
+    & $env:Z_ELECTRON_RUNTIME $runner @args
     exit $LASTEXITCODE
   } finally {
     $env:ELECTRON_RUN_AS_NODE = $previousMode
@@ -14,7 +14,7 @@ if ($env:YAN_ELECTRON_RUNTIME) {
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
-  [Console]::Error.WriteLine('[Yan OfficeCLI] 未找到 Yan runtime 或 Node.js。')
+  [Console]::Error.WriteLine('[Z OfficeCLI] 未找到 Z runtime 或 Node.js。')
   exit 1
 }
 

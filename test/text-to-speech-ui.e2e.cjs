@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const root = path.resolve(__dirname, '..');
-const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-tts-ui-'));
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'z-tts-ui-'));
 const output = path.join(root, 'output', 'tts-read-aloud');
 
 (async () => {
@@ -16,7 +16,7 @@ const output = path.join(root, 'output', 'tts-read-aloud');
       executablePath: require('electron'),
       args: [root],
       cwd: root,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userData }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userData }
     });
     const page = await app.firstWindow();
     const errors = [];
@@ -122,7 +122,7 @@ const output = path.join(root, 'output', 'tts-read-aloud');
       { timeout: 5000 }
     );
     const previewCall = await page.evaluate(() => window.__ttsLog.texts[window.__ttsLog.texts.length - 1]);
-    assert.ok(previewCall.includes('Yan Agent'), 'preview synthesizes the sample sentence');
+    assert.ok(previewCall.includes('Z Agent'), 'preview synthesizes the sample sentence');
     await page.screenshot({ path: path.join(output, 'tts-settings.png') });
 
     assert.deepEqual(errors, []);

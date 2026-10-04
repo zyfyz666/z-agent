@@ -5,19 +5,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
+const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
 
 const source = fs.readFileSync(path.join(__dirname, '../build/installer.nsh'), 'utf8');
-const clear = source.match(/  Function un\.YanClearData\r?\n[\s\S]*?  FunctionEnd/)?.[0];
+const clear = source.match(/  Function un\.ZClearData\r?\n[\s\S]*?  FunctionEnd/)?.[0];
 assert.ok(clear, 'the explicit data-cleanup function must exist');
 assert.ok(clear.indexOf('SetShellVarContext current') < clear.indexOf('Push "$APPDATA'));
-assert.match(source, /Call un\.YanClearData\s+\$\{If\} \$installMode == "all"\s+SetShellVarContext all/);
+assert.match(source, /Call un\.ZClearData\s+\$\{If\} \$installMode == "all"\s+SetShellVarContext all/);
 assert.match(source, /SetFont "Microsoft YaHei UI" 9/);
 assert.match(source, /taskkill\.exe" \/F \/T \/IM "\$\{APP_EXECUTABLE_FILENAME\}"/);
-assert.doesNotMatch(source, /\/IM "(?:Yan Agent|yan-agent)\.exe"/);
+assert.doesNotMatch(source, /\/IM "(?:Z Agent|z-agent)\.exe"/);
 assert.deepEqual([...clear.matchAll(/Push "\$(APPDATA|LOCALAPPDATA)\\([^"\r\n]+)"/g)].map(match => [match[1], match[2]]), [
   ['APPDATA', 'wd-agent'], ['APPDATA', 'WD Agent'], ['LOCALAPPDATA', 'wd-agent'], ['LOCALAPPDATA', 'WD Agent']
 ]);
-assert.doesNotMatch(clear, /\$TEMP\b|yan-agent|Yan Agent|YanAgent/,
+assert.doesNotMatch(clear, /\$TEMP\b|z-agent|Z Agent|ZAgent/,
   'cleanup must not target upstream profiles or shared temporary files');
 
 function findNsis() {
@@ -41,20 +42,20 @@ function runIsolatedFixture(nsis) {
   const quoteNsis = value => value.replaceAll('$', '$$');
   const targetDirs = ['roaming/wd-agent', 'roaming/WD Agent', 'local/wd-agent', 'local/WD Agent'];
   const preservedDirs = [
-    'roaming/yan-agent', 'roaming/Yan Agent', 'local/yan-agent', 'local/Yan Agent',
-    'local/yan-agent-updater', 'temp/YanAgent', 'temp/yan-agent-update',
-    'temp/yan-dsh-code-review', 'workspace/project', 'roaming/OtherApp'
+    'roaming/z-agent', 'roaming/Z Agent', 'local/z-agent', 'local/Z Agent',
+    'local/z-agent-updater', 'temp/ZAgent', 'temp/z-agent-update',
+    'temp/z-dsh-code-review', 'workspace/project', 'roaming/OtherApp'
   ];
-  const preservedFiles = ['temp/yan-agent-yanxi-code-workspace.json'];
+  const preservedFiles = [`temp/${LEGACY_NAMESPACE.agentHyphen}-${LEGACY_NAMESPACE.lower}xi-code-workspace.json`];
   // Never run the real uninstaller. Every filesystem root is redirected into
   // this fixture; process termination and PATH modification are not invoked.
   const isolated = source
     .replaceAll('$APPDATA', quoteNsis(root) + '\\roaming')
     .replaceAll('$LOCALAPPDATA', quoteNsis(root) + '\\local')
     .replaceAll('$TEMP', quoteNsis(root) + '\\temp')
-    .replace('Call un.YanStopProcesses', 'DetailPrint "Test: no process termination"')
-    .replaceAll('!insertmacro RunYanPathUpdate "remove"', 'DetailPrint "Test: no PATH modification"');
-  assert.doesNotMatch(isolated, /Call un\.YanStopProcesses|!insertmacro RunYanPathUpdate "remove"/);
+    .replace('Call un.ZStopProcesses', 'DetailPrint "Test: no process termination"')
+    .replaceAll('!insertmacro RunZPathUpdate "remove"', 'DetailPrint "Test: no PATH modification"');
+  assert.doesNotMatch(isolated, /Call un\.ZStopProcesses|!insertmacro RunZPathUpdate "remove"/);
   const include = path.join(root, 'fixture.nsh');
   const script = `Unicode true
 Name "Z uninstall regression fixture"
@@ -77,9 +78,9 @@ Section
  WriteUninstaller "${quoteNsis(root)}\\uninstall.exe"
 SectionEnd
 Section "Uninstall"
- StrCpy $YanClearDataRequested "1"
+ StrCpy $ZClearDataRequested "1"
  IfFileExists "${quoteNsis(root)}\\preserve-test" 0 +2
- StrCpy $YanClearDataRequested "0"
+ StrCpy $ZClearDataRequested "0"
  IfFileExists "${quoteNsis(root)}\\lock-test" 0 +2
  System::Call 'Kernel32::CreateFileW(w "${quoteNsis(root)}\\roaming\\wd-agent\\locked.txt", i 0x80000000, i 0, p 0, i 3, i 0, p 0) p.r9'
  !insertmacro customUnInstall

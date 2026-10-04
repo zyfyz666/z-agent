@@ -71,13 +71,13 @@
   // status or reconnecting therefore never adds a second intervention.
   function reduce(snapshot, event) {
     const data = event?.data || event?.properties || {};
-    if (event?.type === 'yan.thrash.watchdog.status') {
+    if (event?.type === 'z.thrash.watchdog.status') {
       const next = normalizeSnapshot(data);
       if (next && snapshot?.updatedAt != null && next.updatedAt != null
         && next.updatedAt < snapshot.updatedAt) return snapshot;
       return next || snapshot || null;
     }
-    if (event?.type !== 'yan.thrash.watchdog') return snapshot || null;
+    if (event?.type !== 'z.thrash.watchdog') return snapshot || null;
     const entry = normalizeEvent(data);
     if (!entry) return snapshot || null;
     const previous = normalizeSnapshot(snapshot) || normalizeSnapshot({ enabled: true, phase: 'observing', partial: true });

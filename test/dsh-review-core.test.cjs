@@ -32,7 +32,7 @@ test('rawDiffFromSummary feeds real two-file patches through the upstream parser
   assert.deepEqual(stats, { added: 2, removed: 1, files: 1 });
 });
 
-test('rawDiffFromSummary reconstructs hunks from the Yan row model', () => {
+test('rawDiffFromSummary reconstructs hunks from the Z row model', () => {
   const rawText = core.rawDiffFromSummary({
     files: [{
       path: 'src/rows.js',

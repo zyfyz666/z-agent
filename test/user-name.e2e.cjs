@@ -5,19 +5,21 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
+const { LEGACY_NAMESPACE, LEGACY_STORAGE } = require('../lib/legacy-compat');
+const legacyDefaultName = `${LEGACY_NAMESPACE.title}xi`;
 
 const appRoot = path.resolve(__dirname, '..');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-user-name-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'z-workbench');
 const screenshotPath = path.join(outputDir, 'user-name-z.png');
 fs.mkdirSync(outputDir, { recursive: true });
-fs.mkdirSync(path.join(userDataDir, 'YanData'), { recursive: true });
+fs.mkdirSync(path.join(userDataDir, LEGACY_STORAGE.stableDataDir), { recursive: true });
 // Exercise an old profile's default name without reading a real user profile.
-fs.writeFileSync(path.join(userDataDir, 'YanData', 'config.json'), JSON.stringify({ userName: 'Yanxi', language: 'zh-CN' }));
+fs.writeFileSync(path.join(userDataDir, LEGACY_STORAGE.stableDataDir, 'config.json'), JSON.stringify({ userName: legacyDefaultName, language: 'zh-CN' }));
 const pageErrors = [];
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir };
   delete env.ELECTRON_RUN_AS_NODE;
   const application = await electron.launch({
     executablePath: require('electron'),
@@ -46,8 +48,10 @@ async function launch() {
     application = launched.application;
     let page = launched.page;
 
+    assert.equal(await page.evaluate(async () => (await window.z.getConfig()).userName), legacyDefaultName,
+      'the existing profile is loaded and its stored name is preserved until the user edits it');
     assert.equal(await page.locator('#greeting').textContent(), '下一步，交给 Z。');
-    assert.doesNotMatch(await page.locator('body').innerText(), /Yanxi/i);
+    assert.doesNotMatch(await page.locator('body').innerText(), new RegExp(legacyDefaultName, 'i'));
     await page.locator('#settingsBtn').click();
     await page.locator('#userNameInput').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#userNameInput').inputValue(), '', 'the legacy default must not appear as a personal name');
@@ -57,7 +61,7 @@ async function launch() {
     await page.locator('#userNameInput').fill('Alice');
     assert.equal(await page.locator('#greeting').textContent(), 'Alice，下一步做什么？');
     await page.locator('#userNameInput').press('Enter');
-    await page.waitForFunction(async () => (await window.yan.getConfig()).userName === 'Alice');
+    await page.waitForFunction(async () => (await window.z.getConfig()).userName === 'Alice');
 
     const geometry = await page.evaluate(() => {
       const input = document.querySelector('#userNameInput').getBoundingClientRect();
@@ -87,7 +91,7 @@ async function launch() {
     await page.locator('#settingsBtn').click();
     await page.locator('#userNameInput').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#userNameInput').inputValue(), 'Alice');
-    assert.equal(await page.evaluate(async () => (await window.yan.getConfig()).userName), 'Alice');
+    assert.equal(await page.evaluate(async () => (await window.z.getConfig()).userName), 'Alice');
     assert.deepEqual(pageErrors, []);
 
     console.log(JSON.stringify({ ok: true, screenshotPath, legacyDefaultHidden: true, personalNamePersisted: true, pageErrors }));

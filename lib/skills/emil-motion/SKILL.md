@@ -5,7 +5,7 @@ description: High-craft UI motion and Apple-style interaction guidance based on 
 
 # Emil Motion
 
-Yan Agent bundles four focused motion-design Skills. This entry routes the task without loading the whole suite.
+Z Agent bundles four focused motion-design Skills. This entry routes the task without loading the whole suite.
 
 Use `read_skill` for only the relevant module:
 

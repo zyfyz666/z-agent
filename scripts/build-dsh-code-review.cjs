@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * Build the vendored dsh-code-review core for the Yan renderer.
+ * Build the vendored dsh-code-review core for the Z renderer.
  *
  * Upstream: https://github.com/yangzhe1991/dsh-code-review (MIT).
- * The bundled entry (src/yan-bridge.ts) contains no UI: it re-exports the
+ * The bundled entry (src/z-bridge.ts) contains no UI: it re-exports the
  * verbatim upstream pure modules. All review markup/styles/strings are
  * generated at runtime by the untouched upstream diff-view.ts.
  */
@@ -19,7 +19,7 @@ async function main() {
   const outDir = path.join(root, 'renderer', 'vendor', 'dsh-code-review');
   await mkdir(outDir, { recursive: true });
   await build({
-    entryPoints: [path.join(srcDir, 'yan-bridge.ts')],
+    entryPoints: [path.join(srcDir, 'z-bridge.ts')],
     outfile: path.join(outDir, 'core.js'),
     bundle: true,
     format: 'iife',

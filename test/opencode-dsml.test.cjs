@@ -159,17 +159,17 @@ test('workspace runs overwrite stale tool overrides with explicit active permiss
     accessMode: 'full',
     permissions: { allowFileRead: true, allowFileWrite: true, allowNetwork: true }
   });
-  assert.equal(blankPermission.some(rule => rule.permission === 'yan_skills_*' && rule.action === 'allow'), true);
+  assert.equal(blankPermission.some(rule => rule.permission === 'z_skills_*' && rule.action === 'allow'), true);
   assert.equal(blankPermission.some(rule => rule.permission === 'edit' && rule.action === 'ask'), true);
 });
 
 test('session permission rules preserve patterned policies and plan restrictions', () => {
-  const skillDirectory = 'C:/YanData/skills';
+  const skillDirectory = 'C:/ZData/skills';
   const rules = permissionRulesForRun({
     hasUserWorkspace: true,
     accessMode: 'delegate',
     workMode: 'plan',
-    yanSkillDirectory: skillDirectory,
+    zSkillDirectory: skillDirectory,
     permissions: { allowFileRead: true, allowFileWrite: true, allowNetwork: true }
   });
   assert.equal(rules.some(rule => (
@@ -249,7 +249,7 @@ test('normalizes octet-stream file parts before OpenAI-compatible conversion', a
 
 
 test('turns source attachments into text before creating OpenCode file parts', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-attachment-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-attachment-'));
   try {
     const source = path.join(root, 'broken.cpp');
     const image = path.join(root, 'diagram.png');
@@ -272,7 +272,7 @@ test('turns source attachments into text before creating OpenCode file parts', (
 });
 
 test('turns a selected directory attachment into a bounded path reference', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-directory-attachment-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-directory-attachment-'));
   try {
     const parts = buildPromptParts({
       prompt: '检查这个文件夹',
@@ -485,8 +485,8 @@ test('recovery parsers exclude quoted examples beside a real invocation', () => 
 });
 
 test('factory wraps callable and named language-model entry points', async () => {
-  const { createYanDsmlProvider } = await providerModule;
-  const provider = createYanDsmlProvider({
+  const { createZDsmlProvider } = await providerModule;
+  const provider = createZDsmlProvider({
     name: 'deepseek',
     baseURL: 'https://api.deepseek.com',
     apiKey: 'not-used'
@@ -506,7 +506,7 @@ test('uses the optimized local provider for OpenAI-compatible models', () => {
     providerId: 'deepseek',
     providerName: 'DeepSeek',
     modelId: 'deepseek-v4-flash',
-    deepSeekProviderModule: 'file:///staged/yan-provider.mjs'
+    deepSeekProviderModule: 'file:///staged/z-provider.mjs'
   });
   const qwen = buildOpenCodeConfig({
     providerId: 'qwen',
@@ -514,11 +514,11 @@ test('uses the optimized local provider for OpenAI-compatible models', () => {
     modelId: 'qwen3.5-plus',
     qwemProviderModule: 'file:///staged/qwem-provider.mjs'
   });
-  assert.equal(deepseek.provider.deepseek.npm, 'file:///staged/yan-provider.mjs');
+  assert.equal(deepseek.provider.deepseek.npm, 'file:///staged/z-provider.mjs');
   // Qwen models resolve to the QWEM family adapter, not the DSML module.
   assert.equal(qwen.provider.qwen.npm, 'file:///staged/qwem-provider.mjs');
-  assert.equal(deepseek.provider.deepseek.options.yanDsmlCompatibility, true);
-  assert.equal(qwen.provider.qwen.options.yanQwemCompatibility, true);
+  assert.equal(deepseek.provider.deepseek.options.zDsmlCompatibility, true);
+  assert.equal(qwen.provider.qwen.options.zQwemCompatibility, true);
 });
 
 test('keeps provider requests alive for slow first-token and streaming models', () => {
@@ -533,11 +533,11 @@ test('keeps provider requests alive for slow first-token and streaming models', 
   assert.equal(options.timeout, false, 'disable the total request deadline, including for long healthy streams');
   assert.ok(options.headerTimeout > 10_000);
   assert.ok(options.chunkTimeout > 15_000);
-  assert.equal('yan' in config, false);
+  assert.equal('z' in config, false);
 });
 
 test('always stages the bundled provider outside the application directory', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-provider-stage-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-provider-stage-'));
   try {
     const moduleUrl = stageDeepSeekProviderModule({
       appRoot: path.resolve(__dirname, '..'),
@@ -554,7 +554,7 @@ test('always stages the bundled provider outside the application directory', () 
 });
 
 test('stages an installed app.asar provider into the user runtime', () => {
-  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-provider-asar-'));
+  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-provider-asar-'));
   const packedRoot = path.join(packageRoot, 'resources', 'app.asar');
   const unpackedProvider = path.join(`${packedRoot}.unpacked`, 'lib', 'opencode-dsml-provider.bundle.mjs');
   const dataDir = path.join(packageRoot, 'data');
@@ -572,7 +572,7 @@ test('stages an installed app.asar provider into the user runtime', () => {
 });
 
 test('repairs a corrupted provider in the content-addressed runtime cache', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-provider-repair-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-provider-repair-'));
   try {
     const options = { appRoot: path.resolve(__dirname, '..'), dataDir };
     const moduleUrl = stageDeepSeekProviderModule(options);
@@ -609,23 +609,23 @@ test('configures Anthropic-compatible gateways with the native provider', () => 
   assert.equal(config.provider['custom-ark'].npm, '@ai-sdk/anthropic');
   assert.equal(config.provider['custom-ark'].options.baseURL, 'https://ark.example.com/v1');
   assert.equal(config.provider['custom-ark'].options.headers.Authorization, 'Bearer secret-key');
-  assert.equal('yanDsmlCompatibility' in config.provider['custom-ark'].options, false);
+  assert.equal('zDsmlCompatibility' in config.provider['custom-ark'].options, false);
 });
 
 test('provider fetch leaves non-stream responses untouched', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const original = new Response('{"ok":true}', {
     status: 201,
     headers: { 'content-type': 'application/json' }
   });
-  const optimizedFetch = createYanProviderFetch(async () => original);
+  const optimizedFetch = createZProviderFetch(async () => original);
   const result = await optimizedFetch('https://example.test');
   assert.equal(result, original);
   assert.equal(await result.text(), '{"ok":true}');
 });
 
 test('provider fetch normalizes non-stream native tool-call ids', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const original = new Response(JSON.stringify({
     choices: [{
       message: {
@@ -639,7 +639,7 @@ test('provider fetch normalizes non-stream native tool-call ids', async () => {
   }), {
     headers: { 'content-type': 'application/json' }
   });
-  const result = await createYanProviderFetch(async () => original)('https://example.test');
+  const result = await createZProviderFetch(async () => original)('https://example.test');
   const payload = await result.json();
   const ids = payload.choices[0].message.tool_calls.map(call => call.id);
   assert.equal(ids[0], '7');
@@ -648,14 +648,14 @@ test('provider fetch normalizes non-stream native tool-call ids', async () => {
 });
 
 test('provider fetch preserves ordinary fragmented SSE streams', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const chunks = [
     { id: 'chat-plain', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '你' }, finish_reason: null }] },
     { id: 'chat-plain', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '好' }, finish_reason: null }] },
     { id: 'chat-plain', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
   ];
   const source = `${chunks.map(sseBlock).join('')}data: [DONE]\n\n`;
-  const optimizedFetch = createYanProviderFetch(async () => fragmentedSseResponse(source, 1));
+  const optimizedFetch = createZProviderFetch(async () => fragmentedSseResponse(source, 1));
   const response = await optimizedFetch('https://example.test');
   const output = parseSseOutput(await response.text());
   assert.deepEqual(output, [...chunks, '[DONE]']);
@@ -663,7 +663,7 @@ test('provider fetch preserves ordinary fragmented SSE streams', async () => {
 });
 
 test('provider fetch settles at DONE when the gateway leaves the body open', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const source = sseBlock({
     id: 'chat-open', object: 'chat.completion.chunk',
     choices: [{ index: 0, delta: { content: 'done' }, finish_reason: null }]
@@ -677,7 +677,7 @@ test('provider fetch settles at DONE when the gateway leaves the body open', asy
     },
     cancel() {}
   }), { headers: { 'content-type': 'text/event-stream' } });
-  const result = await createYanProviderFetch(async () => response)('https://example.test');
+  const result = await createZProviderFetch(async () => response)('https://example.test');
   const output = await Promise.race([
     result.text(),
     new Promise((_, reject) => setTimeout(() => reject(new Error('stream did not settle at DONE')), 500))
@@ -686,7 +686,7 @@ test('provider fetch settles at DONE when the gateway leaves the body open', asy
 });
 
 test('provider fetch coalesces large native tool arguments before SDK parsing', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const writeArguments = JSON.stringify({
     filePath: 'C:\\workspace\\large.js',
     content: 'const value = "测试🚀";\n'.repeat(2_048)
@@ -728,7 +728,7 @@ test('provider fetch coalesces large native tool arguments before SDK parsing', 
     { id: 'chat-tools', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 } }
   ];
   const source = `${chunks.map(sseBlock).join('')}data: [DONE]\n\n`;
-  const optimizedFetch = createYanProviderFetch(async () => fragmentedSseResponse(source, 13));
+  const optimizedFetch = createZProviderFetch(async () => fragmentedSseResponse(source, 13));
   const output = parseSseOutput(await (await optimizedFetch('https://example.test')).text());
   const toolChunks = output.filter(item => item !== '[DONE]' && item.choices?.some(choice => choice.delta?.tool_calls));
   assert.equal(toolChunks.length, 3);
@@ -760,7 +760,7 @@ test('provider fetch coalesces large native tool arguments before SDK parsing', 
 });
 
 test('provider fetch repairs missing and non-string native tool-call ids', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const chunks = [
     {
       id: 'chat-image-follow-up',
@@ -798,7 +798,7 @@ test('provider fetch repairs missing and non-string native tool-call ids', async
     }
   ];
   const source = `${chunks.map(sseBlock).join('')}data: [DONE]\n\n`;
-  const response = await createYanProviderFetch(async () => fragmentedSseResponse(source, 5))('https://example.test');
+  const response = await createZProviderFetch(async () => fragmentedSseResponse(source, 5))('https://example.test');
   const output = parseSseOutput(await response.text());
   const toolChunks = output.filter(item => item !== '[DONE]' && item.choices?.some(choice => choice.delta?.tool_calls));
   assert.equal(toolChunks.length, 3);
@@ -816,7 +816,7 @@ test('provider fetch repairs missing and non-string native tool-call ids', async
 });
 
 test('provider fetch flushes a tool call when an SSE stream ends without DONE', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const args = '{"filePath":"a.js","content":"ok"}';
   const source = sseBlock({
     id: 'chat-no-done',
@@ -827,7 +827,7 @@ test('provider fetch flushes a tool call when an SSE stream ends without DONE', 
       finish_reason: 'tool_calls'
     }]
   });
-  const optimizedFetch = createYanProviderFetch(async () => fragmentedSseResponse(source, 7));
+  const optimizedFetch = createZProviderFetch(async () => fragmentedSseResponse(source, 7));
   const output = parseSseOutput(await (await optimizedFetch('https://example.test')).text());
   assert.equal(output[0].choices[0].delta.tool_calls[0].id, 'call-1');
   assert.equal(output[0].choices[0].delta.tool_calls[0].function.name, 'write');
@@ -837,7 +837,7 @@ test('provider fetch flushes a tool call when an SSE stream ends without DONE', 
 });
 
 test('optimized provider presents one complete tool call to the AI SDK', async () => {
-  const { createYanDsmlProvider } = await providerModule;
+  const { createZDsmlProvider } = await providerModule;
   const args = JSON.stringify({
     filePath: 'C:\\workspace\\snake.js',
     content: 'const snake = "测试";\n'.repeat(256)
@@ -865,10 +865,10 @@ test('optimized provider presents one complete tool call to the AI SDK', async (
     object: 'chat.completion.chunk',
     choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
   })}\n\ndata: [DONE]\n\n`;
-  const provider = createYanDsmlProvider({
+  const provider = createZDsmlProvider({
     baseURL: 'https://example.test/v1',
     apiKey: 'test',
-    yanDsmlCompatibility: false,
+    zDsmlCompatibility: false,
     fetch: async () => fragmentedSseResponse(source, 5)
   });
   const result = await provider('test-model').doStream({
@@ -906,24 +906,24 @@ test('bounds provider reservation and tool output for stable multi-step prefill'
   assert.deepEqual(config.tool_output, { max_lines: 800, max_bytes: 98_304 });
   assert.equal(config.compaction.preserve_recent_tokens, 24_000);
   assert.deepEqual(Object.keys(config.mcp), ['alpha', 'zeta']);
-  assert.equal('yan' in config, false);
-  assert.equal('yanInputTokensPerSecond' in config.provider.openai.options, false);
-  assert.equal('yanInputThroughputBaseline' in config.provider.openai.options, false);
+  assert.equal('z' in config, false);
+  assert.equal('zInputTokensPerSecond' in config.provider.openai.options, false);
+  assert.equal('zInputThroughputBaseline' in config.provider.openai.options, false);
 });
 
 test('preserves nested OpenCode validation details', () => {
   assert.equal(openCodeErrorDetail({
     error: {
       name: 'ConfigInvalidError',
-      data: { message: 'Unrecognized key: yan' }
+      data: { message: 'Unrecognized key: z' }
     }
-  }), 'ConfigInvalidError: Unrecognized key: yan');
+  }), 'ConfigInvalidError: Unrecognized key: z');
 });
 
 test('provider fetch restores reasoning_content when a DeepSeek replay loses it', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   const seen = [];
-  const optimizedFetch = createYanProviderFetch(async (input, init) => {
+  const optimizedFetch = createZProviderFetch(async (input, init) => {
     seen.push(JSON.parse(String(init?.body || '{}')));
     return new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } });
   }, { deepSeekReasoningReplay: true });
@@ -947,10 +947,10 @@ test('provider fetch restores reasoning_content when a DeepSeek replay loses it'
 });
 
 test('DeepSeek alias composes OpenAI shaping with all assistant reasoning replay and preserves caller headers', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   let body;
   const headers = new Headers({ 'content-length': '123' });
-  const fetch = createYanProviderFetch(async (_url, init) => {
+  const fetch = createZProviderFetch(async (_url, init) => {
     body = JSON.parse(init.body);
     assert.equal(init.headers.has('content-length'), false);
     return new Response('{}', { headers: { 'content-type': 'application/json' } });
@@ -970,9 +970,9 @@ test('DeepSeek alias composes OpenAI shaping with all assistant reasoning replay
 });
 
 test('provider fetch keeps replay history untouched for non-DeepSeek providers', async () => {
-  const { createYanProviderFetch } = await providerModule;
+  const { createZProviderFetch } = await providerModule;
   let bodySeen = null;
-  const optimizedFetch = createYanProviderFetch(async (input, init) => {
+  const optimizedFetch = createZProviderFetch(async (input, init) => {
     bodySeen = JSON.parse(String(init?.body || '{}'));
     return new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } });
   });

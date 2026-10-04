@@ -9,7 +9,7 @@ const task = (callId, status = 'running', output = '', sessionID = '') => ({ typ
   state: { status, input: { subagent_type: 'explorer', description: `Explore ${callId}`, prompt: 'Read taste skill' },
     metadata: { sessionId: sessionID }, output }
 } } });
-const child = (callId, event, childSessionID = '') => ({ type: 'yan.subagent.event', data: { callId, childSessionID, subagentType: 'explorer', event } });
+const child = (callId, event, childSessionID = '') => ({ type: 'z.subagent.event', data: { callId, childSessionID, subagentType: 'explorer', event } });
 const textPart = (id, text, end = false) => ({ type: 'message.part.updated', properties: { part: { id, messageID: 'm', type: 'text', text, time: end ? { end: 200 } : {} } } });
 const toolPart = (id, status) => ({ type: 'message.part.updated', properties: { part: { id, callID: id, type: 'tool', tool: 'read', state: { status, input: { filePath: 'SKILL.md' }, output: status === 'completed' ? 'Taste guidance' : '' } } } });
 
@@ -173,7 +173,7 @@ test('bridge forwards all direct child roles and hydrates assistant workflow wit
   assert.equal(records.length, 2);
   assert.ok(records.every(record => record.timeline.some(item => item.content === 'Read taste skill')));
   assert.ok(records.every(record => !record.timeline.some(item => item.content === 'Private delegated prompt')));
-  assert.equal(events.filter(e => e.type === 'yan.subagent.history').length, 2);
+  assert.equal(events.filter(e => e.type === 'z.subagent.history').length, 2);
   assert.equal(bridge.state.timeline.some(item => item.type === 'tool_call'), false);
 });
 

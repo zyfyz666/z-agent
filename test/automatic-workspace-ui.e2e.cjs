@@ -9,13 +9,13 @@ const appRoot = path.resolve(__dirname, '..');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-default-workspace-ui-'));
 const outputDir = path.join(appRoot, 'output', 'default-workspace-ui');
 fs.mkdirSync(outputDir, { recursive: true });
-const configPath = path.join(userDataDir, 'YanData', 'config.json');
+const configPath = path.join(userDataDir, 'ZData', 'config.json');
 const report = { ok: false, checks: [], pageErrors: [] };
 let application;
 let page;
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -51,13 +51,13 @@ function externalConfigEdit(edit) {
     assert.equal(await page.locator('#taskBarFolder').evaluate(element => element.classList.contains('task-bar-folder-empty')), false);
     report.checks.push('new task has an accessible automatic folder without asking for a workspace');
 
-    const second = await page.evaluate(() => window.yan.createSession(true, ''));
+    const second = await page.evaluate(() => window.z.createSession(true, ''));
     assert.equal(second.workspaceKind, 'default');
     assert.notEqual(second.workspace, first.workspace);
     await page.evaluate(async session => {
       session.title = 'Persistent automatic task';
       session.messages = [{ role: 'user', content: 'Keep this task for restart verification', ts: Date.now() }];
-      await window.yan.saveSession(session);
+      await window.z.saveSession(session);
     }, second);
     fs.writeFileSync(path.join(first.workspace, 'retained.txt'), 'persistent task output');
     assert.equal(fs.existsSync(path.join(second.workspace, 'retained.txt')), false);
@@ -67,8 +67,8 @@ function externalConfigEdit(edit) {
 
     const savedConnections = await page.evaluate(async () => {
       const base = { apiKey: 'local-fixture-only', baseUrl: 'http://127.0.0.1:9/v1', streamEnabled: true };
-      const main = await window.yan.connectionsSave({ ...base, name: 'Original gateway', preset: 'openai', apiFormat: 'responses', manualModelId: 'gpt-6-astra' });
-      const claude = await window.yan.connectionsSave({ ...base, name: 'Secondary gateway', preset: 'anthropic', apiFormat: 'anthropic', manualModelId: 'claude-opus-4-7' });
+      const main = await window.z.connectionsSave({ ...base, name: 'Original gateway', preset: 'openai', apiFormat: 'responses', manualModelId: 'gpt-6-astra' });
+      const claude = await window.z.connectionsSave({ ...base, name: 'Secondary gateway', preset: 'anthropic', apiFormat: 'anthropic', manualModelId: 'claude-opus-4-7' });
       if (!main.ok || !claude.ok) throw new Error('Fixture connection save failed');
       openSettings('api');
       return { main: main.connection.providerId, claude: claude.connection.providerId };
@@ -108,12 +108,12 @@ function externalConfigEdit(edit) {
 
     await application.close(); application = null;
     await launch();
-    const restored = await page.evaluate(id => window.yan.getSession(id), second.id);
+    const restored = await page.evaluate(id => window.z.getSession(id), second.id);
     assert(restored, 'default task survives restart');
     assert.equal(restored.workspace, second.workspace);
     assert.equal(restored.workspaceKind, 'default');
     assert.equal(fs.readFileSync(path.join(first.workspace, 'retained.txt'), 'utf8'), 'persistent task output');
-    const connections = await page.evaluate(() => window.yan.connectionsList());
+    const connections = await page.evaluate(() => window.z.connectionsList());
     assert.deepEqual(connections.map(connection => connection.name), ['Renamed gateway']);
     report.checks.push('task folders, generated files, and supplier changes survive a full restart');
     assert.deepEqual(report.pageErrors, []);
@@ -122,7 +122,7 @@ function externalConfigEdit(edit) {
   } catch (error) {
     report.failure = error.message;
     report.uiNames = await page?.locator('#connectionList .provider-name').allTextContents().catch(() => []);
-    report.apiNames = await page?.evaluate(async () => (await window.yan.connectionsList()).map(connection => connection.name)).catch(() => []);
+    report.apiNames = await page?.evaluate(async () => (await window.z.connectionsList()).map(connection => connection.name)).catch(() => []);
     if (fs.existsSync(configPath)) {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       report.diskNames = (config.api.connections || []).map(connection => config.api.providerSuppliers[connection.providerId]?.[0]?.name);

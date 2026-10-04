@@ -14,7 +14,7 @@ function tool(name, targetKey) {
 }
 
 function makeDir() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-mining-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-mining-'));
   return {
     root,
     file: path.join(root, 'skill-evolution.json'),

@@ -169,8 +169,8 @@ test('compacts a reused OpenCode session and measures its active post-compaction
     auto: true
   });
   assert.deepEqual(events.map(event => event.type), [
-    'yan.context.compression.started',
-    'yan.context.compression.completed'
+    'z.context.compression.started',
+    'z.context.compression.completed'
   ]);
 });
 
@@ -194,7 +194,7 @@ test('keeps the task runnable when proactive compaction fails', async () => {
   assert.equal(result.failed, true);
   assert.equal(result.messages, original);
   assert.match(result.error, /provider unavailable/i);
-  assert.equal(events.at(-1).type, 'yan.context.compression.failed');
+  assert.equal(events.at(-1).type, 'z.context.compression.failed');
 });
 
 test('compacts from a content estimate when the provider reports no usage', async () => {
@@ -282,10 +282,10 @@ test('anchors the original objective once a compaction boundary exists', () => {
       parts: [{
         type: 'text',
         text: [
-          'The following is bounded prior history from this Yan session.',
-          '<yan-session-history>\nuser: old stuff\nassistant: older answer\n</yan-session-history>',
+          'The following is bounded prior history from this Z session.',
+          '<z-session-history>\nuser: old stuff\nassistant: older answer\n</z-session-history>',
           '帮我写一个记账库，后端零错误、100 分安全。',
-          '<yan-turn-context task_id="t1">\nworkspace stuff\n</yan-turn-context>'
+          '<z-turn-context task_id="t1">\nworkspace stuff\n</z-turn-context>'
         ].join('\n')
       }]
     },
@@ -294,9 +294,9 @@ test('anchors the original objective once a compaction boundary exists', () => {
   ]);
   assert.ok(anchor);
   assert.match(anchor.objective, /记账库/);
-  assert.doesNotMatch(anchor.objective, /yan-session-history/);
+  assert.doesNotMatch(anchor.objective, /z-session-history/);
   assert.doesNotMatch(anchor.objective, /old stuff/);
-  assert.doesNotMatch(anchor.objective, /yan-turn-context/);
+  assert.doesNotMatch(anchor.objective, /z-turn-context/);
 });
 
 test('truncates oversized objectives and renders the anchor system block', () => {
@@ -305,7 +305,7 @@ test('truncates oversized objectives and renders the anchor system block', () =>
   assert.ok(longObjective.length > 1_600);
   assert.equal(buildCompactionAnchor([]), null);
   const system = contextAnchorSystem(request);
-  assert.match(system, /<yan-compaction-anchor>/);
+  assert.match(system, /<z-compaction-anchor>/);
   assert.match(system, /目标/);
   assert.ok(system.length < longObjective.length);
   assert.equal(contextAnchorSystem({}), '');

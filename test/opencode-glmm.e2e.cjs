@@ -10,7 +10,7 @@ const path = require('node:path');
 const { OpenCodeSidecar, buildOpenCodeConfig, stageGlmmProviderModule } = require('../lib/opencode-sidecar');
 
 const appRoot = path.resolve(__dirname, '..');
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-glmm-runtime-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-glmm-runtime-'));
 const workspace = path.join(directory, 'workspace');
 fs.mkdirSync(workspace);
 const file = path.join(workspace, 'adapter.txt');
@@ -178,7 +178,7 @@ const server = http.createServer((request, response) => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(directory).startsWith('yan-glmm-runtime-'));
+    assert.ok(path.basename(directory).startsWith('z-glmm-runtime-'));
     fs.rmSync(directory, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

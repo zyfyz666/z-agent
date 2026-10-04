@@ -43,7 +43,7 @@ function externalChangeFixture(t) {
   Object.assign(context, {
     refreshSessions: async () => context.setSessionSummaries(await context.listSessionSummaries({ includeRewindBackups: true })),
     settleAgentInteractionsForSession: id => effects.push(['settle', id]),
-    clearYanCoreQueuedIntentsForThread: async id => effects.push(['clear-intents', id]),
+    clearZCoreQueuedIntentsForThread: async id => effects.push(['clear-intents', id]),
     restoreComposerDraftForSession: id => effects.push(['restore-draft', id]),
     clearMessages: () => effects.push(['clear-messages']),
     setEmptyState: value => effects.push(['empty-state', value]),
@@ -127,7 +127,7 @@ test('deleting a viewed backup still clears its draft and queued intent and open
 test('rewind backup dialog and dynamic counts are localized without changing stored user text', () => {
   const context = vm.createContext({ window: {}, URLSearchParams });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../renderer/i18n.js'), 'utf8'), context);
-  const translate = text => context.window.YanI18n.translate(text, 'en');
+  const translate = text => context.window.ZI18n.translate(text, 'en');
   assert.equal(translate('回退备份（4）'), 'Rewind backups (4)');
   assert.equal(translate('118 条消息'), '118 messages');
   assert.equal(translate('1 条消息 · 已继续'), '1 message · Continued');

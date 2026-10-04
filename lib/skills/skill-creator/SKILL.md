@@ -1,29 +1,29 @@
 ---
 name: skill-creator
-description: Guide for creating effective Yan Agent skills. Use when the user wants to create or update a skill that extends Yan Agent with specialized knowledge, workflows, or tool integrations.
+description: Guide for creating effective Z Agent skills. Use when the user wants to create or update a skill that extends Z Agent with specialized knowledge, workflows, or tool integrations.
 metadata:
   short-description: Create or update a skill
 ---
 
 # Skill Creator
 
-This skill provides guidance for creating effective skills for Yan Agent.
+This skill provides guidance for creating effective skills for Z Agent.
 
-## Yan Agent Integration
+## Z Agent Integration
 
-This copy is bundled with Yan Agent. Treat Yan Agent's own Skill store as the only
+This copy is bundled with Z Agent. Treat Z Agent's own Skill store as the only
 authority for Skill installation, discovery, invocation, and deletion.
 
 - Never read from or write to Codex's `.codex/skills`, an external `.agents/skills`, or another application's Skill directory.
-- Use Yan Agent's Skill MCP and its configured `YAN_SKILLS_ROOT` when a Skill must be installed or updated. The runtime supplies that path; do not guess it from the host machine.
-- The scripts and references shipped beside this file are reusable resources for the bundled Skill. A newly created Skill belongs in Yan Agent's managed Skill root, not in the user's workspace, unless the user explicitly asks for an export there.
+- Use Z Agent's Skill MCP and its configured `Z_SKILLS_ROOT` when a Skill must be installed or updated. The runtime supplies that path; do not guess it from the host machine.
+- The scripts and references shipped beside this file are reusable resources for the bundled Skill. A newly created Skill belongs in Z Agent's managed Skill root, not in the user's workspace, unless the user explicitly asks for an export there.
 - Installation is a Skill-store operation and remains available in a blank conversation; it does not require a workspace.
 
 ## About Skills
 
-Skills are modular, self-contained folders that extend Yan Agent's capabilities by providing
+Skills are modular, self-contained folders that extend Z Agent's capabilities by providing
 specialized knowledge, workflows, and tools. Think of them as "onboarding guides" for specific
-domains or tasks—they transform Yan Agent from a general-purpose agent into a specialized agent
+domains or tasks—they transform Z Agent from a general-purpose agent into a specialized agent
 equipped with procedural knowledge that no model can fully possess.
 
 ### What Skills Provide
@@ -37,9 +37,9 @@ equipped with procedural knowledge that no model can fully possess.
 
 ### Concise is Key
 
-The context window is a public good. Skills share the context window with everything else Yan Agent needs: system prompt, conversation history, other Skills' metadata, and the actual user request.
+The context window is a public good. Skills share the context window with everything else Z Agent needs: system prompt, conversation history, other Skills' metadata, and the actual user request.
 
-**Default assumption: Yan Agent is already very smart.** Only add context Yan Agent doesn't already have. Challenge each piece of information: "Does Yan Agent really need this explanation?" and "Does this paragraph justify its token cost?"
+**Default assumption: Z Agent is already very smart.** Only add context Z Agent doesn't already have. Challenge each piece of information: "Does Z Agent really need this explanation?" and "Does this paragraph justify its token cost?"
 
 Prefer concise examples over verbose explanations.
 
@@ -53,7 +53,7 @@ Match the level of specificity to the task's fragility and variability:
 
 **Low freedom (specific scripts, few parameters)**: Use when operations are fragile and error-prone, consistency is critical, or a specific sequence must be followed.
 
-Think of Yan Agent as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
+Think of Z Agent as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
 
 ### Protect Validation Integrity
 
@@ -86,7 +86,7 @@ skill-name/
 
 Every SKILL.md consists of:
 
-- **Frontmatter** (YAML): Contains `name` and `description` fields. These are the only fields that Yan Agent reads to determine when the skill gets used, thus it is very important to be clear and comprehensive in describing what the skill is, and when it should be used.
+- **Frontmatter** (YAML): Contains `name` and `description` fields. These are the only fields that Z Agent reads to determine when the skill gets used, thus it is very important to be clear and comprehensive in describing what the skill is, and when it should be used.
 - **Body** (Markdown): Instructions and guidance for using the skill. Only loaded AFTER the skill triggers (if at all).
 
 #### Agents metadata (recommended)
@@ -108,27 +108,27 @@ Executable code (Python/Bash/etc.) for tasks that require deterministic reliabil
 - **When to include**: When the same code is being rewritten repeatedly or deterministic reliability is needed
 - **Example**: `scripts/rotate_pdf.py` for PDF rotation tasks
 - **Benefits**: Token efficient, deterministic, may be executed without loading into context
-- **Note**: Scripts may still need to be read by Yan Agent for patching or environment-specific adjustments
+- **Note**: Scripts may still need to be read by Z Agent for patching or environment-specific adjustments
 
 ##### References (`references/`)
 
-Documentation and reference material intended to be loaded as needed into context to inform Yan Agent's process and thinking.
+Documentation and reference material intended to be loaded as needed into context to inform Z Agent's process and thinking.
 
-- **When to include**: For documentation that Yan Agent should reference while working
+- **When to include**: For documentation that Z Agent should reference while working
 - **Examples**: `references/finance.md` for financial schemas, `references/mnda.md` for company NDA template, `references/policies.md` for company policies, `references/api_docs.md` for API specifications
 - **Use cases**: Database schemas, API documentation, domain knowledge, company policies, detailed workflow guides
-- **Benefits**: Keeps SKILL.md lean, loaded only when Yan Agent determines it's needed
+- **Benefits**: Keeps SKILL.md lean, loaded only when Z Agent determines it's needed
 - **Best practice**: If files are large (>10k words), include grep search patterns in SKILL.md
 - **Avoid duplication**: Information should live in either SKILL.md or references files, not both. Prefer references files for detailed information unless it's truly core to the skill—this keeps SKILL.md lean while making information discoverable without hogging the context window. Keep only essential procedural instructions and workflow guidance in SKILL.md; move detailed reference material, schemas, and examples to references files.
 
 ##### Assets (`assets/`)
 
-Files not intended to be loaded into context, but rather used within the output Yan Agent produces.
+Files not intended to be loaded into context, but rather used within the output Z Agent produces.
 
 - **When to include**: When the skill needs files that will be used in the final output
 - **Examples**: `assets/logo.png` for brand assets, `assets/slides.pptx` for PowerPoint templates, `assets/frontend-template/` for HTML/React boilerplate, `assets/font.ttf` for typography
 - **Use cases**: Templates, images, icons, boilerplate code, fonts, sample documents that get copied or modified
-- **Benefits**: Separates output resources from documentation, enables Yan Agent to use files without loading them into context
+- **Benefits**: Separates output resources from documentation, enables Z Agent to use files without loading them into context
 
 #### What to Not Include in a Skill
 
@@ -148,7 +148,7 @@ Skills use a three-level loading system to manage context efficiently:
 
 1. **Metadata (name + description)** - Always in context (~100 words)
 2. **SKILL.md body** - When skill triggers (<5k words)
-3. **Bundled resources** - As needed by Yan Agent (Unlimited because scripts can be executed without reading into context window)
+3. **Bundled resources** - As needed by Z Agent (Unlimited because scripts can be executed without reading into context window)
 
 #### Progressive Disclosure Patterns
 
@@ -173,7 +173,7 @@ Extract text with pdfplumber:
 - **Examples**: See [EXAMPLES.md](EXAMPLES.md) for common patterns
 ```
 
-Yan Agent loads FORMS.md, REFERENCE.md, or EXAMPLES.md only when needed.
+Z Agent loads FORMS.md, REFERENCE.md, or EXAMPLES.md only when needed.
 
 **Pattern 2: Domain-specific organization**
 
@@ -189,7 +189,7 @@ bigquery-skill/
     └── marketing.md (campaigns, attribution)
 ```
 
-When a user asks about sales metrics, Yan Agent only reads sales.md.
+When a user asks about sales metrics, Z Agent only reads sales.md.
 
 Similarly, for skills supporting multiple frameworks or variants, organize by variant:
 
@@ -202,7 +202,7 @@ cloud-deploy/
     └── azure.md (Azure deployment patterns)
 ```
 
-When the user chooses AWS, Yan Agent only reads aws.md.
+When the user chooses AWS, Z Agent only reads aws.md.
 
 **Pattern 3: Conditional details**
 
@@ -223,12 +223,12 @@ For simple edits, modify the XML directly.
 **For OOXML details**: See [OOXML.md](OOXML.md)
 ```
 
-Yan Agent reads REDLINING.md or OOXML.md only when the user needs those features.
+Z Agent reads REDLINING.md or OOXML.md only when the user needs those features.
 
 **Important guidelines:**
 
 - **Avoid deeply nested references** - Keep references one level deep from SKILL.md. All reference files should link directly from SKILL.md.
-- **Structure longer reference files** - For files longer than 100 lines, include a table of contents at the top so Yan Agent can see the full scope when previewing.
+- **Structure longer reference files** - For files longer than 100 lines, include a table of contents at the top so Z Agent can see the full scope when previewing.
 
 ## Skill Creation Process
 
@@ -263,7 +263,7 @@ For example, when building an image-editor skill, relevant questions include:
 - "Can you give some examples of how this skill would be used?"
 - "I can imagine users asking for things like 'Remove the red-eye from this image' or 'Rotate this image'. Are there other ways you imagine this skill being used?"
 - "What would a user say that should trigger this skill?"
-- "Where should I create this skill? If you do not have a preference, I will place it in Yan Agent's managed Skill root so Yan Agent can discover it automatically."
+- "Where should I create this skill? If you do not have a preference, I will place it in Z Agent's managed Skill root so Z Agent can discover it automatically."
 
 To avoid overwhelming users, avoid asking too many questions in a single message. Start with the most important questions and follow up as needed for better effectiveness.
 
@@ -299,7 +299,7 @@ At this point, it is time to actually create the skill.
 
 Skip this step only if the skill being developed already exists. In this case, continue to the next step.
 
-Before running `init_skill.py`, ask where the user wants the skill created. If they do not specify a location, use the Yan Agent-managed Skill root supplied by the runtime (`YAN_SKILLS_ROOT`). Never fall back to a Codex or external-agent directory. When the runtime path is unavailable, use Yan Agent's Skill MCP/store instead of inventing a host path.
+Before running `init_skill.py`, ask where the user wants the skill created. If they do not specify a location, use the Z Agent-managed Skill root supplied by the runtime (`Z_SKILLS_ROOT`). Never fall back to a Codex or external-agent directory. When the runtime path is unavailable, use Z Agent's Skill MCP/store instead of inventing a host path.
 
 When creating a new skill from scratch, always run the `init_skill.py` script. The script conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
 
@@ -312,8 +312,8 @@ scripts/init_skill.py <skill-name> --path <output-directory> [--resources script
 Examples:
 
 ```bash
-scripts/init_skill.py my-skill --path "$YAN_SKILLS_ROOT"
-scripts/init_skill.py my-skill --path "$YAN_SKILLS_ROOT" --resources scripts,references
+scripts/init_skill.py my-skill --path "$Z_SKILLS_ROOT"
+scripts/init_skill.py my-skill --path "$Z_SKILLS_ROOT" --resources scripts,references
 scripts/init_skill.py my-skill --path ~/work/skills --resources scripts --examples
 ```
 
@@ -337,7 +337,7 @@ Only include other optional interface fields when the user explicitly provides t
 
 ### Step 4: Edit the Skill
 
-When editing the (newly-generated or existing) skill, remember that the skill is being created for another instance of Yan Agent to use. Include information that would be beneficial and non-obvious to Yan Agent. Consider what procedural knowledge, domain-specific details, or reusable assets would help another Yan Agent instance execute these tasks more effectively.
+When editing the (newly-generated or existing) skill, remember that the skill is being created for another instance of Z Agent to use. Include information that would be beneficial and non-obvious to Z Agent. Consider what procedural knowledge, domain-specific details, or reusable assets would help another Z Agent instance execute these tasks more effectively.
 
 After substantial revisions, or if the skill is particularly tricky, you should use subagents to forward-test the skill on realistic tasks or artifacts. When doing so, pass the artifact under validation rather than your diagnosis of what is wrong, and keep the prompt generic enough that success depends on transferable reasoning rather than hidden ground truth.
 
@@ -358,10 +358,10 @@ If you used `--examples`, delete any placeholder files that are not needed for t
 Write the YAML frontmatter with `name` and `description`:
 
 - `name`: The skill name
-- `description`: This is the primary triggering mechanism for your skill, and helps Yan Agent understand when to use the skill.
+- `description`: This is the primary triggering mechanism for your skill, and helps Z Agent understand when to use the skill.
   - Include both what the Skill does and specific triggers/contexts for when to use it.
-  - Include all "when to use" information here - Not in the body. The body is only loaded after triggering, so "When to Use This Skill" sections in the body are not helpful to Yan Agent.
-  - Example description for a `docx` skill: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. Use when Yan Agent needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
+  - Include all "when to use" information here - Not in the body. The body is only loaded after triggering, so "When to Use This Skill" sections in the body are not helpful to Z Agent.
+  - Example description for a `docx` skill: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. Use when Z Agent needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
 
 Do not include any other fields in YAML frontmatter.
 

@@ -13,7 +13,7 @@ const { sidepathCeiling } = require('../lib/agi/reasoning-sidepath');
 
 test('the vocabulary and side-path requirement appear only in AGI mode', () => {
   const base = { providerId: 'deepseek', modelId: 'deepseek-v4-flash', prompt: '写一个鹈鹕骑自行车 注意AGI' };
-  assert.doesNotMatch(combineTurnPrompt(base, base.prompt, false), /Yan 系统词表/);
+  assert.doesNotMatch(combineTurnPrompt(base, base.prompt, false), /Z 系统词表/);
   assert.doesNotMatch(combineTurnPrompt(base, base.prompt, false), /AGI reasoning side-path/);
 
   const withSidepath = combineTurnPrompt({
@@ -24,7 +24,7 @@ test('the vocabulary and side-path requirement appear only in AGI mode', () => {
   assert.match(withSidepath, /AGI reasoning side-path/);
   assert.match(withSidepath, /follow-up round/);
   assert.match(withSidepath, /intentDelta/);
-  assert.match(withSidepath, /<yan-reasoning-sidepath>/);
+  assert.match(withSidepath, /<z-reasoning-sidepath>/);
 
   const ungated = combineTurnPrompt({
     ...base,
@@ -34,7 +34,7 @@ test('the vocabulary and side-path requirement appear only in AGI mode', () => {
 });
 
 test('the side-path block never leaks into user-facing text', () => {
-  const text = '前言<yan-reasoning-sidepath>{"task":"x"}</yan-reasoning-sidepath>后记';
+  const text = '前言<z-reasoning-sidepath>{"task":"x"}</z-reasoning-sidepath>后记';
   assert.equal(stripProtocolBlocks(text), '前言后记');
 });
 
@@ -90,11 +90,11 @@ test('AGI mode announces the dual chain, the floor and the runtime audit', () =>
 });
 
 test('normal mode may use verified experience but not unverified entries', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-sidepath-harness-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-sidepath-harness-'));
   try {
     const store = new ContinualHarnessStore({
       globalPath: path.join(dir, 'harness-state.json'),
-      yanagentDir: '.yanagent'
+      zagentDir: '.zagent'
     });
     await store.apply({
       id: 'seed-verified-experience',

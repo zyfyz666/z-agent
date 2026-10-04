@@ -8,10 +8,10 @@ const path = require('node:path');
 const test = require('node:test');
 const crypto = require('node:crypto');
 
-const SERVER = path.resolve(__dirname, '..', 'lib', 'yan-analysis-mcp.js');
+const SERVER = path.resolve(__dirname, '..', 'lib', 'z-analysis-mcp.js');
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-analysis-mcp-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-analysis-mcp-'));
 }
 
 function write(filePath, content) {
@@ -58,7 +58,7 @@ function startServer(env = {}) {
   return { child, request, async stop() { child.kill(); } };
 }
 
-test('yan analysis mcp answers initialize, tool list and every tool call', async t => {
+test('z analysis mcp answers initialize, tool list and every tool call', async t => {
   const workspace = makeTempRoot();
   const notes = makeTempRoot();
   const contextPath = path.join(notes, `${crypto.createHash('sha256').update('test-task').digest('hex')}.json`);
@@ -75,12 +75,12 @@ test('yan analysis mcp answers initialize, tool list and every tool call', async
   write(path.join(workspaceNotes, 'protocol-notes.md'), '# 分析笔记\n\n之前已经推断过协议状态机：握手后进入 auth 状态。');
 
   const server = startServer({
-    YAN_ANALYSIS_CONTEXT_DIR: notes
+    Z_ANALYSIS_CONTEXT_DIR: notes
   });
   t.after(() => server.stop());
 
   const init = await server.request('initialize', { protocolVersion: '2025-03-26' });
-  assert.equal(init.result.serverInfo.name, 'Yan Analysis');
+  assert.equal(init.result.serverInfo.name, 'Z Analysis');
 
   const list = await server.request('tools/list', {});
   const names = list.result.tools.map(tool => tool.name).sort();

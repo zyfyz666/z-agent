@@ -10,15 +10,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
-const { YanCore } = require('../lib/yan-core');
+const { ZCore } = require('../lib/z-core');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-restart-recovery-'));
-const dataDir = path.join(userDataDir, 'YanData');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-restart-recovery-'));
+const dataDir = path.join(userDataDir, 'ZData');
 const sessionsDir = path.join(dataDir, 'sessions');
-const coreDir = path.join(dataDir, 'yan-core');
+const coreDir = path.join(dataDir, 'z-core');
 const sessionId = 'sess_recoveryseed1';
-const runId = `yan-${sessionId}-11111111-2222-3333-4444-555555555555`;
+const runId = `z-${sessionId}-11111111-2222-3333-4444-555555555555`;
 const seedPrompt = '请写一段恢复测试文本';
 const seedText = '被中断前的第一段正文';
 
@@ -34,7 +34,7 @@ function seedInterruptedState() {
     updatedAt: Date.now() - 120_000
   }, null, 2));
 
-  const core = new YanCore({ rootDir: coreDir });
+  const core = new ZCore({ rootDir: coreDir });
   core.startTurn({
     threadId: sessionId,
     turnId: runId,
@@ -43,7 +43,7 @@ function seedInterruptedState() {
     configSnapshot: { providerId: 'seed', modelId: 'seed-model', modelName: 'Seed Model', workMode: 'normal' },
     intent: { prompt: seedPrompt, workMode: 'normal' }
   });
-  core.ingestProviderEvent(runId, { type: 'yan.opencode.started', data: { sessionID: 'ses_seed' } });
+  core.ingestProviderEvent(runId, { type: 'z.opencode.started', data: { sessionID: 'ses_seed' } });
   core.ingestProviderEvent(runId, { type: 'message.part.delta', data: { partID: 'p1', field: 'text', delta: seedText } });
   core.ingestProviderEvent(runId, { type: 'message.part.updated', data: { part: { id: 'p1', type: 'text', text: seedText } } });
   core.ingestProviderEvent(runId, { type: 'session.next.tool.called', data: { callID: 'c1', tool: 'bash', input: { command: 'echo seed' } } });
@@ -73,7 +73,7 @@ async function waitForRecoveredSession(filePath, timeoutMs = 45_000) {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));

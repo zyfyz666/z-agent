@@ -96,7 +96,7 @@ test('the preload forwards the optional backward-paging flag without changing de
     require(name) {
       assert.equal(name, 'electron');
       return {
-        contextBridge: { exposeInMainWorld(name, value) { if (name === 'yan') api = value; } },
+        contextBridge: { exposeInMainWorld(name, value) { if (name === 'z') api = value; } },
         ipcRenderer: { invoke: async (channel, payload) => calls.push({ channel, payload }) },
         webUtils: {}
       };

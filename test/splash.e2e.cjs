@@ -27,7 +27,7 @@ require(${JSON.stringify(path.join(appRoot, 'main.js'))});
 (async () => {
   let application;
   try {
-    const env = { ...process.env, YAN_E2E_MODE: '0', YAN_E2E_USER_DATA_DIR: path.join(temp, 'data') };
+    const env = { ...process.env, Z_E2E_MODE: '0', Z_E2E_USER_DATA_DIR: path.join(temp, 'data') };
     delete env.ELECTRON_RUN_AS_NODE;
     application = await electron.launch({
       executablePath: require('electron'), args: [bootstrap], cwd: appRoot,

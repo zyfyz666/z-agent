@@ -97,7 +97,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 10.27 7 3.34"/><path d="m11 13.73-4 6.93"/><path d="M12 22v-2"/><path d="M12 2v2"/><path d="M14 12h8"/><path d="m17 20.66-1-1.73"/><path d="m17 3.34-1 1.73"/><path d="M2 12h2"/><path d="m20.66 17-1.73-1"/><path d="m20.66 7-1.73 1"/><path d="m3.34 17 1.73-1"/><path d="m3.34 7 1.73 1"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="12" r="8"/></svg>
                 <span>设置</span>
               </button>
-              <button id="guideBtn" class="settings-menu-item" type="button" role="menuitem" title="上手指南" aria-label="上手指南" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog" data-vision-relay-guide="yan-guide">
+              <button id="guideBtn" class="settings-menu-item" type="button" role="menuitem" title="上手指南" aria-label="上手指南" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog" data-vision-relay-guide="z-guide">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z"/><path d="M5 17A12 12 0 0 1 17 5"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/></svg>
                 <span>引导</span>
               </button>
@@ -705,7 +705,7 @@
                 </div>
               </div>
             </div>
-            <button id="guideHint" class="composer-guide-hint hidden" type="button" data-vision-relay-guide="yan-guide">
+            <button id="guideHint" class="composer-guide-hint hidden" type="button" data-vision-relay-guide="z-guide">
               <span class="composer-guide-hint-text">第一次使用 Z？</span>
               <span class="composer-guide-hint-key"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z"/><path d="M5 17A12 12 0 0 1 17 5"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/></svg><span>引导</span></span>
               <span class="composer-guide-hint-text">从这里开始</span>
@@ -1097,7 +1097,7 @@
             <button id="reviewRefreshBtn" class="rv-icon-btn" type="button" title="刷新审阅" aria-label="刷新审阅">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </button>
-            <div id="yanDshReviewMount" aria-label="代码审阅"></div>
+            <div id="zDshReviewMount" aria-label="代码审阅"></div>
           </section>
           <section id="rs-interjection" class="rs-panel rs-interjection-panel" role="tabpanel" aria-label="临时对话" data-state="idle">
             <form id="interjectionForm" class="auxiliary-dialogue-composer">
@@ -1186,7 +1186,7 @@
                   </div>
                   <p>输入URL以浏览</p>
                 </div>
-                <webview class="browser-webview" data-browser-role="webview" src="about:blank" partition="persist:yan-browser" allowpopups></webview>
+                <webview class="browser-webview" data-browser-role="webview" src="about:blank" allowpopups></webview>
                 <div class="browser-agent-takeover" data-browser-role="agent-takeover" aria-hidden="true">
                   <div class="browser-agent-input-shield" data-browser-role="agent-input-shield" tabindex="-1" aria-label="Agent 正在操控此网页"></div>
                   <div class="browser-agent-cursor" data-browser-role="agent-cursor" aria-hidden="true">
@@ -1953,7 +1953,7 @@
                         <p>连接模型后即可开始。Z 会自动准备任务文件夹，也支持选择已有项目。</p>
                       </div>
                       <div class="about-row-actions">
-                        <button class="conn-pill" type="button" data-vision-relay-guide="yan-guide" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog">打开使用指南</button>
+                        <button class="conn-pill" type="button" data-vision-relay-guide="z-guide" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog">打开使用指南</button>
                       </div>
                     </div>
                   </div>
@@ -2111,6 +2111,7 @@
     </div>
   </div>
 
+  <script src="../lib/legacy-compat.js"></script>
   <script src="understand-anything/index.js"></script>
   <link rel="stylesheet" href="browser-annotations.css">
   <link rel="stylesheet" href="browser-annotation-reference.css">

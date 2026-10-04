@@ -1,12 +1,12 @@
 /* Hallmark · macrostructure: Workbench · genre: modern-minimal · design-system: design.md · designed-as-app · pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass (40–41) */
-/* Hallmark · component: Agent output + context dashboard + capability controls · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: Agent output + context dashboard + capability controls · genre: modern-minimal · theme: Z workbench
  * pre-emit critique: P5 H5 E4 S5 R5 V4 · contrast: pass · motion: restrained
  */
 @import url("../tokens.css");
 
 /* Bundled OFL variable font: use actual weights instead of platform SimSun bold. */
 @font-face {
-  font-family: "Yan Reading Serif";
+  font-family: "Z Reading Serif";
   src: url("assets/NotoSerifSC.ttf") format("truetype");
   font-style: normal;
   font-weight: 200 900;
@@ -14,7 +14,7 @@
 }
 
 /* ============================================================
-   Yan — design system
+   Z — design system
    Goal: calm, refined, minimal. Not "plastic".
    ============================================================ */
 
@@ -25,7 +25,7 @@
   --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   --font-review-code: Consolas, "Courier New", monospace;
   --font-review-file: var(--font-reading);
-  --font-reading: "Yan Reading Serif", serif;
+  --font-reading: "Z Reading Serif", serif;
 
   /* Radii */
   --r-sm: 6px;
@@ -2989,7 +2989,7 @@ body.is-mac .sidebar-brand-name-mac { display: inline; }
 .browser-focus-minimized-shell,
 .browser-focus-composer-collapse { display: none; }
 
-/* Hallmark · component: paged Agent question panel · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: paged Agent question panel · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass · motion: cut
  */
@@ -4710,7 +4710,7 @@ body.is-mac .welcome-logo-mac { display: block; filter: none; }
   }
 }
 
-/* Hallmark · component: run change review panel · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: run change review panel · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass
  */
@@ -5815,7 +5815,7 @@ body.composer-resizing * { cursor: ns-resize !important; }
 .chat-scroll-resume-button:active { transform: translateY(1px); }
 .app.browser-focus-mode .chat-scroll-resume-host { display: none !important; }
 
-/* Hallmark · component: task progress pill + review surface · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: task progress pill + review surface · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass
  */
@@ -6532,7 +6532,7 @@ body.composer-resizing * { cursor: ns-resize !important; }
   line-height: 1.45;
 }
 .reasoning-speed-billing.is-empty { display: none; }
-/* Hallmark · component: atomic inline Skill mention · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: atomic inline Skill mention · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · invalidated · restored-as-text
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass
  */
@@ -7334,7 +7334,7 @@ body.composer-resizing * { cursor: ns-resize !important; }
 }
 @keyframes sheetIn { from { opacity: 0; transform: translateY(12px) scale(0.99); } to { opacity: 1; transform: none; } }
 
-/* Hallmark · component: settings workspace · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: settings workspace · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass
  */
@@ -7587,9 +7587,9 @@ body.composer-resizing * { cursor: ns-resize !important; }
 }
 .settings-page-layer #tab-api > .settings-form-section:nth-child(2) { grid-column: 1; }
 .settings-page-layer #tab-api > .settings-form-section:nth-child(3) { grid-column: 2; }
-/* Hallmark · component: vision relay settings · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: vision relay settings · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
- * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: inherited from Yan tokens
+ * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: inherited from Z tokens
  */
 .settings-page-layer #tab-vision-relay.active {
   width: min(760px, 100%);
@@ -7743,13 +7743,13 @@ body.composer-resizing * { cursor: ns-resize !important; }
   color: var(--color-accent-ink);
 }
 
-.conn-wizard-dialog.vision-relay-guide-dialog[data-guide="yan-guide"] {
+.conn-wizard-dialog.vision-relay-guide-dialog[data-guide="z-guide"] {
   width: min(760px, calc(100vw - var(--space-xl) - var(--space-sm)));
 }
-.conn-wizard-dialog.vision-relay-guide-dialog[data-guide="yan-guide"] .provider-dialog-shell {
+.conn-wizard-dialog.vision-relay-guide-dialog[data-guide="z-guide"] .provider-dialog-shell {
   height: min(560px, calc(100dvh - var(--space-xl) - var(--space-sm)));
 }
-.conn-wizard-dialog.vision-relay-guide-dialog[data-guide="yan-guide"] .conn-wizard-stage.vision-relay-guide-stage {
+.conn-wizard-dialog.vision-relay-guide-dialog[data-guide="z-guide"] .conn-wizard-stage.vision-relay-guide-stage {
   height: auto;
 }
 
@@ -10032,7 +10032,7 @@ select.input { cursor: pointer; }
   display: none;
 }
 
-/* Hallmark · component: right sidebar tabs · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: right sidebar tabs · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass
  */
@@ -11947,7 +11947,7 @@ body.review-tree-resizing .rv-divider::after {
   justify-self: end;
 }
 
-/* Hallmark · component: focus composer · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: focus composer · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass · motion: opacity + transform
  */
@@ -12834,7 +12834,7 @@ html[data-theme="dark"] .browser-focus-logo-dark { display: block !important; }
   z-index: 70;
 }
 
-/* Hallmark · component: task-bar Git ecosystem · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: task-bar Git ecosystem · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass (40–41)
  */
@@ -14010,7 +14010,7 @@ body.resizing .right-sidebar { transition: none !important; }
   }
 }
 
-/* Hallmark · component: general settings · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: general settings · genre: modern-minimal · theme: Z workbench
  * structure: Codex-style section groups · states: default · hover · focus · active · disabled
  * pre-emit critique: P5 H5 E5 S5 R5 V5 · contrast: pass
  */
@@ -14441,7 +14441,7 @@ body.resizing .right-sidebar { transition: none !important; }
 }
 
 /* Uiverse-inspired day/night switch by Galahhad, adapted from the MIT-licensed
-   strong-squid-82 component for Yan's theme tokens and control dimensions. */
+   strong-squid-82 component for Z's theme tokens and control dimensions. */
 .settings-page-layer #tab-general .theme-switch {
   --toggle-size: 14px;
   --container-width: 5.15em;
@@ -14648,7 +14648,7 @@ body.resizing .right-sidebar { transition: none !important; }
   border-color: var(--border-strong);
 }
 
-/* Hallmark · component: composer toolbar · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: composer toolbar · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass
  */
@@ -16366,7 +16366,7 @@ html[data-theme="dark"] .settings-page-layer {
   .settings-page-layer #tab-api .conn-wizard-foot > #connNext { grid-column: 2; }
 }
 
-/* Hallmark · component: media model settings flow · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: media model settings flow · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass (40–41)
  */
@@ -17353,7 +17353,7 @@ html[data-theme="dark"] .settings-page-layer {
   stroke: var(--reasoning-flower-lit);
 }
 
-/* Hallmark · component: compact model + reasoning picker · genre: modern-minimal · theme: Yan workbench
+/* Hallmark · component: compact model + reasoning picker · genre: modern-minimal · theme: Z workbench
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass
  */
@@ -17838,7 +17838,7 @@ html[data-theme="dark"] .settings-page-layer {
   }
 }
 
-/* Hallmark · component: delegation plan · theme: Yan workbench
+/* Hallmark · component: delegation plan · theme: Z workbench
  * pre-emit critique: P4 H5 E4 S4 R5 V4 */
 .subagent-plan-graph {
   display: grid;

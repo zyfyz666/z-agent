@@ -20,7 +20,7 @@ const {
 } = require('../lib/agi/eval');
 
 function makeWorkspace() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-eval-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-eval-'));
   return {
     root,
     sandbox: path.join(root, 'sandbox'),

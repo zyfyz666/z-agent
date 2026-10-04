@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('yanImageViewer', {
+contextBridge.exposeInMainWorld('zImageViewer', {
   read: (assetId) => ipcRenderer.invoke('image:generated-read', assetId),
   download: (assetId) => ipcRenderer.invoke('image:generated-download', assetId),
   readFile: (filePath) => ipcRenderer.invoke('image:file-read', filePath),

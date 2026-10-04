@@ -13,12 +13,12 @@ const os = require('node:os');
 const Module = require('node:module');
 
 const appRoot = path.resolve(__dirname, '..');
-const stubDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-usage-'));
+const stubDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-usage-'));
 
 const electronStub = {
   app: {
     getPath: () => stubDataDir,
-    getName: () => 'yan-agent',
+    getName: () => 'z-agent',
     getVersion: () => '1.4.0',
     getLocale: () => 'zh',
     getPreferredSystemLanguages: () => ['zh-CN'],
@@ -58,7 +58,7 @@ Module._load = function stubbedLoad(request, parent, isMain) {
 
 let main;
 try {
-  process.env.YAN_MAIN_TEST_EXPORTS = '1';
+  process.env.Z_MAIN_TEST_EXPORTS = '1';
   main = require(path.join(appRoot, 'main.js'));
 } finally {
   Module._load = originalLoad;
@@ -185,12 +185,12 @@ test('reviewer edits and usage attribution coexist for the same injected entries
         };
       }
     },
-    selection: { providerId: 'yan-provider', modelId: 'yan-model' },
+    selection: { providerId: 'z-provider', modelId: 'z-model' },
     request: { history: [] },
     result: { status: 'done', todos: [{ done: true }], toolCalls: [], changes: [] },
     prompt: '普通任务',
     workspace: '',
-    yanSessionId: 'sess-coexist',
+    zSessionId: 'sess-coexist',
     runId: 'run-coexist',
     harnessBaselines: { global: baseline },
     evolutionMode: true

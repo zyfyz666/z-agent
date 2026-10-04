@@ -2,7 +2,7 @@
 
 // Work GUI feed: normalization, coalescing, subagent tracking, home
 // persistence and snapshot shape. These tests drive the feed exactly like the
-// main process does — one Yan Core event at a time.
+// main process does — one Z Core event at a time.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -14,7 +14,7 @@ const { WorkGuiFeed, zoneForTool } = require('../lib/work-gui/feed');
 const { WorkGuiHomeStore } = require('../lib/work-gui/home-store');
 
 function makeFeed(t, overrides = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-work-gui-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-work-gui-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const batches = [];
   const core = {
@@ -89,10 +89,10 @@ test('tool calls map to stations and text deltas are coalesced per flush', async
 
 test('zone mapping covers read, browser, media and planning tools', () => {
   assert.equal(zoneForTool('read'), 'library');
-  assert.equal(zoneForTool('yan_analysis_code_search'), 'library');
+  assert.equal(zoneForTool('z_analysis_code_search'), 'library');
   assert.equal(zoneForTool('edit'), 'workshop');
   assert.equal(zoneForTool('browser_click'), 'tower');
-  assert.equal(zoneForTool('yan_media_generate_image'), 'studio');
+  assert.equal(zoneForTool('z_media_generate_image'), 'studio');
   assert.equal(zoneForTool('todo_write'), 'hall');
   assert.equal(zoneForTool('task'), 'hall');
   assert.equal(zoneForTool('mystery_tool'), 'workshop');
@@ -161,7 +161,7 @@ test('subagent task parts spawn helpers tracked with their own activity', async 
     }
   }));
   feed.handleCoreEvent(coreEvent('provider.event', {
-    rawType: 'yan.subagent.event',
+    rawType: 'z.subagent.event',
     data: {
       sessionID: 'child_1',
       childSessionID: 'child_1',
@@ -204,7 +204,7 @@ test('context events update run energy with throttling', async t => {
 });
 
 test('home store unlocks milestones exactly once', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-work-gui-home-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-work-gui-home-'));
   try {
     const store = new WorkGuiHomeStore({ filePath: path.join(dir, 'home.json'), logger: { warn: () => {} } });
     const first = store.recordTurn({ sessionId: 's1', title: 'A', status: 'completed', skillIds: ['sk'], toolCalls: 60, at: 1000 });

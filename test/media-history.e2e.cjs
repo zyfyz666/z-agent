@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-media-history-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-media-history-e2e-'));
 
 (async () => {
   let application;
@@ -18,8 +18,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-media-history-e2e
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();

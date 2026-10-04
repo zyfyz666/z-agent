@@ -8,8 +8,8 @@ const path = require('node:path');
 const { OpenCodeSidecar, buildOpenCodeConfig, permissionRulesForRun } = require('../lib/opencode-sidecar');
 
 const appRoot = path.resolve(__dirname, '..');
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-file-tools-e2e-'));
-const provider = 'yan-native-tools-test';
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-file-tools-e2e-'));
+const provider = 'z-native-tools-test';
 const models = ['gpt-5.3', 'gpt-4.1', 'deepseek-v4-flash', 'claude-sonnet-4-5', 'gemini-2.5-pro', 'qwen3.5-plus', 'arbitrary-custom-model'];
 const writeTools = ['apply_patch', 'edit', 'write'];
 const cases = new Map();
@@ -117,7 +117,7 @@ function unwrap(result) {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(directory).startsWith('yan-file-tools-e2e-'));
+    assert.ok(path.basename(directory).startsWith('z-file-tools-e2e-'));
     fs.rmSync(directory, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -5,7 +5,7 @@ description: Official GreenSock GSAP guidance for production web animation. Use 
 
 # GreenSock GSAP
 
-Yan Agent bundles the official GreenSock GSAP Skill suite. This entry is a router, not a replacement for the source material.
+Z Agent bundles the official GreenSock GSAP Skill suite. This entry is a router, not a replacement for the source material.
 
 Load only the modules needed for the current task with `read_skill`:
 

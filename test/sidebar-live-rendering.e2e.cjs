@@ -13,7 +13,7 @@ const output = path.join(root, 'output', 'sidebar-optimization');
   try {
     app = await electron.launch({
       executablePath: require('electron'), args: [root], cwd: root,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'yan-sidebar-live-')) }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'z-sidebar-live-')) }
     });
     const page = await app.firstWindow();
     const errors = [];

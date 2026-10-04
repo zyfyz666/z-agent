@@ -33,7 +33,7 @@ test('runSignals counts trailing tool failures only', () => {
 });
 
 test('escalation memo is a one-shot, workspace-scoped hint', () => {
-  const dir = tempDir('yan-agi-bridge-');
+  const dir = tempDir('z-agi-bridge-');
   try {
     const file = path.join(dir, 'escalation.json');
     const memo = createEscalationMemo({ filePath: file });
@@ -58,7 +58,7 @@ test('escalation memo is a one-shot, workspace-scoped hint', () => {
 });
 
 test('escalation memo expires and acceptance failure escalates', () => {
-  const dir = tempDir('yan-agi-bridge-');
+  const dir = tempDir('z-agi-bridge-');
   try {
     const file = path.join(dir, 'escalation.json');
     const memo = createEscalationMemo({ filePath: file, ttlMs: 1000 });
@@ -82,7 +82,7 @@ test('raiseReasoningSpeed raises within the supported ladder and clamps', () => 
 });
 
 test('verified run index only trusts passing trajectories', () => {
-  const dir = tempDir('yan-agi-bridge-');
+  const dir = tempDir('z-agi-bridge-');
   try {
     const store = createTrajectoryStore({ dir });
     store.record({ runId: 'run-pass', outcome: 'success', verification: { verdict: 'pass' } });
@@ -100,7 +100,7 @@ test('verified run index only trusts passing trajectories', () => {
 });
 
 test('memory maintenance decays stale entries only and never preferences', () => {
-  const dir = tempDir('yan-agi-bridge-');
+  const dir = tempDir('z-agi-bridge-');
   try {
     const memoryPath = path.join(dir, 'memory.json');
     const old = Date.now() - 90 * 24 * 3600 * 1000;
@@ -112,7 +112,7 @@ test('memory maintenance decays stale entries only and never preferences', () =>
       ],
       updatedAt: old
     });
-    const store = new LongTermMemoryStore({ globalPath: memoryPath, yanagentDir: '.yanagent' });
+    const store = new LongTermMemoryStore({ globalPath: memoryPath, zagentDir: '.zagent' });
     const result = maintainMemoryStore({ longTermMemory: store, memoryPath, workspace: '' });
     assert.equal(result.updated, 1);
     const persisted = JSON.parse(fs.readFileSync(memoryPath, 'utf8'));
@@ -127,7 +127,7 @@ test('memory maintenance decays stale entries only and never preferences', () =>
 });
 
 test('workflow mining proposes shared sequences and the store accepts them', () => {
-  const dir = tempDir('yan-agi-bridge-');
+  const dir = tempDir('z-agi-bridge-');
   try {
     const steps = [
       { tool: 'grep', ok: true, target: 'src' },
@@ -156,10 +156,10 @@ test('workflow mining proposes shared sequences and the store accepts them', () 
 });
 
 test('memory query boosts entries from verified runs', () => {
-  const dir = tempDir('yan-agi-bridge-');
+  const dir = tempDir('z-agi-bridge-');
   try {
     const memoryPath = path.join(dir, 'memory.json');
-    const store = new LongTermMemoryStore({ globalPath: memoryPath, yanagentDir: '.yanagent' });
+    const store = new LongTermMemoryStore({ globalPath: memoryPath, zagentDir: '.zagent' });
     store.upsert({ content: '部署流程：先构建再发布，目标环境为 staging', type: 'procedure', scope: 'global', confidence: 0.6 }, { runId: 'run-pass' });
     store.upsert({ content: '部署流程：先构建再发布，目标环境为 prod', type: 'procedure', scope: 'global', confidence: 0.6 }, { runId: 'run-fail' });
     const plain = store.query({ query: '部署流程 构建 发布 staging prod', workspace: '', maxChars: 4000, limit: 5 });

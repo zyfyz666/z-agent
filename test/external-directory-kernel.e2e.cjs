@@ -94,7 +94,7 @@ const server = http.createServer((request, response) => {
       item.requests++;
       const system = messages.filter(message => message.role === 'system').map(message => message.content).join('\n');
       assert.match(system, /LOCAL_PLUGIN_RULE_4197/, 'the staged coding environment plugin actually executes');
-      assert.match(system, /YAN PROJECT ENVIRONMENT/);
+      assert.match(system, /Z PROJECT ENVIRONMENT/);
       const availableWrites = body.tools.map(tool => tool.function?.name).filter(name => writeTools.includes(name)).sort();
       assert.deepEqual(availableWrites, item.writesUnavailable ? [] : writeTools,
         `${item.name}: plan and explicit write-deny still hide native mutation tools`);
@@ -173,7 +173,7 @@ async function boundedRun(sidecar, request, item) {
     assert.deepEqual(config.plugin, [codingEnvironmentModule]);
     for (const item of cases) {
       const result = await boundedRun(sidecar, {
-        runId: `external-directory-${item.name}`, yanSessionId: `external-${item.name}`,
+        runId: `external-directory-${item.name}`, zSessionId: `external-${item.name}`,
         providerId, modelId, workspace, hasUserWorkspace: true, workspaceKind: 'default',
         workMode: item.workMode, accessMode: item.accessMode,
         permissions: { allowFileRead: true, allowFileWrite: item.allowFileWrite, allowNetwork: false },

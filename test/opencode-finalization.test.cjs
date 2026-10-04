@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { LEGACY_NAMESPACE, LEGACY_STORAGE } = require('../lib/legacy-compat');
 const {
   OpenCodeSidecar,
   sessionDirectoryMatches,
@@ -134,9 +135,13 @@ function waitForSignal(signal) {
   return new Promise(resolve => signal?.addEventListener('abort', resolve, { once: true }));
 }
 
-test('runtime watchdog audits the full tool history and delivers its session event', async t => {
+for (const auditDirectory of ['.zagent', LEGACY_STORAGE.workspaceDir]) test(`runtime watchdog keeps full history in ${auditDirectory === '.zagent' ? 'current' : 'historical'} workspace storage`, async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-runtime-poll-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  if (auditDirectory !== '.zagent') {
+    fs.mkdirSync(path.join(directory, auditDirectory));
+    fs.writeFileSync(path.join(directory, auditDirectory, 'thrash-audit.jsonl'), '{"previous":true}\n');
+  }
   let busy = true;
   const delivered = [];
   const fixture = fakeClient(directory, (_payload, _call, messages) => {
@@ -163,18 +168,23 @@ test('runtime watchdog audits the full tool history and delivers its session eve
     prompt: 'Find the configuration.', workMode: 'normal', providerId: 'test', modelId: 'test' }, event => events.push(event));
   assert.equal(delivered.length, 1);
   assert.match(delivered[0].guidance, /WD THRASH WATCHDOG/);
-  const event = events.find(event => event.type === 'yan.thrash.watchdog');
+  const event = events.find(event => event.type === 'z.thrash.watchdog');
   assert.equal(event.data.sessionID, 'workspace-session');
-  const audit = fs.readFileSync(path.join(directory, '.yanagent', 'thrash-audit.jsonl'), 'utf8');
+  const audit = fs.readFileSync(path.join(directory, auditDirectory, 'thrash-audit.jsonl'), 'utf8');
   assert.match(audit, /"step":30/);
+  if (auditDirectory !== '.zagent') {
+    assert.ok(audit.startsWith('{"previous":true}\n'));
+    assert.equal(fs.existsSync(path.join(directory, '.zagent', 'thrash-audit.jsonl')), false);
+  }
 });
 
 test('normal coding preserves its final body without followups for missing, failed or stale checks and builders', async t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-check-pass-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-check-pass-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  for (const outcome of ['passed', 'waived', 'failed', 'unavailable', 'stale', 'builder']) {
+  for (const outcome of ['passed', 'waived', 'failed', 'unavailable', 'stale', 'builder', 'historical']) {
     const body = '完整交付正文：实现说明、代码示例与使用方法。';
-    const write = { type: 'tool', tool: 'write', callID: 'write', state: { status: 'completed', input: {}, output: 'written', metadata: { yanEnvironment: { mutation: true } } } };
+    const write = { type: 'tool', tool: 'write', callID: 'write', state: { status: 'completed', input: {}, output: 'written', metadata: { [outcome === 'historical' ? `${LEGACY_NAMESPACE.lower}Environment` : 'zEnvironment']: { mutation: true } } } };
+    const savedMetadata = JSON.stringify(write.state.metadata);
     const check = { type: 'tool', tool: 'bash', callID: 'check', state: { status: 'completed', input: { command: 'node --check code.js' }, metadata: { exit: outcome === 'failed' ? 1 : 0 }, output: '' } };
     const parts = outcome === 'stale' ? [check, write] : [write, ...(['passed', 'failed'].includes(outcome) ? [check] : [])];
     const builder = { type: 'tool', tool: 'task', callID: 'builder', state: { status: 'completed', input: { subagent_type: 'builder', description: 'Implement module', prompt: 'Implement module and check it.' }, output: 'Implemented.' } };
@@ -194,8 +204,9 @@ test('normal coding preserves its final body without followups for missing, fail
     assert.equal(result.status, 'done');
     assert.equal(fixture.calls.promptAsync.length, 1);
     assert.equal(result.text, body);
-    assert.equal(result.delivery.verification.status, ['unavailable', 'builder'].includes(outcome) ? 'unchecked' : outcome);
-    assert.equal(emitted.some(event => ['yan.verification.required', 'yan.subagent.acceptance.started'].includes(event.type)), false);
+    assert.equal(result.delivery.verification.status, ['unavailable', 'builder', 'historical'].includes(outcome) ? 'unchecked' : outcome);
+    assert.equal(JSON.stringify(write.state.metadata), savedMetadata, 'reading metadata aliases must not rewrite stored evidence');
+    assert.equal(emitted.some(event => ['z.verification.required', 'z.subagent.acceptance.started'].includes(event.type)), false);
     if (outcome === 'builder') assert.ok(result.subagents.some(agent => agent.role === 'builder' || agent.subagentType === 'builder' || agent.type === 'builder'));
   }
 });
@@ -241,8 +252,8 @@ test('direct explorer and builder streams stay out of the parent and persist the
   assert.equal(result.subagents.length, 2);
   assert.ok(result.subagents.every(record => record.status === 'completed'));
   assert.ok(result.subagents.every(record => record.timeline.some(item => item.content === 'Recovered child result')));
-  assert.ok(emitted.some(event => event.type === 'yan.subagent.event' && event.data.subagentType === 'explorer' && event.data.event?.properties?.part?.text === 'Taste skill read'));
-  assert.ok(emitted.some(event => event.type === 'yan.subagent.event' && event.data.subagentType === 'builder'));
+  assert.ok(emitted.some(event => event.type === 'z.subagent.event' && event.data.subagentType === 'explorer' && event.data.event?.properties?.part?.text === 'Taste skill read'));
+  assert.ok(emitted.some(event => event.type === 'z.subagent.event' && event.data.subagentType === 'builder'));
   assert.ok(!emitted.some(event => event.properties?.part?.sessionID?.startsWith('child-')));
   assert.ok(!JSON.stringify(emitted).includes('Must not be forwarded'));
   assert.ok(fixture.calls.update.some(payload => payload.sessionID === 'child-b'));
@@ -293,13 +304,13 @@ test('reconnects an interrupted event stream five times and reports recovery', a
   assert.equal(result.text, '重连后继续完成。');
   assert.equal(subscribeCalls, 6);
   assert.deepEqual(
-    events.filter(event => event.type === 'yan.opencode.reconnecting')
+    events.filter(event => event.type === 'z.opencode.reconnecting')
       .map(event => event.data.attempt),
     [1, 2, 3, 4, 5]
   );
-  assert.equal(events.filter(event => event.type === 'yan.opencode.reconnected').length, 1);
-  assert.equal(events.find(event => event.type === 'yan.opencode.reconnected')?.data.attempt, 5);
-  assert.equal(events.some(event => event.type === 'yan.opencode.event-stream-lost'), false);
+  assert.equal(events.filter(event => event.type === 'z.opencode.reconnected').length, 1);
+  assert.equal(events.find(event => event.type === 'z.opencode.reconnected')?.data.attempt, 5);
+  assert.equal(events.some(event => event.type === 'z.opencode.event-stream-lost'), false);
 });
 
 test('stops after five failed event stream reconnects', async () => {
@@ -343,11 +354,11 @@ test('stops after five failed event stream reconnects', async () => {
 
   assert.equal(subscribeCalls, 6);
   assert.deepEqual(
-    events.filter(event => event.type === 'yan.opencode.reconnecting')
+    events.filter(event => event.type === 'z.opencode.reconnecting')
       .map(event => event.data.attempt),
     [1, 2, 3, 4, 5]
   );
-  const exhausted = events.find(event => event.type === 'yan.opencode.event-stream-lost');
+  const exhausted = events.find(event => event.type === 'z.opencode.event-stream-lost');
   assert.equal(exhausted?.data.exhausted, true);
   assert.equal(exhausted?.data.attempt, 5);
   assert.match(exhausted?.data.message || '', /服务端仍不可用 6/);
@@ -382,7 +393,7 @@ test('task permission recovers a missed input event and rejects unfinished depen
   const events = [];
   const replies = [];
   const part = { type: 'tool', tool: 'task', callID: 'child-call', state: { status: 'running', input: {
-    subagent_type: 'builder', prompt: 'yan-plan: {"id":"feature","dependsOn":["schema"]}\nImplement feature.'
+    subagent_type: 'builder', prompt: 'z-plan: {"id":"feature","dependsOn":["schema"]}\nImplement feature.'
   } } };
   const fixture = fakeClient(directory, () => assistant('final', [{ type: 'text', text: 'Dependency not ready.' }]),
     { id: 'workspace-session', directory }, { initialMessages: [assistant('delegation', [part])] });
@@ -557,11 +568,11 @@ test('discloses skipped Skills without failing an otherwise successful run', () 
   assert.match(result.text, /尝试 3 次/);
 });
 
-test('discovers a skipped Skill from the completed Yan Skills tool result', () => {
+test('discovers a skipped Skill from the completed Z Skills tool result', () => {
   const messages = [assistant('answer', [
     {
       type: 'tool',
-      tool: 'yan_skills_read_skill',
+      tool: 'z_skills_read_skill',
       callID: 'skill-call',
       state: {
         status: 'completed',
@@ -588,7 +599,7 @@ test('discovers a skipped Skill from the completed Yan Skills tool result', () =
 test('a skipped Skill disclosure cannot turn an empty assistant response into success', () => {
   const messages = [assistant('empty', [{
     type: 'tool',
-    tool: 'yan_skills_read_skill',
+    tool: 'z_skills_read_skill',
     state: {
       status: 'completed',
       output: JSON.stringify({ skipped: true, id: 'broken', attempts: 3, error: 'parse failed' })
@@ -647,7 +658,7 @@ test('completes a mutating tool-only run with a disclosure instead of failing it
 test('file-only side effects also complete an otherwise silent run', () => {
   const messages = [assistant('silent-editor', [{
     type: 'tool',
-    tool: 'yan_skills_read_skill',
+    tool: 'z_skills_read_skill',
     callID: 'skill-call',
     state: { status: 'completed', input: {}, output: 'ok' }
   }])];
@@ -662,7 +673,7 @@ test('keeps the no-answer error when nothing but read-only work happened', () =>
     assistant('thinking', [{ type: 'text', text: '<thinking>Still working</thinking>' }]),
     assistant('read-only', [{
       type: 'tool',
-      tool: 'yan_skills_read_skill',
+      tool: 'z_skills_read_skill',
       callID: 'skill-call',
       state: { status: 'completed', input: {}, output: 'ok' }
     }])
@@ -756,7 +767,7 @@ test('settles on the text-bearing assistant when a trailing empty message ends t
   assert.equal(result.error, '');
 });
 
-test('creates a workspace-bound session when a Yan task leaves Blank', async () => {
+test('creates a workspace-bound session when a Z task leaves Blank', async () => {
   const directory = path.resolve('workspace-target');
   const fixture = fakeClient(directory, (_payload, call) => (
     call === 1 ? assistant('direct-answer', [{ type: 'text', text: '已进入工作区。' }]) : null
@@ -786,7 +797,7 @@ test('creates a workspace-bound session when a Yan task leaves Blank', async () 
   assert.equal(fixture.calls.create[0].directory, directory);
   assert.equal(fixture.calls.delete.length, 0);
   assert.equal(fixture.calls.prompt.length, 0);
-  assert.match(fixture.calls.promptAsync[0].system, /Yan installed Skill catalog/);
+  assert.match(fixture.calls.promptAsync[0].system, /Z installed Skill catalog/);
   assert.match(fixture.calls.promptAsync[0].system, /demo-skill/);
   assert.deepEqual(fixture.calls.promptAsync[0].tools, { task: true });
   assert.equal(result.openCodeSessionId, 'workspace-session');
@@ -892,7 +903,7 @@ test('uses the model final response without issuing a second summary prompt', as
   }, event => events.push(event));
 
   assert.equal(fixture.calls.promptAsync.length, 1);
-  assert.equal(events.filter(event => event.type === 'yan.model.request.started').length, 1);
+  assert.equal(events.filter(event => event.type === 'z.model.request.started').length, 1);
   assert.deepEqual(fixture.calls.promptAsync[0].tools, { task: true });
   assert.equal(result.summaryStarted, true);
   assert.equal(result.status, 'done');
@@ -939,7 +950,7 @@ test('a policy-carrying run finishes without a policy acceptance step', async ()
   assert.equal(result.text, '已通过 AnySearch 查到 Fable 5.1 的官方资料。');
   assert.equal(result.status, 'done');
   assert.equal(result.policy, undefined);
-  assert.equal(events.filter(event => String(event.type || '').startsWith('yan.policy.')).length, 0);
+  assert.equal(events.filter(event => String(event.type || '').startsWith('z.policy.')).length, 0);
 });
 
 test('an unmet search policy no longer turns the run into an error', async () => {
@@ -972,7 +983,7 @@ test('an unmet search policy no longer turns the run into an error', async () =>
   assert.equal(fixture.calls.promptAsync.length, 1);
   assert.equal(result.text, '未执行检索。');
   assert.equal(result.status, 'done');
-  assert.equal(events.filter(event => String(event.type || '').startsWith('yan.policy.')).length, 0);
+  assert.equal(events.filter(event => String(event.type || '').startsWith('z.policy.')).length, 0);
 });
 
 test('preserves the main body after a normal mutation without acceptance or summary requests', async () => {
@@ -1018,12 +1029,12 @@ test('preserves the main body after a normal mutation without acceptance or summ
   assert.equal(fixture.calls.promptAsync.length, 1);
   assert.equal(result.delivery.verified, false);
   assert.equal(result.delivery.acceptanceRounds, 0);
-  assert.equal(events.filter(event => event.type === 'yan.delivery.acceptance.started').length, 0);
-  assert.equal(events.filter(event => event.type === 'yan.delivery.acceptance.passed').length, 0);
+  assert.equal(events.filter(event => event.type === 'z.delivery.acceptance.started').length, 0);
+  assert.equal(events.filter(event => event.type === 'z.delivery.acceptance.passed').length, 0);
   assert.equal(result.text, '网页已实现。');
   assert.equal(result.summaryStarted, true);
   assert.equal(result.delivery.passive, true);
-  assert.equal(events.filter(event => /^yan\.delivery\.(acceptance|summary)\./.test(event.type)).length, 0);
+  assert.equal(events.filter(event => /^z\.delivery\.(acceptance|summary)\./.test(event.type)).length, 0);
 });
 
 test('does not trigger delivery acceptance from a previous turn mutation', async () => {
@@ -1142,7 +1153,7 @@ test('leaves missing verification unverified without a forced repair or summary'
   assert.equal(result.delivery.verified, false);
   assert.equal(result.delivery.failure, '');
   assert.equal(result.text, '网页已实现。');
-  assert.equal(events.filter(event => event.type === 'yan.delivery.acceptance.failed').length, 0);
+  assert.equal(events.filter(event => event.type === 'z.delivery.acceptance.failed').length, 0);
 });
 
 test('flags only shell command failures in the last completed tool output', () => {
@@ -1176,7 +1187,7 @@ test('records a model delivery contract without letting it schedule acceptance',
   const fixture = fakeClient(directory, (_payload, call) => {
     if (call === 1) {
       return assistant('contract-work', [
-        { type: 'text', text: '<yan-delivery-contract>\nintent: delivery\nartifact: backend\nscope: 只改价格模块\nacceptance: node test/pricing.test.js 全部通过\n</yan-delivery-contract>' },
+        { type: 'text', text: '<z-delivery-contract>\nintent: delivery\nartifact: backend\nscope: 只改价格模块\nacceptance: node test/pricing.test.js 全部通过\n</z-delivery-contract>' },
         {
           type: 'tool',
           tool: 'write',
@@ -1239,7 +1250,7 @@ test('publishes creative direction during streaming and preserves its unverified
   const emitted = [];
   const contract = { intent: 'presentable', artifact: 'frontend', scope: '2D 鹈鹕骑自行车 HTML',
     direction: '海边悠闲骑行', decisions: '近景移动更快，踏板与腿部协调', acceptance: '观察骑行与空间关系' };
-  const contractText = `<yan-delivery-contract>\n${Object.entries(contract).map(([key, value]) => `${key}: ${value}`).join('\n')}\n</yan-delivery-contract>`;
+  const contractText = `<z-delivery-contract>\n${Object.entries(contract).map(([key, value]) => `${key}: ${value}`).join('\n')}\n</z-delivery-contract>`;
   const userContract = contractText.replace('海边悠闲骑行', '不应记录的用户引用');
   const events = [
     { type: 'message.updated', properties: { info: { id: 'quoted-user', sessionID: 'workspace-session', role: 'user' } } },
@@ -1265,11 +1276,11 @@ test('publishes creative direction during streaming and preserves its unverified
   const result = await sidecar.run({ runId: 'creative-delivery', workspace: directory,
     hasUserWorkspace: true, prompt: '写一个2D的鹈鹕骑自行车html', providerId: 'test', modelId: 'test',
     workMode: 'normal', selectedSkills: [], availableSkills: [] }, event => emitted.push(event));
-  const update = emitted.findIndex(event => event.type === 'yan.delivery.contract.updated');
+  const update = emitted.findIndex(event => event.type === 'z.delivery.contract.updated');
   const screenshot = emitted.findIndex(event => event.properties?.part?.id === 'creative-image');
   assert.ok(update >= 0 && screenshot > update, 'contract must reach the host before the screenshot event');
   assert.equal(emitted[update].data.contract.direction, contract.direction);
-  assert.equal(emitted.filter(event => event.type === 'yan.delivery.contract.updated').length, 1);
+  assert.equal(emitted.filter(event => event.type === 'z.delivery.contract.updated').length, 1);
   assert.equal(fake.calls.promptAsync.length, 1, 'missing review must not create a follow-up');
   assert.equal(result.delivery.verified, false);
   assert.equal(result.delivery.contract.direction, contract.direction);
@@ -1291,11 +1302,11 @@ test('collects a complete main-turn review and invalidates it after a later muta
     const fixture = fakeClient(directory, (_payload, call) => {
       assert.equal(call, 1, 'passive evidence must not request another response');
       return assistant('main-final', [
-        { type: 'text', text: `<yan-delivery-contract>${JSON.stringify(contract)}</yan-delivery-contract>` },
+        { type: 'text', text: `<z-delivery-contract>${JSON.stringify(contract)}</z-delivery-contract>` },
         mutation,
         { type: 'tool', tool: 'browser_screenshot', state: { status: 'completed', output: '视觉结论：合格' } },
         { type: 'tool', tool: 'browser_click', state: { status: 'completed', output: 'success' } },
-        { type: 'text', text: `<yan-delivery-review>${JSON.stringify(review)}</yan-delivery-review>` },
+        { type: 'text', text: `<z-delivery-review>${JSON.stringify(review)}</z-delivery-review>` },
         ...(lateMutation ? [mutation] : []),
         { type: 'text', text: '结果与限制已说明。' }
       ]);
@@ -1360,11 +1371,11 @@ test('discloses a negative visual verdict without starting a repair or replacing
   assert.match(result.delivery.failure, /尚未解决/);
   assert.equal(result.delivery.repairRounds, 0);
   assert.equal(result.delivery.acceptanceRounds, 0);
-  assert.equal(events.filter(event => /^yan\.delivery\.(acceptance|summary)\./.test(event.type)).length, 0);
+  assert.equal(events.filter(event => /^z\.delivery\.(acceptance|summary)\./.test(event.type)).length, 0);
 });
 
 test('skips the acceptance round for a trivial measured diff', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-trivial-run-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-trivial-run-'));
   try {
     const configFile = path.join(directory, 'config.txt');
     fs.writeFileSync(configFile, 'alpha\nbeta\ngamma\n');
@@ -1586,7 +1597,7 @@ test('retries a transiently interrupted prompt when nothing executed', async () 
   assert.equal(result.status, 'done');
   assert.equal(result.text, '重试后完成。');
   assert.equal(result.error, '');
-  assert.ok(events.some(event => event.type === 'yan.model.retrying'), 'emits a retry event');
+  assert.ok(events.some(event => event.type === 'z.model.retrying'), 'emits a retry event');
 });
 
 test('continues once when a reasoning model hits max_output_tokens with no visible answer', async () => {
@@ -1600,8 +1611,8 @@ test('continues once when a reasoning model hits max_output_tokens with no visib
       return truncated;
     }
     if (call === 2) {
-      assert.match(String(payload?.parts?.[0]?.text || ''), /YAN OUTPUT CONTINUATION/);
-      return assistant('terra-continued', [{ type: 'text', text: 'Yan Agent，桌面工作区助手。' }]);
+      assert.match(String(payload?.parts?.[0]?.text || ''), /Z OUTPUT CONTINUATION/);
+      return assistant('terra-continued', [{ type: 'text', text: 'Z Agent，桌面工作区助手。' }]);
     }
     return null;
   }, { id: 'workspace-session', directory }, {
@@ -1626,9 +1637,9 @@ test('continues once when a reasoning model hits max_output_tokens with no visib
 
   assert.equal(fixture.calls.promptAsync.length, 2);
   assert.equal(result.status, 'done');
-  assert.equal(result.text, 'Yan Agent，桌面工作区助手。');
+  assert.equal(result.text, 'Z Agent，桌面工作区助手。');
   assert.equal(result.error, '');
-  assert.ok(events.some(event => event.type === 'yan.model.truncated'));
+  assert.ok(events.some(event => event.type === 'z.model.truncated'));
 });
 
 test('continues once when a stop turn has only whitespace and no tool calls', async () => {
@@ -1642,9 +1653,9 @@ test('continues once when a stop turn has only whitespace and no tool calls', as
       return emptyStop;
     }
     if (call === 2) {
-      assert.match(String(payload?.parts?.[0]?.text || ''), /YAN OUTPUT CONTINUATION/);
+      assert.match(String(payload?.parts?.[0]?.text || ''), /Z OUTPUT CONTINUATION/);
       assert.match(String(payload?.parts?.[0]?.text || ''), /empty or whitespace-only/);
-      return assistant('terra-stop-continued', [{ type: 'text', text: 'Yan Agent，桌面工作区助手。' }]);
+      return assistant('terra-stop-continued', [{ type: 'text', text: 'Z Agent，桌面工作区助手。' }]);
     }
     return null;
   }, { id: 'workspace-session', directory }, {
@@ -1669,10 +1680,10 @@ test('continues once when a stop turn has only whitespace and no tool calls', as
 
   assert.equal(fixture.calls.promptAsync.length, 2);
   assert.equal(result.status, 'done');
-  assert.equal(result.text, 'Yan Agent，桌面工作区助手。');
+  assert.equal(result.text, 'Z Agent，桌面工作区助手。');
   assert.equal(result.error, '');
-  assert.ok(events.some(event => event.type === 'yan.model.empty-output'));
-  assert.equal(events.some(event => event.type === 'yan.model.truncated'), false);
+  assert.ok(events.some(event => event.type === 'z.model.empty-output'));
+  assert.equal(events.some(event => event.type === 'z.model.truncated'), false);
 });
 
 test('continues once when Responses maps an empty completion to finish=other', async () => {
@@ -1686,8 +1697,8 @@ test('continues once when Responses maps an empty completion to finish=other', a
       return emptyOther;
     }
     if (call === 2) {
-      assert.match(String(payload?.parts?.[0]?.text || ''), /YAN OUTPUT CONTINUATION/);
-      return assistant('terra-other-continued', [{ type: 'text', text: 'Yan Agent，桌面工作区助手。' }]);
+      assert.match(String(payload?.parts?.[0]?.text || ''), /Z OUTPUT CONTINUATION/);
+      return assistant('terra-other-continued', [{ type: 'text', text: 'Z Agent，桌面工作区助手。' }]);
     }
     return null;
   }, { id: 'workspace-session', directory }, {
@@ -1712,8 +1723,8 @@ test('continues once when Responses maps an empty completion to finish=other', a
 
   assert.equal(fixture.calls.promptAsync.length, 2);
   assert.equal(result.status, 'done');
-  assert.equal(result.text, 'Yan Agent，桌面工作区助手。');
-  assert.ok(events.some(event => event.type === 'yan.model.empty-output'));
+  assert.equal(result.text, 'Z Agent，桌面工作区助手。');
+  assert.ok(events.some(event => event.type === 'z.model.empty-output'));
 });
 
 test('continues once when a completed turn has only thinking tags', async () => {
@@ -2155,7 +2166,7 @@ test('stall watchdog aborts a drip-stream turn and retries safely', async () => 
   assert.equal(fixture.calls.promptAsync.length, 2);
   assert.equal(result.status, 'done');
   assert.equal(result.text, '停滞重试成功。');
-  assert.ok(events.some(event => event.type === 'yan.model.retrying'), 'retry event emitted');
+  assert.ok(events.some(event => event.type === 'z.model.retrying'), 'retry event emitted');
 });
 
 test('session-only stream failures override a prior tool completion even with recorded diffs', () => {
@@ -2217,5 +2228,5 @@ test('a provider stream error recovered by a later response does not fail the ru
 
   assert.equal(result.status, 'done');
   assert.equal(result.error, '');
-  assert.ok(events.some(event => event.type === 'yan.model.recovered'), 'recovery event emitted');
+  assert.ok(events.some(event => event.type === 'z.model.recovered'), 'recovery event emitted');
 });

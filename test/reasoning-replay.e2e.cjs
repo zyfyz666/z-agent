@@ -8,13 +8,13 @@ const path = require('node:path');
 const http = require('node:http');
 const { OpenCodeSidecar, buildOpenCodeConfig, stageDeepSeekProviderModule } = require('../lib/opencode-sidecar');
 const appRoot = path.resolve(__dirname, '..');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-reasoning-replay-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-reasoning-replay-'));
 const workspace = path.join(root, 'workspace');
 fs.mkdirSync(workspace);
 const file = path.join(workspace, 'fixture.txt');
 fs.writeFileSync(file, 'reasoning replay fixture');
-const parentMarker = 'YAN_PARENT_REPLAY';
-const childMarker = 'YAN_CHILD_REPLAY';
+const parentMarker = 'Z_PARENT_REPLAY';
+const childMarker = 'Z_CHILD_REPLAY';
 const thought = '  Exact parent reasoning.\n保留空白与换行。\n';
 const failures = [];
 const counts = { parent: 0, child: 0, replay: 0, empty: 0 };
@@ -97,7 +97,7 @@ const server = http.createServer((req, res) => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     assert.equal(path.dirname(root), os.tmpdir());
-    assert.ok(path.basename(root).startsWith('yan-reasoning-replay-'));
+    assert.ok(path.basename(root).startsWith('z-reasoning-replay-'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

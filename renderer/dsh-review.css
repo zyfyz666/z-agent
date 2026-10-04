@@ -1,11 +1,11 @@
-/* Yan Agent ↔ dsh-code-review 宿主胶水。
+/* Z Agent ↔ dsh-code-review 宿主胶水。
  * 审阅 UI 本体完全位于上游生成的页面（renderer/vendor/dsh-code-review/core.js
  * → buildStandaloneHtml）。本文件只负责：
- *   1) 把上游页面继承的 DSW/shiki 主题变量映射到 Yan 主题 token（数值供给，
+ *   1) 把上游页面继承的 DSW/shiki 主题变量映射到 Z 主题 token（数值供给，
  *      非界面样式）；
  *   2) 宿主区域（mount/iframe/错误文案）的尺寸布局。 */
 
-/* —— DSW 主题变量 → Yan token（明暗主题随 --bg 等自动翻转）—— */
+/* —— DSW 主题变量 → Z token（明暗主题随 --bg 等自动翻转）—— */
 body {
   --dsw-alias-bg-base: var(--bg);
   --dsw-alias-bg-layer-1: var(--bg-elev);
@@ -21,7 +21,7 @@ body {
   --ds-font-family-code: var(--font-mono);
 
   /* Shiki 语法高亮 token：浅色取上游 THEME_VAR_DEFAULTS 原值；
-   * 深色按 GitHub-dark 语义取值（Yan 自身无语法 token 变量）。 */
+   * 深色按 GitHub-dark 语义取值（Z 自身无语法 token 变量）。 */
   --shiki-token-keyword: #7c3aed;
   --shiki-token-string: #16a34a;
   --shiki-token-comment: #9aa0a6;
@@ -37,7 +37,7 @@ html[data-theme="dark"] body {
 }
 
 /* —— 宿主区域尺寸（无审阅样式；iframe 即 UI）—— */
-#yanDshReviewMount {
+#zDshReviewMount {
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -48,7 +48,7 @@ html[data-theme="dark"] body {
 #rs-review {
   padding: 0 !important;
 }
-#yanDshReviewPanel {
+#zDshReviewPanel {
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -58,8 +58,8 @@ html[data-theme="dark"] body {
   overflow: hidden;
   background: var(--bg);
 }
-#yanDshReviewPanel.hidden { display: none; }
-#yanDshReviewFrame {
+#zDshReviewPanel.hidden { display: none; }
+#zDshReviewFrame {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -69,7 +69,7 @@ html[data-theme="dark"] body {
   background: var(--bg);
   display: block;
 }
-.yan-dsh-review-error {
+.z-dsh-review-error {
   flex: 1 1 auto;
   display: flex;
   align-items: center;

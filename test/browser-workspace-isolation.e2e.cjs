@@ -9,12 +9,12 @@ const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
 const fixture = pathToFileURL(path.join(__dirname, 'fixtures', 'browser-agent.html')).href;
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-browser-workspace-isolation-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-browser-workspace-isolation-e2e-'));
 
 async function command(page, runId, action, params = {}) {
   return page.evaluate(({ id, action: name, input }) => executeBrowserAgentCommand({
     action: name,
-    params: { ...input, yan_run_id: id }
+    params: { ...input, z_run_id: id }
   }), { id: runId, action, input: params });
 }
 
@@ -25,7 +25,7 @@ async function command(page, runId, action, params = {}) {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => (
@@ -38,16 +38,16 @@ async function command(page, runId, action, params = {}) {
     const result = await page.evaluate(async ({ fixtureUrl }) => {
       if (!state.currentSession) await newSession();
       const session = state.currentSession;
-      const workspaceA = 'C:/YanWorkspace/workspace-a';
-      const workspaceB = 'C:/YanWorkspace/workspace-b';
+      const workspaceA = 'C:/ZWorkspace/workspace-a';
+      const workspaceB = 'C:/ZWorkspace/workspace-b';
       session.workspace = workspaceA;
-      const scopeA = { yan_workspace: workspaceA, yan_session_id: session.id };
+      const scopeA = { z_workspace: workspaceA, z_session_id: session.id };
       const openedA = await executeBrowserAgentCommand({
         action: 'open',
-        params: { yan_run_id: 'run-a', ...scopeA, target_type: 'url', url_or_path: `${fixtureUrl}?owner=a` }
+        params: { z_run_id: 'run-a', ...scopeA, target_type: 'url', url_or_path: `${fixtureUrl}?owner=a` }
       });
       const tabA = openedA.tabId;
-      await executeBrowserAgentCommand({ action: 'release', params: { yan_run_id: 'run-a' } });
+      await executeBrowserAgentCommand({ action: 'release', params: { z_run_id: 'run-a' } });
 
       session.workspace = workspaceB;
       syncAgentBrowserVisibility();
@@ -56,7 +56,7 @@ async function command(page, runId, action, params = {}) {
 
       const openedB = await executeBrowserAgentCommand({
         action: 'open',
-        params: { yan_run_id: 'run-b', yan_workspace: workspaceB, yan_session_id: session.id, target_type: 'url', url_or_path: `${fixtureUrl}?owner=b` }
+        params: { z_run_id: 'run-b', z_workspace: workspaceB, z_session_id: session.id, target_type: 'url', url_or_path: `${fixtureUrl}?owner=b` }
       });
       const controllerA = browserTabControllers.get(tabA);
       const controllerB = browserTabControllers.get(openedB.tabId);
@@ -65,7 +65,7 @@ async function command(page, runId, action, params = {}) {
       const activeBeforeBackgroundA = activeRightSidebarTab;
       const backgroundA = await executeBrowserAgentCommand({
         action: 'open',
-        params: { yan_run_id: 'run-a-2', yan_workspace: workspaceA, yan_session_id: session.id, target_type: 'url', url_or_path: `${fixtureUrl}?owner=a2` }
+        params: { z_run_id: 'run-a-2', z_workspace: workspaceA, z_session_id: session.id, target_type: 'url', url_or_path: `${fixtureUrl}?owner=a2` }
       });
       return {
         openedA: { ok: openedA.ok, tabId: tabA },

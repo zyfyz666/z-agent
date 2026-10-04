@@ -26,7 +26,7 @@ test('responses format selects the staged responses provider module', () => {
   assert.equal(provider.npm, moduleUrl);
   assert.equal(provider.options.baseURL, 'https://api.example.com/v1');
   assert.equal(provider.options.apiKey, 'test-key');
-  assert.equal('yanDsmlCompatibility' in provider.options, false);
+  assert.equal('zDsmlCompatibility' in provider.options, false);
 });
 
 test('responses format requires a staged module instead of silently reusing chat completions', () => {
@@ -39,7 +39,7 @@ test('responses format requires a staged module instead of silently reusing chat
 });
 
 test('stages the responses bundle outside the application directory', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-responses-stage-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-responses-stage-'));
   try {
     const moduleUrl = stageResponsesProviderModule({ appRoot, dataDir });
     const stagedPath = fileURLToPath(moduleUrl);
@@ -52,7 +52,7 @@ test('stages the responses bundle outside the application directory', () => {
 });
 
 test('responses provider routes model calls to POST /responses and remaps reasoning options', async () => {
-  const { createYanOpenAIResponsesProvider } = await import(pathToFileURL(bundlePath).href);
+  const { createZOpenAIResponsesProvider } = await import(pathToFileURL(bundlePath).href);
   let captured = null;
   const fakeFetch = async (input, init) => {
     captured = {
@@ -65,7 +65,7 @@ test('responses provider routes model calls to POST /responses and remaps reason
       headers: { 'content-type': 'application/json' }
     });
   };
-  const provider = createYanOpenAIResponsesProvider({
+  const provider = createZOpenAIResponsesProvider({
     name: 'conn-responses',
     apiKey: 'test-key',
     baseURL: 'https://api.example.com/v1',

@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-composer-todo-e2e-'));
 
 (async () => {
   let application;
@@ -18,8 +18,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -178,7 +178,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e
         }
       });
       applyOpenCodeEvent(runCtx, {
-        type: 'yan.review.updated',
+        type: 'z.review.updated',
         data: { count: 1, additions: 12, deletions: 3, files: [{ path: 'index.html', additions: 12, deletions: 3 }] }
       });
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -265,8 +265,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e
         openedReview,
         openAfterFileClick: host.classList.contains('open'),
         translations: {
-          progress: window.YanI18n?.translate('第 1/3 已完成', 'en'),
-          files: window.YanI18n?.translate('编辑了文件', 'en')
+          progress: window.ZI18n?.translate('第 1/3 已完成', 'en'),
+          files: window.ZI18n?.translate('编辑了文件', 'en')
         }
       };
       state.activeRuns.delete(state.currentSession.id);
@@ -352,7 +352,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e
     assert.equal(transientSurfaceResult.focus.scrollWidth, transientSurfaceResult.focus.viewportWidth, JSON.stringify(transientSurfaceResult));
 
     const openCodeWaitResult = await page.evaluate(() => {
-      const runCtx = createRunCtx('opencode-wait-e2e', false, 'C:\\yan-review-test');
+      const runCtx = createRunCtx('opencode-wait-e2e', false, 'C:\\z-review-test');
       runCtx.activeAgentRun = {
         runId: runCtx.runId,
         status: 'working',
@@ -403,7 +403,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e
         }
       }, { deferEffects: true });
       applyOpenCodeEvent(runCtx, {
-        type: 'yan.model.request.started',
+        type: 'z.model.request.started',
         data: { requestIndex: 2 }
       }, { deferEffects: true });
       const afterTool = {
@@ -411,7 +411,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-todo-e2e
         variant: openCodeTimelineItem(runCtx, 'model-wait')?.variant || ''
       };
       const petAfterTool = mapOpenCodeEventToPet({
-        type: 'yan.model.request.started',
+        type: 'z.model.request.started',
         data: { requestIndex: 2 }
       }, runCtx)?.message || '';
 

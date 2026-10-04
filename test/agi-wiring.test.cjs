@@ -30,8 +30,8 @@ function minedCandidate(overrides = {}) {
   };
 }
 
-test('mined candidates cannot be promoted before Yan Eval validation', () => {
-  const dir = tempDir('yan-agi-wiring-');
+test('mined candidates cannot be promoted before Z Eval validation', () => {
+  const dir = tempDir('z-agi-wiring-');
   try {
     const store = new SkillEvolutionStore({ filePath: path.join(dir, 'skill-evolution.json') });
     const recorded = store.record(minedCandidate(), {
@@ -52,7 +52,7 @@ test('mined candidates cannot be promoted before Yan Eval validation', () => {
 
     const attached = store.attachValidation('wf-abc1234567', {
       ok: true,
-      suiteId: 'yan-eval-core',
+      suiteId: 'z-eval-core',
       rubricVersion: 1,
       digest: 'deadbeef',
       taskIds: ['fs-roundtrip', 'exact-replace']
@@ -70,7 +70,7 @@ test('mined candidates cannot be promoted before Yan Eval validation', () => {
 });
 
 test('legacy reviewer candidates keep promoting without the strict flag', () => {
-  const dir = tempDir('yan-agi-wiring-');
+  const dir = tempDir('z-agi-wiring-');
   try {
     const store = new SkillEvolutionStore({ filePath: path.join(dir, 'skill-evolution.json') });
     const legacy = minedCandidate();
@@ -91,19 +91,19 @@ test('legacy reviewer candidates keep promoting without the strict flag', () => 
 
 test('long-horizon protocol renders into the turn context only when present', () => {
   const base = { providerId: 'deepseek', modelId: 'deepseek-v4-flash', prompt: 'hi' };
-  assert.doesNotMatch(combineTurnPrompt(base, base.prompt, false), /yan-long-horizon-protocol/);
+  assert.doesNotMatch(combineTurnPrompt(base, base.prompt, false), /z-long-horizon-protocol/);
   const withProtocol = combineTurnPrompt(
     { ...base, workMode: 'agi', longHorizonContext: '目标：交付登录页\n冒烟：npm test' },
     base.prompt,
     false
   );
-  assert.match(withProtocol, /<yan-long-horizon-protocol>/);
+  assert.match(withProtocol, /<z-long-horizon-protocol>/);
   assert.match(withProtocol, /交付登录页/);
   assert.match(withProtocol, /npm test/);
 });
 
 test('protocol artifacts survive a session restart and reach the prompt', () => {
-  const workspace = tempDir('yan-agi-wiring-ws-');
+  const workspace = tempDir('z-agi-wiring-ws-');
   try {
     const created = ensureProtocol({
       workspace,
@@ -134,7 +134,7 @@ test('protocol artifacts survive a session restart and reach the prompt', () => 
       workMode: 'agi',
       longHorizonContext: section
     }, '继续', false);
-    assert.match(prompt, /<yan-long-horizon-protocol>/);
+    assert.match(prompt, /<z-long-horizon-protocol>/);
     assert.match(prompt, /表单校验/);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });

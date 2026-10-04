@@ -5,7 +5,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { OpenCodeSidecar, buildOpenCodeConfig } = require('../lib/opencode-sidecar');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-compact-kernel-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-compact-kernel-'));
 const requests = [];
 const server = http.createServer((req,res)=>{
  let raw=''; req.on('data',chunk=>raw+=chunk);req.on('end',()=>{

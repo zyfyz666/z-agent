@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-quick-diff-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-quick-diff-'));
 
 (async () => {
   let application;
@@ -18,8 +18,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-quick-diff
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -28,7 +28,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-quick-diff
     await page.evaluate(async () => {
       if (!state.currentSession) await newSession();
       clearMessages();
-      state.currentSession.workspace = 'C:\\yan-review-quick-diff';
+      state.currentSession.workspace = 'C:\\z-review-quick-diff';
       state.currentSession.messages = [];
       const agentRun = {
         runId: 'quick-diff-run',
@@ -133,8 +133,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-quick-diff
     // must not resurrect the quick preview.
     await receiptFile.click();
     await page.locator('#rs-review.active').waitFor();
-    await page.locator('#yanDshReviewFrame').waitFor();
-    const formalReviewFrame = page.frameLocator('#yanDshReviewFrame');
+    await page.locator('#zDshReviewFrame').waitFor();
+    const formalReviewFrame = page.frameLocator('#zDshReviewFrame');
     await formalReviewFrame.locator('.sidenav .navitem').first().waitFor();
     assert.ok(await formalReviewFrame.locator('.sidenav .navitem').count() >= 1);
     assert.equal(await page.locator('#reviewQuickDiff').evaluate(panel => panel.classList.contains('hidden')), true);

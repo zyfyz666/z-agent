@@ -5,11 +5,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
+const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
+const obsoleteBrandPattern = new RegExp(`\\b${LEGACY_NAMESPACE.lower}(?:[- ]?Agent)?\\b|\\b${LEGACY_NAMESPACE.title[0]}Agent\\b|\\b${LEGACY_NAMESPACE.lower}xi\\b|WD\\s+Agent`, 'i');
 
 const appRoot = path.resolve(__dirname, '..');
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'z-visible-brand-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'z-workbench');
-const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userData };
+const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userData };
 delete env.ELECTRON_RUN_AS_NODE;
 const report = { ok: false, pageErrors: [], surfaces: [], screenshots: [] };
 fs.mkdirSync(outputDir, { recursive: true });
@@ -36,7 +38,7 @@ fs.mkdirSync(outputDir, { recursive: true });
     const file = path.join(outputDir, filename);
     await page.screenshot({ path: file });
     report.screenshots.push(file);
-    assert.doesNotMatch(visible.text, /\bYan\b|YAgent|YanAgent|Yanxi|WD\s+Agent/i, name + ' must use current product branding');
+    assert.doesNotMatch(visible.text, obsoleteBrandPattern, name + ' must use current product branding');
     return visible;
   };
   try {
@@ -61,22 +63,24 @@ fs.mkdirSync(outputDir, { recursive: true });
 
     await page.locator('#newTaskNavBtn').click();
     await page.locator('#pageChat').waitFor({ state: 'visible' });
-    await page.locator('[data-window-view="project-map"]').click();
-    assert.equal(await page.evaluate(() => currentWindowView), 'main', 'empty workspace is guarded before generating a project map');
+    assert.equal(await page.locator('[data-window-view="project-map"]').count(), 1);
+    const taskWorkspace = await page.evaluate(() => state.currentSession.workspace);
+    assert.ok(taskWorkspace && fs.existsSync(taskWorkspace), 'new tasks have an automatic workspace');
     // Also inspect the viewer's own empty state without creating a project,
     // invoking code analysis, or using a model.
-    await page.evaluate(() => window.YanUnderstandAnything.open(''));
+    await page.evaluate(() => window.ZUnderstandAnything.open(''));
     await page.locator('#understandAnythingLayer').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('#understandAnythingStatus').innerText(), '请先选择工作区');
+    assert.equal(await page.locator('#understandAnythingStatus').innerText(),
+      '当前任务文件夹中没有可显示的代码。请选择包含源码的项目文件夹后再打开项目地图。');
     await scan('#understandAnythingLayer', 'Project map empty state', 'project-map-empty-z.png');
-    await page.evaluate(() => window.YanUnderstandAnything.close({ silent: true }));
+    await page.evaluate(() => window.ZUnderstandAnything.close({ silent: true }));
 
     assert.equal(await page.locator('[data-window-view="work-gui"]').count(), 0, 'removed visual workspace has no navigation entry');
     assert.equal(await page.locator('#pageWorkGui').count(), 0, 'removed visual workspace has no page container');
     assert.deepEqual(await page.evaluate(() => ({
-      workGui: typeof window.YanWorkGui,
-      palaceHost: typeof window.YanTiangongHost,
-      palaceSubmit: typeof window.YanPalaceSubmit,
+      workGui: typeof window.ZWorkGui,
+      palaceHost: typeof window.ZTiangongHost,
+      palaceSubmit: typeof window.ZPalaceSubmit,
     })), { workGui: 'undefined', palaceHost: 'undefined', palaceSubmit: 'undefined' }, 'removed visual workspace has no global bridges');
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('script[src],link[href]')]
       .map(element => element.getAttribute('src') || element.getAttribute('href'))

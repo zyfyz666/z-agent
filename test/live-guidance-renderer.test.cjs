@@ -74,13 +74,13 @@ test('running Send persists pending guidance before directly delivering it to th
   assert.equal(f.queued, 0);
   assert.equal(f.saved[0].messages.at(-1).liveGuidance.status, 'pending');
   assert.equal(f.calls[0].runId, 'run-A');
-  assert.equal(f.calls[0].yanSessionId, 'A');
+  assert.equal(f.calls[0].zSessionId, 'A');
   assert.equal(f.calls[0].text, 'First guidance');
   assert.deepEqual(f.shown, [{ content: 'First guidance' }]);
   f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
   await pending;
   assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.status, 'queued');
-  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'yan.guidance.status', data: {
+  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'z.guidance.status', data: {
     requestId: f.calls[0].requestId, status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' } });
   await until(() => f.saved.at(-1).messages.at(-1).liveGuidance.status === 'delivered');
   assert.equal(f.a.messages[0].content, 'Original request');
@@ -133,9 +133,9 @@ test('provider proof wins a late acknowledgement and remains confined to its ori
   await until(() => f.calls.length === 1);
   f.context.state.currentSession = f.b;
   const data = { requestId: f.calls[0].requestId, status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' };
-  f.context.applyLiveGuidanceStatus({ ...f.runCtx, runId: 'wrong-run' }, { type: 'yan.guidance.status', data });
+  f.context.applyLiveGuidanceStatus({ ...f.runCtx, runId: 'wrong-run' }, { type: 'z.guidance.status', data });
   assert.equal(f.a.messages.at(-1).liveGuidance.status, 'pending');
-  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'yan.guidance.status', data });
+  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'z.guidance.status', data });
   f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
   await pending;
   f.context.settleLiveGuidanceStatuses(f.runCtx);
@@ -149,7 +149,7 @@ test('a stopped run retains unsent guidance with an explicit failure instead of 
   const f = fixture();
   const pending = f.context.steerCurrentComposerTurn();
   await until(() => f.calls.length === 1);
-  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'yan.guidance.status', data: {
+  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'z.guidance.status', data: {
     requestId: f.calls[0].requestId, status: 'failed', error: '任务已停止，未确认送入模型' } });
   f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
   await pending;
@@ -253,7 +253,7 @@ test('messages with attachments still queue explicitly and stopping tasks accept
 
 function terminalFixture() {
   const context = {
-    window: { YanSubagentWorkflow: { importRecords() {}, consume() {}, finalize() {} } },
+    window: { ZSubagentWorkflow: { importRecords() {}, consume() {}, finalize() {} } },
     subagentPanel: { schedule() {} },
     flushOpenCodeStreamDeltas() {}, cancelScheduledOpenCodeRender() {}, cancelOpenCodeStreamFlush() {}, removeOpenCodeTimeline() {},
     normalizeDeliveryAgreementTimeline: value => value.map(item => ({ ...item })),

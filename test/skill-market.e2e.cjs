@@ -8,8 +8,8 @@ const { _electron: electron } = require('playwright');
 const skillRegistry = require('../lib/skill-registry');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-skill-market-e2e-'));
-const dataDir = path.join(userDataDir, 'YanData');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skill-market-e2e-'));
+const dataDir = path.join(userDataDir, 'ZData');
 const outputDir = path.join(appRoot, 'output', 'playwright');
 const screenshotPath = path.join(outputDir, 'skill-market.png');
 fs.mkdirSync(outputDir, { recursive: true });
@@ -40,8 +40,8 @@ const legacyHallmarkShadow = {
   version: 110
 };
 fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ customSkills: [retiredSkill, legacyBundledSkill] }, null, 2));
-skillRegistry.installYanUserSkill(dataDir, retiredSkill);
-skillRegistry.installYanUserSkill(dataDir, legacyHallmarkShadow);
+skillRegistry.installZUserSkill(dataDir, retiredSkill);
+skillRegistry.installZUserSkill(dataDir, legacyHallmarkShadow);
 
 (async () => {
   let application;
@@ -52,13 +52,13 @@ skillRegistry.installYanUserSkill(dataDir, legacyHallmarkShadow);
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => document.readyState === 'complete' && typeof switchSidebarNav === 'function');
-    const expectedSkills = await page.evaluate(() => window.yan.listSkills());
+    const expectedSkills = await page.evaluate(() => window.z.listSkills());
     const expectedMarketCount = expectedSkills.length;
     const expectedCounts = new Map([
       'code-assist',
@@ -135,7 +135,7 @@ skillRegistry.installYanUserSkill(dataDir, legacyHallmarkShadow);
     await page.waitForFunction(count => document.querySelectorAll('#skillMarketGrid .skill-card').length === count, expectedCounts.get('office-assist'));
     await page.screenshot({ path: screenshotPath, fullPage: false });
 
-    const installed = await page.evaluate(() => window.yan.listSkills());
+    const installed = await page.evaluate(() => window.z.listSkills());
     assert.equal(installed.length, expectedMarketCount);
     assert.ok(installed.some(skill => skill.id === 'hyperframes'));
     assert.ok(installed.some(skill => skill.id === 'remotion-best-practices'));
@@ -145,8 +145,8 @@ skillRegistry.installYanUserSkill(dataDir, legacyHallmarkShadow);
     assert.deepEqual(migrated.tags, ['code-assist']);
     assert.equal(migrated.source, 'bundled');
     assert.ok(installed.some(skill => skill.id === legacyHallmarkShadow.id));
-    assert.ok(!skillRegistry.scanYanUserSkills(dataDir).some(skill => skill.id === legacyHallmarkShadow.id));
-    assert.ok(!skillRegistry.scanYanUserSkills(dataDir).some(skill => skill.id === retiredSkill.id));
+    assert.ok(!skillRegistry.scanZUserSkills(dataDir).some(skill => skill.id === legacyHallmarkShadow.id));
+    assert.ok(!skillRegistry.scanZUserSkills(dataDir).some(skill => skill.id === retiredSkill.id));
     console.log(JSON.stringify({ ok: true, screenshotPath, skills: ids }));
   } finally {
     await application?.close().catch(() => {});

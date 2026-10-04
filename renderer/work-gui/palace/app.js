@@ -48,6 +48,6 @@
   }
   setTimeout(boot,80);
   $('#world').addEventListener('webglcontextlost',e=>{e.preventDefault();$('#error').hidden=false;stopTour();});
-  window.addEventListener('message',e=>{if(e.source!==window.parent||e.data?.source!=='yan-palace-host')return;if(e.data.kind==='pause'){api?.setPaused(true);window.TiangongPanels?.close();}if(e.data.kind==='resume')api?.setPaused(false);});
+  window.addEventListener('message',e=>{if(e.source!==window.parent||e.data?.source!=='z-palace-host')return;if(e.data.kind==='pause'){api?.setPaused(true);window.TiangongPanels?.close();}if(e.data.kind==='resume')api?.setPaused(false);});
   window.addEventListener('pagehide',()=>{cancelAnimationFrame(clock);api?.dispose();});
 })();

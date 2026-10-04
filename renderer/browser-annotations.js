@@ -1,7 +1,7 @@
 /* User-owned annotations. The guest supplies bounded metadata, never host UI or commands. */
 (() => {
-  window.YanApplyAnnotation=function(request){
-    const element=window.__yanAnnotationTargets?.get(request.id);
+  window.ZApplyAnnotation=function(request){
+    const element=window.__zAnnotationTargets?.get(request.id);
     if(location.href!==request.url||!element?.isConnected)return {ok:false,error:'选定元素已失效，请重新注释'};
     const allowed={color:'color',background:'background-color',opacity:'opacity',fontFamily:'font-family',fontSize:'font-size',fontWeight:'font-weight'};
     const styles=request.styles||{};
@@ -33,7 +33,7 @@
       parts.unshift(part);
     }
     const sensitive=el.matches('input,textarea,[contenteditable="true"]')||el.closest('[contenteditable="true"]');
-    if(annotationId){const targets=window.__yanAnnotationTargets ||= new Map();targets.set(annotationId,el);
+    if(annotationId){const targets=window.__zAnnotationTargets ||= new Map();targets.set(annotationId,el);
     if(targets.size>40)targets.delete(targets.keys().next().value);}
     return {annotationId,url:location.href,title:document.title.slice(0,200),tag:el.localName,selector:parts.join(' > '),shadow:el.getRootNode()!==document,
       text:sensitive?'':String(el.innerText||el.getAttribute('aria-label')||'').trim().slice(0,300),
@@ -41,7 +41,7 @@
       rect:{x:rect.x/innerWidth,y:rect.y/innerHeight,width:rect.width/innerWidth,height:rect.height/innerHeight},
       size:Math.round(rect.width)+' × '+Math.round(rect.height),styles:{font:style.fontSize+' '+style.fontFamily,color:style.color,background:style.backgroundColor,opacity:style.opacity,fontFamily:style.fontFamily,fontSize:style.fontSize,fontWeight:style.fontWeight,padding:style.padding,display:style.display}};
   }
-  window.YanBrowserAnnotations={init(controller,{onAdd,notify=()=>{}}={}){
+  window.ZBrowserAnnotations={init(controller,{onAdd,notify=()=>{}}={}){
     const {panel,webview,root}=controller;
     const button=document.createElement('button');button.type='button';button.className='tool-panel-nav-btn browser-annotate-btn';button.dataset.browserAction='annotate';button.title='注释网页';button.setAttribute('aria-label','注释网页');button.setAttribute('aria-pressed','false');
     const icon=document.querySelector('[data-rs-dock-tool="interjection"] svg');if(icon)button.append(icon.cloneNode(true));

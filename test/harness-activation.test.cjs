@@ -16,12 +16,12 @@ const Module = require('node:module');
 const crypto = require('node:crypto');
 
 const appRoot = path.resolve(__dirname, '..');
-const stubDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-activate-'));
+const stubDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-activate-'));
 
 const electronStub = {
   app: {
     getPath: () => stubDataDir,
-    getName: () => 'yan-agent',
+    getName: () => 'z-agent',
     getVersion: () => '1.4.0',
     getLocale: () => 'zh',
     getPreferredSystemLanguages: () => ['zh-CN'],
@@ -61,17 +61,17 @@ Module._load = function stubbedLoad(request, parent, isMain) {
 
 let main;
 try {
-  process.env.YAN_MAIN_TEST_EXPORTS = '1';
+  process.env.Z_MAIN_TEST_EXPORTS = '1';
   main = require(path.join(appRoot, 'main.js'));
 } finally {
   Module._load = originalLoad;
 }
 
 const { ContinualHarnessStore } = require('../lib/continual-harness');
-// main.js derives dataDir as <app.getPath('userData')>/YanData.
+// main.js derives dataDir as <app.getPath('userData')>/ZData.
 const harness = new ContinualHarnessStore({
-  globalPath: path.join(stubDataDir, 'YanData', 'harness', 'harness-state.json'),
-  yanagentDir: path.join(stubDataDir, 'YanData', 'yanagent')
+  globalPath: path.join(stubDataDir, 'ZData', 'harness', 'harness-state.json'),
+  zagentDir: path.join(stubDataDir, 'ZData', 'zagent')
 });
 
 function candidateReview(overrides = {}) {

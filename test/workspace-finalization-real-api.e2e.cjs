@@ -6,16 +6,16 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
-if (process.env.YAN_RUN_REAL_API_E2E !== '1') {
-  console.log('Skipped: set YAN_RUN_REAL_API_E2E=1 to use the configured text-model API.');
+if (process.env.Z_RUN_REAL_API_E2E !== '1') {
+  console.log('Skipped: set Z_RUN_REAL_API_E2E=1 to use the configured text-model API.');
   process.exit(0);
 }
 
 const appRoot = path.resolve(__dirname, '..');
-const sourceConfig = path.join(process.env.APPDATA || '', 'yan-agent', 'YanData', 'config.json');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-workspace-finalization-real-'));
-const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-workspace-target-'));
-const targetDataDir = path.join(userDataDir, 'YanData');
+const sourceConfig = path.join(process.env.APPDATA || '', 'z-agent', 'ZData', 'config.json');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-workspace-finalization-real-'));
+const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'z-workspace-target-'));
+const targetDataDir = path.join(userDataDir, 'ZData');
 
 async function latestAssistant(page) {
   return page.evaluate(() => {
@@ -34,7 +34,7 @@ async function latestAssistant(page) {
 (async () => {
   let application;
   try {
-    assert.equal(fs.existsSync(sourceConfig), true, 'Yan model configuration is missing');
+    assert.equal(fs.existsSync(sourceConfig), true, 'Z model configuration is missing');
     fs.mkdirSync(targetDataDir, { recursive: true });
     fs.copyFileSync(sourceConfig, path.join(targetDataDir, 'config.json'));
     application = await electron.launch({
@@ -43,8 +43,8 @@ async function latestAssistant(page) {
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();

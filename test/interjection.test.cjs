@@ -130,7 +130,7 @@ test('isolated auxiliary observer uses plain output with tools denied and a stab
   assert.equal(second.kind, 'check');
   assert.equal(calls.create.length, 2);
   assert.deepEqual(calls.create[0].permission, [{ permission: '*', pattern: '*', action: 'deny' }]);
-  assert.equal(calls.create[0].metadata.yanInterjectionObserver, true);
+  assert.equal(calls.create[0].metadata.zInterjectionObserver, true);
   assert.equal(calls.prompt.length, 2);
   assert.deepEqual(calls.prompt[0].tools, { '*': false });
   assert.match(calls.prompt[0].system, /你是 Z 的辅助对话子智能体/);

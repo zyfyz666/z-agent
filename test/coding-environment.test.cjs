@@ -12,18 +12,18 @@ const { fileRevision } = require('../lib/verification-state');
 const { projectEnvironment } = require('../lib/project-environment');
 const { buildRepoMapBackground } = require('../lib/analysis/repo-map-background');
 function repo(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-environment-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-environment-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'src'));
   fs.writeFileSync(path.join(root, 'AGENTS.md'), 'ROOT_RULE');
-  fs.writeFileSync(path.join(root, 'YAN.md'), 'YAN_OVERRIDE');
+  fs.writeFileSync(path.join(root, 'Z.md'), 'Z_OVERRIDE');
   fs.writeFileSync(path.join(root, 'src', 'AGENTS.md'), 'SOURCE_RULE');
   return root;
 }
 test('project rules resolve directory order and refresh edits/deletes without crossing workspace', t => {
   const root = repo(t);
   const target = path.join(root, 'src', 'new.js');
-  assert.deepEqual(readProjectInstructions(root, target).map(record => record.text), ['ROOT_RULE', 'YAN_OVERRIDE', 'SOURCE_RULE']);
+  assert.deepEqual(readProjectInstructions(root, target).map(record => record.text), ['ROOT_RULE', 'Z_OVERRIDE', 'SOURCE_RULE']);
   fs.writeFileSync(path.join(root, 'src', 'AGENTS.md'), 'CHANGED');
   assert.equal(readProjectInstructions(root, target).at(-1).text, 'CHANGED');
   fs.unlinkSync(path.join(root, 'src', 'AGENTS.md'));
@@ -58,7 +58,7 @@ test('file receipts invalidate a check after an external modification', t => {
   const file = path.join(root, 'src', 'a.js');
   fs.writeFileSync(file, 'const x = 1;');
   const messages = [{ parts: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'node --check src/a.js' },
-    metadata: { exit: 0, yanVerification: { files: { [file]: fileRevision(file) } } } } }] }];
+    metadata: { exit: 0, zVerification: { files: { [file]: fileRevision(file) } } } } }] }];
   assert.equal(summarizeVerification(messages, { workspace: root }).status, 'passed');
   fs.writeFileSync(file, 'const x = ;');
   assert.equal(summarizeVerification(messages, { workspace: root }).status, 'stale');

@@ -16,7 +16,7 @@ const {
 } = require('../lib/text-to-speech');
 
 function makeTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-tts-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-tts-'));
 }
 
 function createFakeClient({ calls = [], payload = Buffer.from('fake-mp3'), mode = 'ok' } = {}) {

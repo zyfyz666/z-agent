@@ -6,7 +6,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-session-switch-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-session-switch-'));
 
 // Switching tasks used to keep the previous conversation on screen until the
 // async session load finished (seconds). The loading placeholder must replace
@@ -19,7 +19,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-session-switch-')
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));

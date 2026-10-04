@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreement-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-delivery-agreement-e2e-'));
 
 (async () => {
   let application;
@@ -18,8 +18,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -50,7 +50,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
 
       applyOpenCodeEvent(runCtx, {
         type: 'message.part.updated',
-        data: { part: { id: 'delivery-part', type: 'text', text: '<yan-deliv' } }
+        data: { part: { id: 'delivery-part', type: 'text', text: '<z-deliv' } }
       }, { deferEffects: true });
       renderOpenCodeRunNow(runCtx);
       const partialOpen = {
@@ -63,7 +63,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
         data: {
           partID: 'delivery-part',
           field: 'text',
-          delta: 'ery-contract>\nintent: presentable（演示级单文件网页）\nartifact: frontend\nscope: 仅实现“3D 小岛”单页展示\ndirection: 宁静的海岛午后\ndecisions:\n海面与植被采用统一风向\n主体居中，远景保持简洁\nacceptance: 真实浏览器预览且页面可交互旋转\n</yan-delivery'
+          delta: 'ery-contract>\nintent: presentable（演示级单文件网页）\nartifact: frontend\nscope: 仅实现“3D 小岛”单页展示\ndirection: 宁静的海岛午后\ndecisions:\n海面与植被采用统一风向\n主体居中，远景保持简洁\nacceptance: 真实浏览器预览且页面可交互旋转\n</z-delivery'
         }
       }, { deferEffects: true });
       renderOpenCodeRunNow(runCtx);
@@ -103,14 +103,14 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
       };
 
       const currentContract = Object.fromEntries(rows.map(row => [row.key, row.value]));
-      applyOpenCodeEvent(runCtx, { type: 'yan.delivery.contract.updated', data: { contract: currentContract, contractId: 'version-one' } }, { deferEffects: true });
-      applyOpenCodeEvent(runCtx, { type: 'yan.delivery.acceptance.started', data: { round: 1 } }, { deferEffects: true });
+      applyOpenCodeEvent(runCtx, { type: 'z.delivery.contract.updated', data: { contract: currentContract, contractId: 'version-one' } }, { deferEffects: true });
+      applyOpenCodeEvent(runCtx, { type: 'z.delivery.acceptance.started', data: { round: 1 } }, { deferEffects: true });
       renderOpenCodeRunNow(runCtx);
       const checking = assistantEl.querySelector('.delivery-agreement-tool').dataset.deliveryVerification;
-      applyOpenCodeEvent(runCtx, { type: 'yan.delivery.acceptance.passed', data: { contractId: 'stale-version' } }, { deferEffects: true });
+      applyOpenCodeEvent(runCtx, { type: 'z.delivery.acceptance.passed', data: { contractId: 'stale-version' } }, { deferEffects: true });
       const staleStatus = openCodeTimelineItem(runCtx, 'delivery-contract').verification;
       const review = { criteria: { direction: { status: 'pass', evidence: '海面、树影和主体形成统一的午后场景' } } };
-      applyOpenCodeEvent(runCtx, { type: 'yan.delivery.acceptance.passed', data: { contractId: 'version-one', review } }, { deferEffects: true });
+      applyOpenCodeEvent(runCtx, { type: 'z.delivery.acceptance.passed', data: { contractId: 'version-one', review } }, { deferEffects: true });
       renderOpenCodeRunNow(runCtx);
       const verified = {
         status: assistantEl.querySelector('.delivery-agreement-tool').dataset.deliveryVerification,
@@ -118,17 +118,17 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
         evidence: assistantEl.querySelector('.delivery-agreement-evidence')?.textContent,
         normalized: normalizeDeliveryAgreementTimeline(runCtx.activeAgentRun.timeline).find(item => item.type === 'delivery_contract')?.verification
       };
-      applyOpenCodeEvent(runCtx, { type: 'yan.delivery.contract.updated', data: { contract: { ...currentContract, direction: '风暴中的海岛' }, contractId: 'version-two' } }, { deferEffects: true });
+      applyOpenCodeEvent(runCtx, { type: 'z.delivery.contract.updated', data: { contract: { ...currentContract, direction: '风暴中的海岛' }, contractId: 'version-two' } }, { deferEffects: true });
       const revisedStatus = openCodeTimelineItem(runCtx, 'delivery-contract').verification;
-      applyOpenCodeEvent(runCtx, { type: 'yan.delivery.acceptance.failed', data: { message: '尚未观察到统一风向' } }, { deferEffects: true });
+      applyOpenCodeEvent(runCtx, { type: 'z.delivery.acceptance.failed', data: { message: '尚未观察到统一风向' } }, { deferEffects: true });
       renderOpenCodeRunNow(runCtx);
       const failedStatus = openCodeTimelineItem(runCtx, 'delivery-contract').verification;
       const failedLabel = assistantEl.querySelector('.delivery-agreement-tool .tool-activity-label')?.textContent;
 
-      const rawContract = '<yan-delivery-contract>\nintent: delivery\nartifact: backend\nscope: 保留现有 API\nacceptance: 本地测试通过\n</yan-delivery-contract>';
+      const rawContract = '<z-delivery-contract>\nintent: delivery\nartifact: backend\nscope: 保留现有 API\nacceptance: 本地测试通过\n</z-delivery-contract>';
       const finalized = openCodeResultToAgentRun({
         status: 'done',
-        text: `${rawContract}\n<yan-delivery-review>{"criteria":{}}</yan-delivery-review>\n最终完成。`,
+        text: `${rawContract}\n<z-delivery-review>{"criteria":{}}</z-delivery-review>\n最终完成。`,
         delivery: { contract: currentContract, contractId: 'version-three', verified: true, review },
         toolCalls: [],
         todos: []
@@ -212,10 +212,10 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
 
     assert.equal(result.partialOpen.agreementCount, 0);
     assert.equal(result.partialClose.agreementCount, 0);
-    assert.doesNotMatch(result.partialOpen.visibleText, /yan-deliv/i);
-    assert.doesNotMatch(result.partialClose.visibleText, /yan-delivery/i);
+    assert.doesNotMatch(result.partialOpen.visibleText, /z-deliv/i);
+    assert.doesNotMatch(result.partialClose.visibleText, /z-delivery/i);
 
-    assert.equal(result.completedStream.name, 'Yan-Delivery-Agreement ·已完成');
+    assert.equal(result.completedStream.name, 'Z-Delivery-Agreement ·已完成');
     assert.equal(result.completedStream.icon, 'clock');
     assert.equal(result.completedStream.verification, 'recorded');
     assert.equal(result.completedStream.statusChipPresent, false);
@@ -230,27 +230,27 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
     assert.match(result.completedStream.rows[0].value, /^presentable/u);
     assert.equal(result.completedStream.rows[1].value, 'frontend');
     assert.match(result.completedStream.visibleText, /我们开始实现/u);
-    assert.doesNotMatch(result.completedStream.visibleText, /yan-delivery-contract/i);
+    assert.doesNotMatch(result.completedStream.visibleText, /z-delivery-contract/i);
     assert.deepEqual(result.completedStream.textItems, ['我们开始实现。']);
     assert.equal(result.checking, 'checking');
     assert.equal(result.staleStatus, 'checking');
     assert.equal(result.verified.status, 'verified');
     assert.equal(result.verified.normalized, 'verified');
-    assert.equal(result.verified.label, 'Yan-Delivery-Agreement ·已完成');
+    assert.equal(result.verified.label, 'Z-Delivery-Agreement ·已完成');
     assert.match(result.verified.evidence, /午后场景/u);
     assert.equal(result.revisedStatus, 'recorded');
     assert.equal(result.failedStatus, 'failed');
-    assert.equal(result.failedLabel, 'Yan-Delivery-Agreement ·错误');
+    assert.equal(result.failedLabel, 'Z-Delivery-Agreement ·错误');
 
     assert.equal(result.restored.agreementCount, 1);
-    assert.equal(result.restored.name, 'Yan-Delivery-Agreement ·已完成');
+    assert.equal(result.restored.name, 'Z-Delivery-Agreement ·已完成');
     assert.equal(result.restored.contractItems, 1);
     assert.equal(result.restored.textContent, '最终完成。');
     assert.equal(result.restored.persistedContract.artifact, 'frontend');
     assert.equal(result.legacyArtifact, 'backend');
     assert.equal(result.restored.verification, 'verified');
     assert.equal(result.restored.persistedContract.decisions, '海面与植被采用统一风向\n主体居中，远景保持简洁');
-    assert.doesNotMatch(result.restored.visibleText, /yan-delivery-contract/i);
+    assert.doesNotMatch(result.restored.visibleText, /z-delivery-contract/i);
     assert.equal(result.loaderCount, 1);
     for (const body of result.finalBodies) {
       assert.equal(body.summaryStarted, true);
@@ -268,7 +268,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-delivery-agreemen
     console.log('delivery agreement UI e2e passed');
   } finally {
     if (application) await application.close();
-    if (path.resolve(userDataDir).startsWith(path.join(os.tmpdir(), 'yan-delivery-agreement-e2e-'))) {
+    if (path.resolve(userDataDir).startsWith(path.join(os.tmpdir(), 'z-delivery-agreement-e2e-'))) {
       fs.rmSync(userDataDir, { recursive: true, force: true });
     }
   }

@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-question-ui-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-question-ui-e2e-'));
 const screenshotDir = path.join(appRoot, 'output', 'playwright');
 const screenshotPath = path.join(screenshotDir, 'agent-question-panel-paged.png');
 fs.mkdirSync(screenshotDir, { recursive: true });
@@ -21,8 +21,8 @@ fs.mkdirSync(screenshotDir, { recursive: true });
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -95,7 +95,7 @@ fs.mkdirSync(screenshotDir, { recursive: true });
     assert.equal(await page.locator('#agentPermissionOnce').textContent(), '下一题');
     assert.equal(await page.locator('.agent-question-count').textContent(), '1/4');
     assert.equal(await page.locator('#agentQuestionHeaderPrev').getAttribute('aria-disabled'), 'true');
-    assert.equal(await page.locator('.agent-question-custom').getAttribute('placeholder'), '否，并告诉 Yan Agent 应该如何做不同');
+    assert.equal(await page.locator('.agent-question-custom').getAttribute('placeholder'), '否，并告诉 Z Agent 应该如何做不同');
     assert.equal(await page.locator('.agent-question-item').count(), 1);
     assert.equal(await page.locator('.agent-question-item input[type="radio"]').count(), 4);
     const optionViewport = await page.locator('#agentQuestionFields').evaluate(fields => {

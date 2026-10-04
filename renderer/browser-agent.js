@@ -1,4 +1,4 @@
-/* Yan Browser Agent Bridge - controls one visible, Agent-owned webview. */
+/* Z Browser Agent Bridge - controls one visible, Agent-owned webview. */
 (function (namespace) {
   'use strict';
 
@@ -138,14 +138,14 @@
           && rect.x < window.innerWidth && rect.y < window.innerHeight
       };
     });
-    window.__yanBrowserRefs = refs;
-    window.__yanBrowserSnapshotId = ${JSON.stringify(String(snapshotId || ''))};
+    window.__zBrowserRefs = refs;
+    window.__zBrowserSnapshotId = ${JSON.stringify(String(snapshotId || ''))};
     const bodyText = text(document.body?.innerText).slice(0, 3200);
     return {
       url: location.href,
       title: document.title || '',
       readyState: document.readyState,
-      snapshotId: window.__yanBrowserSnapshotId,
+      snapshotId: window.__zBrowserSnapshotId,
       viewport: { width: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX, scrollY: window.scrollY },
       items,
       bodyText,
@@ -154,7 +154,7 @@
   })()`;
 
   const targetScript = ref => `(() => {
-    const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+    const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
     if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     let view = element.ownerDocument.defaultView;
@@ -314,17 +314,17 @@
     async clearGuestAgentState() {
       try {
         return await this.executePage(`(() => {
-          for (const record of window.__yanBrowserInteractionReceipts?.values?.() || []) {
+          for (const record of window.__zBrowserInteractionReceipts?.values?.() || []) {
             record.element?.removeEventListener?.(record.eventType, record.listener, true);
           }
-          for (const record of window.__yanBrowserKeyboardReceipts?.values?.() || []) {
+          for (const record of window.__zBrowserKeyboardReceipts?.values?.() || []) {
             document.removeEventListener('keydown', record.onDown, true);
             document.removeEventListener('keyup', record.onUp, true);
           }
-          window.__yanBrowserInteractionReceipts = new Map();
-          window.__yanBrowserKeyboardReceipts = new Map();
-          window.__yanBrowserRefs = new Map();
-          window.__yanBrowserSnapshotId = '';
+          window.__zBrowserInteractionReceipts = new Map();
+          window.__zBrowserKeyboardReceipts = new Map();
+          window.__zBrowserRefs = new Map();
+          window.__zBrowserSnapshotId = '';
           return { ok: true };
         })()`);
       } catch {
@@ -373,7 +373,7 @@
     async pageState(ref = '', { changed = false, beforeUrl = '' } = {}) {
       const result = await this.executePage(`(() => {
         const ref = ${JSON.stringify(String(ref || ''))};
-        const element = ref ? window.__yanBrowserRefs?.get(ref) : null;
+        const element = ref ? window.__zBrowserRefs?.get(ref) : null;
         const summarize = target => {
           if (!target) return null;
           const type = String(target.getAttribute?.('type') || '').toLowerCase();
@@ -397,7 +397,7 @@
           url: location.href,
           title: document.title || '',
           readyState: document.readyState,
-          snapshotId: String(window.__yanBrowserSnapshotId || ''),
+          snapshotId: String(window.__zBrowserSnapshotId || ''),
           viewport: { scrollX: Math.round(window.scrollX), scrollY: Math.round(window.scrollY) },
           active: summarize(document.activeElement),
           target: summarize(element)
@@ -421,9 +421,9 @@
 
     async prepareInteractionReceipt(ref, receiptId, eventType) {
       return this.executePage(`(() => {
-        const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+        const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
         if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
-        window.__yanBrowserInteractionReceipts ||= new Map();
+        window.__zBrowserInteractionReceipts ||= new Map();
         const id = ${JSON.stringify(receiptId)};
         const record = {
           element,
@@ -437,14 +437,14 @@
           record.trusted = !!event.isTrusted;
         };
         element.addEventListener(record.eventType, record.listener, { capture: true, once: true });
-        window.__yanBrowserInteractionReceipts.set(id, record);
+        window.__zBrowserInteractionReceipts.set(id, record);
         return { ok: true, url: location.href };
       })()`);
     }
 
     async readInteractionReceipt(receiptId, { finalize = false } = {}) {
       return this.executePage(`(() => {
-        const store = window.__yanBrowserInteractionReceipts;
+        const store = window.__zBrowserInteractionReceipts;
         const id = ${JSON.stringify(receiptId)};
         const record = store?.get(id);
         if (!record) return { received: false, trusted: false, receiptMissing: true, url: location.href };
@@ -480,7 +480,7 @@
 
     async fallbackInteraction(ref, { button = 'left', clickCount = 1 } = {}) {
       return this.executePage(`(() => {
-        const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+        const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
         if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请重新快照。', code: 'STALE_REF' };
         if (${JSON.stringify(button)} === 'right') {
           element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, view: element.ownerDocument.defaultView, button: 2 }));
@@ -569,7 +569,7 @@
 
     async prepareKeyboardReceipt(receiptId, descriptor) {
       return this.executePage(`(() => {
-        window.__yanBrowserKeyboardReceipts ||= new Map();
+        window.__zBrowserKeyboardReceipts ||= new Map();
         const id = ${JSON.stringify(String(receiptId || ''))};
         const expectedKey = ${JSON.stringify(String(descriptor?.key || ''))};
         const expectedCode = ${JSON.stringify(String(descriptor?.code || ''))};
@@ -597,14 +597,14 @@
         record.onUp = event => { if (!record.up && matches(event)) record.up = summarize(event); };
         document.addEventListener('keydown', record.onDown, true);
         document.addEventListener('keyup', record.onUp, true);
-        window.__yanBrowserKeyboardReceipts.set(id, record);
+        window.__zBrowserKeyboardReceipts.set(id, record);
         return { ok: true, url: location.href };
       })()`);
     }
 
     async readKeyboardReceipt(receiptId, { finalize = false } = {}) {
       return this.executePage(`(() => {
-        const store = window.__yanBrowserKeyboardReceipts;
+        const store = window.__zBrowserKeyboardReceipts;
         const id = ${JSON.stringify(String(receiptId || ''))};
         const record = store?.get(id);
         if (!record) return { downReceived: false, upReceived: false, receiptMissing: true, url: location.href };
@@ -815,7 +815,7 @@
         if (!target?.ok) return target;
         this.pointer(target, 'move');
         const result = await this.executePage(`(() => {
-          const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+          const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
           if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
           element.focus();
           const value = ${JSON.stringify(value)};
@@ -849,7 +849,7 @@
         if (!target?.ok) return target;
         this.pointer(target, 'move');
         const result = await this.executePage(`(() => {
-          const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+          const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
           if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
           if (element.tagName !== 'SELECT') return { ok: false, error: '目标不是下拉选择框。', code: 'NOT_SELECT' };
           const wanted = ${JSON.stringify(String(value ?? ''))};
@@ -873,7 +873,7 @@
         if (!target?.ok) return target;
         this.pointer(target, 'move');
         const result = await this.executePage(`(() => {
-          const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+          const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
           if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
           const wanted = ${checked !== false};
           const role = element.getAttribute('role');
@@ -899,7 +899,7 @@
         if (!target?.ok) return target;
         this.pointer(target, 'move');
         const result = await this.executePage(`(() => {
-          const element = window.__yanBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
+          const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
           if (!element || !element.isConnected) return { ok: false, code: 'STALE_REF', error: '页面已变化，请重新快照。' };
           element.focus();
           return { ok: document.activeElement === element || element.ownerDocument.activeElement === element };
@@ -1048,7 +1048,7 @@
         const beforeUrl = this.webview.getURL?.() || '';
         const result = await this.executePage(`(() => {
           const ref = ${JSON.stringify(String(ref || ''))};
-          const element = ref ? window.__yanBrowserRefs?.get(ref) : null;
+          const element = ref ? window.__zBrowserRefs?.get(ref) : null;
           if (ref && (!element || !element.isConnected)) return { ok: false, error: '页面已变化，请重新快照。', code: 'STALE_REF' };
           const target = element || window;
           target.scrollBy({ left: ${delta[0]}, top: ${delta[1]}, behavior: 'instant' });
@@ -1080,7 +1080,7 @@
             const ref = ${JSON.stringify(targetRef)};
             if (wanted && String(document.body?.innerText || '').includes(wanted)) return { matched: true, reason: 'text' };
             if (!ref) return { matched: false };
-            const element = window.__yanBrowserRefs?.get(ref);
+            const element = window.__zBrowserRefs?.get(ref);
             const visible = !!element && element.isConnected && (() => { const r = element.getBoundingClientRect(); const s = getComputedStyle(element); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; })();
             const disabled = !!element && (element.disabled || element.getAttribute('aria-disabled') === 'true');
             const matched = ${JSON.stringify(state)} === 'hidden' ? !visible : (${JSON.stringify(state)} === 'enabled' ? visible && !disabled : visible);
@@ -1323,4 +1323,4 @@
   }
 
   namespace.init = options => new BrowserAgentController(options || {});
-})(window.YanBrowserAgent = window.YanBrowserAgent || {});
+})(window.ZBrowserAgent = window.ZBrowserAgent || {});

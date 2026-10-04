@@ -11,11 +11,11 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const start = source.indexOf('const openCodeSteeringRequests =');
 const end = source.indexOf("ipcMain.handle('opencode:interject',", start);
 assert.ok(start >= 0 && end > start);
-const request = (overrides = {}) => ({ runId: 'run-a', yanSessionId: 'sess_alpha', requestId: 'message-1', text: 'Keep the public API unchanged.', ...overrides });
+const request = (overrides = {}) => ({ runId: 'run-a', zSessionId: 'sess_alpha', requestId: 'message-1', text: 'Keep the public API unchanged.', ...overrides });
 
 function fixture(deliver) {
   const calls = [];
-  const active = { yanSessionId: 'sess_alpha', visionAbortController: new AbortController() };
+  const active = { zSessionId: 'sess_alpha', visionAbortController: new AbortController() };
   const runs = new Map([['run-a', active]]);
   const kernels = new Set(['run-a']);
   let handler;
@@ -46,7 +46,7 @@ test('live guidance directly reaches the active kernel with exact session owners
   assert.equal(result.accepted, true);
   assert.equal(result.delivered, false);
   assert.equal(result.requestId, 'message-1');
-  assert.equal(result.yanSessionId, 'sess_alpha');
+  assert.equal(result.zSessionId, 'sess_alpha');
   assert.deepEqual(JSON.parse(JSON.stringify(f.calls)), [{ runId: 'run-a', analysis: {
     kind: 'guidance', guidance: request().text, requestId: request().requestId, requestFinish: false, hardCancel: false, source: 'user'
   } }]);
@@ -81,7 +81,7 @@ test('reusing a message id for different text is rejected and cannot inject a se
 
 test('another conversation cannot steer this run and distinct messages are delivered independently', async () => {
   const f = fixture();
-  const wrong = await f.send(request({ yanSessionId: 'sess_other' }));
+  const wrong = await f.send(request({ zSessionId: 'sess_other' }));
   assert.equal(wrong.code, 'STEERING_SESSION_MISMATCH');
   assert.equal(f.calls.length, 0);
   const [first, second] = await Promise.all([
@@ -114,7 +114,7 @@ for (const state of ['finished', 'cancelled', 'replaced']) {
     await Promise.resolve();
     if (state === 'finished') f.runs.clear();
     if (state === 'cancelled') f.active.visionAbortController.abort();
-    if (state === 'replaced') f.runs.set('run-a', { yanSessionId: 'sess_other' });
+    if (state === 'replaced') f.runs.set('run-a', { zSessionId: 'sess_other' });
     resolve({ ok: true, accepted: true, delivered: false, version: 1 });
     const result = await pending;
     assert.equal(result.ok, false);
@@ -141,7 +141,7 @@ test('preload sends live-guidance and session-model payloads through their dedic
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8'), {
     require(name) {
       assert.equal(name, 'electron');
-      return { contextBridge: { exposeInMainWorld(name, value) { if (name === 'yan') api = value; } },
+      return { contextBridge: { exposeInMainWorld(name, value) { if (name === 'z') api = value; } },
         ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve({ ok: true }); }, on() {}, removeListener() {} },
         webUtils: {} };
     }

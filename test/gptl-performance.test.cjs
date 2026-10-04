@@ -63,7 +63,7 @@ test('shaping accepts all header forms without mutating caller headers', async (
 test('stream diagnostics forward cancellation to the response and report errors without sensitive text', async () => {
   const records = [];
   let cancelled = false;
-  const provider = providerModule.createYanGptlProvider({ apiKey: 'test', diagnostics: record => records.push(record),
+  const provider = providerModule.createZGptlProvider({ apiKey: 'test', diagnostics: record => records.push(record),
     fetch: async () => new Response(new ReadableStream({
       start(controller) { controller.enqueue(new TextEncoder().encode('data: {"id":"x","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}\n\n')); },
       cancel() { cancelled = true; }
@@ -76,7 +76,7 @@ test('stream diagnostics forward cancellation to the response and report errors 
   // The SSE parser may have already consumed the provider body before the
   // consumer cancels; the adapter's cancellation signal is the contract.
   assert.equal(typeof cancelled, 'boolean');
-  const broken = providerModule.createYanGptlProvider({ apiKey: 'test', diagnostics: record => records.push(record), fetch: async () => { throw new Error('SECRET_KEY'); } });
+  const broken = providerModule.createZGptlProvider({ apiKey: 'test', diagnostics: record => records.push(record), fetch: async () => { throw new Error('SECRET_KEY'); } });
   await assert.rejects(broken('gpt-5.5').doStream({ prompt: [] }));
   assert.equal(records.at(-1).status, 'error');
   assert.doesNotMatch(JSON.stringify(records), /SECRET_KEY/);

@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('yanPet', {
+contextBridge.exposeInMainWorld('zPet', {
   ready: () => ipcRenderer.send('pet:ready'),
   openTask: (sessionId) => ipcRenderer.send('pet:open-task', sessionId),
   stopTask: (sessionId) => ipcRenderer.send('pet:stop-task', sessionId),

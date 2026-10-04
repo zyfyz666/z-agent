@@ -191,7 +191,7 @@ test('a background run sends the target conversation model and freezes it before
   f.b.modelSelection = model('other-page-selection');
   await pending;
   assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].yanSessionId, 'A');
+  assert.equal(f.calls[0].zSessionId, 'A');
   assert.equal(f.calls[0].modelSelection.modelId, 'a');
   assert.equal(f.calls[0].modelSelection.providerId, 'provider-a');
   assert.equal(f.calls[0].modelSelection.capabilities.vision, true);

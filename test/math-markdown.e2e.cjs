@@ -9,7 +9,7 @@ const { _electron: electron } = require('playwright');
 const appRoot = path.resolve(__dirname, '..');
 const output = path.join(appRoot, 'output', 'math-markdown');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'z-math-e2e-'));
-const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile };
+const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile };
 delete env.ELECTRON_RUN_AS_NODE;
 fs.mkdirSync(output, { recursive: true });
 const report = { ok: false, checks: [], screenshots: [], errors: [] };

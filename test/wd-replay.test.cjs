@@ -10,7 +10,7 @@ const freshEntry = () => ({ events: [], watchdogStatus: null, completed: null })
 const noise = index => ({ type: 'message.part.delta', data: { field: 'text', delta: String(index) } });
 function status(runId, overrides = {}) {
   const snapshot = new WDMonitorState({ now: () => 100 }).snapshot();
-  return { type: 'yan.thrash.watchdog.status', data: {
+  return { type: 'z.thrash.watchdog.status', data: {
     ...snapshot, runID: runId, sessionID: `session-${runId}`,
     phase: 'observing', observedSteps: 18, judgedSteps: 18, checks: 3, interventions: 1,
     events: [{ id: 'wd-1', ts: 90, step: 18, action: 'remind', rules: ['R1_loop'], advisories: [],
@@ -27,7 +27,7 @@ test('the latest complete WD snapshot survives more than 400 unrelated stream ev
   assert.equal(entry.events.length, 400);
   assert.ok(entry.events.every(event => event.type === 'message.part.delta'));
   const replay = watchdogReplay(entry, { runId: 'a' });
-  assert.equal(replay.events[0].type, 'yan.thrash.watchdog.status');
+  assert.equal(replay.events[0].type, 'z.thrash.watchdog.status');
   assert.deepEqual(replay.events.slice(1), Array.from({ length: 400 }, (_, i) => noise(i + 600)));
   const restored = renderReplay(replay);
   assert.equal(restored.checks, 3);
@@ -40,13 +40,13 @@ test('older snapshots and legacy events cannot downgrade the authoritative repla
   const entry = freshEntry();
   const pending = status('a', { events: [{ ...status('a').data.events[0], delivery: 'pending' }] });
   recordReconcileEvent(entry, pending, { runId: 'a' });
-  recordReconcileEvent(entry, { type: 'yan.thrash.watchdog', data: pending.data.events[0] }, { runId: 'a' });
+  recordReconcileEvent(entry, { type: 'z.thrash.watchdog', data: pending.data.events[0] }, { runId: 'a' });
   recordReconcileEvent(entry, noise(1), { runId: 'a' });
   // Delivery confirmation intentionally has the same millisecond timestamp.
   recordReconcileEvent(entry, status('a'), { runId: 'a' });
   recordReconcileEvent(entry, status('a', { updatedAt: 50, checks: 1 }), { runId: 'a' });
   const replay = watchdogReplay(entry, { runId: 'a' });
-  assert.deepEqual(replay.events.map(event => event.type), ['yan.thrash.watchdog.status', 'message.part.delta']);
+  assert.deepEqual(replay.events.map(event => event.type), ['z.thrash.watchdog.status', 'message.part.delta']);
   const restored = renderReplay(replay);
   assert.equal(restored.checks, 3);
   assert.equal(restored.events.length, 1);
@@ -105,7 +105,7 @@ test('late delivery acknowledgement updates completed replay without reopening i
 
 test('legacy-only records remain replayable and do not invent full monitoring counters', () => {
   const entry = freshEntry();
-  const legacy = { type: 'yan.thrash.watchdog', data: { action: 'remind', rules: ['R1_loop'], advisories: [], streak: 1 } };
+  const legacy = { type: 'z.thrash.watchdog', data: { action: 'remind', rules: ['R1_loop'], advisories: [], streak: 1 } };
   recordReconcileEvent(entry, legacy, { runId: 'a' });
   const replay = watchdogReplay(entry, { runId: 'a' });
   assert.deepEqual(replay.events, [legacy]);

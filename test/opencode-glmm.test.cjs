@@ -95,7 +95,7 @@ test('reasoning is never interpreted as a command and is preserved verbatim', as
 
 test('multiple calls support no arguments and preserve names exactly, including MCP tools', async () => {
   const { transformGlmmGenerateResult } = await providerModule;
-  const names = ['ping', 'yan_skills_read_skill', 'mcp.tools.read'];
+  const names = ['ping', 'z_skills_read_skill', 'mcp.tools.read'];
   const converted = transformGlmmGenerateResult(result(names.map(name => call({}, name)).join('\n')),
     { tools: names.map(name => ({ name, inputSchema: {} })) });
   assert.deepEqual(converted.content.filter(p => p.type === 'tool-call').map(p => p.toolName), names);
@@ -179,9 +179,9 @@ test('GLM 5.3 constraints do not guess the protocol of future/older versions', a
 });
 
 test('GLM 5.3 Flash forwards normalized image attachments to the native API', async () => {
-  const { createYanGlmmProvider } = await providerModule;
+  const { createZGlmmProvider } = await providerModule;
   let body;
-  const provider = createYanGlmmProvider({ name: 'glm', baseURL: 'https://gateway.invalid/v1', fetch: async (_, init) => {
+  const provider = createZGlmmProvider({ name: 'glm', baseURL: 'https://gateway.invalid/v1', fetch: async (_, init) => {
     body = JSON.parse(init.body);
     return Response.json({ id: 'image-test', created: 1, model: 'glm-5.3-flash', choices: [{ index: 0,
       finish_reason: 'stop', message: { role: 'assistant', content: 'image received' } }] });
@@ -194,9 +194,9 @@ test('GLM 5.3 Flash forwards normalized image attachments to the native API', as
 });
 
 test('provider preserves reasoning history, native tool ids and GLM aliases on the wire', async () => {
-  const { createYanGlmmProvider } = await providerModule;
+  const { createZGlmmProvider } = await providerModule;
   const bodies = [];
-  const provider = createYanGlmmProvider({ name: 'custom', baseURL: 'https://gateway.invalid/v1', fetch: async (_, init) => {
+  const provider = createZGlmmProvider({ name: 'custom', baseURL: 'https://gateway.invalid/v1', fetch: async (_, init) => {
     bodies.push(JSON.parse(init.body));
     return Response.json({ id: 'test', created: 1, model: 'glm-5.3', choices: [{ index: 0, finish_reason: 'tool_calls',
       message: { role: 'assistant', reasoning_content: 'exact reasoning\n', content: null,
@@ -231,17 +231,17 @@ test('GLMM routes by preset, model and endpoint without a model allowlist', () =
   ]) {
     const config = buildOpenCodeConfig(selection).provider[selection.providerId];
     assert.match(config.npm, /opencode-glmm-provider/);
-    assert.equal(config.options.yanGlmmCompatibility, true);
+    assert.equal(config.options.zGlmmCompatibility, true);
     assert.deepEqual(config.models[selection.modelId].interleaved, { field: 'reasoning_content' });
   }
   const explicit = buildOpenCodeConfig({ providerId: 'glm', modelId: 'glm-5.3', glmm: false }).provider.glm;
-  assert.equal(explicit.options.yanDsmlCompatibility, false);
+  assert.equal(explicit.options.zDsmlCompatibility, false);
   assert.match(explicit.npm, /dsml-provider/);
   for (const apiFormat of ['anthropic', 'responses']) {
     const provider = buildOpenCodeConfig({ providerId: 'glm', modelId: 'glm-5.3', apiFormat,
       responsesProviderModule: 'file:///responses.mjs' }).provider.glm;
     assert.equal(provider.npm, apiFormat === 'anthropic' ? '@ai-sdk/anthropic' : 'file:///responses.mjs');
-    assert.equal(provider.options.yanGlmmCompatibility, undefined);
+    assert.equal(provider.options.zGlmmCompatibility, undefined);
   }
   assert.equal(inferConnectionPreset('Z.AI', ''), 'glm');
   assert.equal(inferConnectionPreset('', 'https://open.bigmodel.cn/api/anthropic'), 'glm');
@@ -249,13 +249,13 @@ test('GLMM routes by preset, model and endpoint without a model allowlist', () =
 });
 
 test('staging GLMM is content-addressed, self-contained and repairs corrupt cache', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-glmm-stage-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-glmm-stage-'));
   try {
     const location = stageGlmmProviderModule({ appRoot: path.resolve(__dirname, '..'), dataDir: directory });
     const staged = fileURLToPath(location);
     const source = fs.readFileSync(staged);
-    const { createYanGlmmProvider } = await import(location);
-    assert.equal(typeof createYanGlmmProvider, 'function');
+    const { createZGlmmProvider } = await import(location);
+    assert.equal(typeof createZGlmmProvider, 'function');
     fs.writeFileSync(staged, 'corrupt');
     assert.equal(stageGlmmProviderModule({ appRoot: path.resolve(__dirname, '..'), dataDir: directory }), location);
     assert.deepEqual(fs.readFileSync(staged), source);
@@ -268,7 +268,7 @@ test('staging GLMM is content-addressed, self-contained and repairs corrupt cach
     assert.deepEqual(fs.readFileSync(fileURLToPath(fromPackage)), source);
   } finally {
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(directory).startsWith('yan-glmm-stage-'));
+    assert.ok(path.basename(directory).startsWith('z-glmm-stage-'));
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

@@ -80,7 +80,7 @@ test('qwen shaping maps high to the supported xhigh effort', () => {
 test('qwen shaping injects one deterministic explicit cache marker on the system block', () => {
   const shaped = qwenShaping.shapeQwenRequestBody({
     model: 'qwen3.8-max',
-    messages: [{ role: 'system', content: 'Yan system prompt' }, { role: 'user', content: 'hi' }]
+    messages: [{ role: 'system', content: 'Z system prompt' }, { role: 'user', content: 'hi' }]
   }, { cacheMode: 'explicit' });
   const system = shaped.messages[0];
   assert.equal(system.content[0].type, 'text');
@@ -136,7 +136,7 @@ test('kimi shaping strips sampling and stray effort keys on k2.6', () => {
 });
 
 test('provider bundles expose exactly one create* factory and route real requests', async () => {
-  for (const [bundle, createName] of [[qwemBundle, 'createYanQwemProvider'], [kimlBundle, 'createYanKimlProvider']]) {
+  for (const [bundle, createName] of [[qwemBundle, 'createZQwemProvider'], [kimlBundle, 'createZKimlProvider']]) {
     const createExports = Object.keys(bundle).filter(key => /^create/.test(key));
     assert.deepEqual(createExports, [createName], 'the kernel resolves the first create* export');
   }
@@ -145,12 +145,12 @@ test('provider bundles expose exactly one create* factory and route real request
     requests.push({ url: String(input), body: String(init?.body || '') });
     return new Response(JSON.stringify({ error: { message: 'stop' } }), { status: 400, headers: { 'content-type': 'application/json' } });
   };
-  const qwem = qwemBundle.createYanQwemProvider({ name: 'conn-qwem', apiKey: 'k', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', fetch: fakeFetch });
+  const qwem = qwemBundle.createZQwemProvider({ name: 'conn-qwem', apiKey: 'k', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', fetch: fakeFetch });
   await qwem('qwen3.8-max').doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }).catch(() => {});
   const qwemBody = JSON.parse(requests.at(-1).body);
   assert.match(requests.at(-1).url, /\/chat\/completions$/u);
   assert.equal(qwemBody.messages[0].content[0].cache_control, undefined, 'no system block means no cache marker');
-  const kiml = kimlBundle.createYanKimlProvider({ name: 'conn-kiml', apiKey: 'k', baseURL: 'https://api.moonshot.ai/v1', fetch: fakeFetch });
+  const kiml = kimlBundle.createZKimlProvider({ name: 'conn-kiml', apiKey: 'k', baseURL: 'https://api.moonshot.ai/v1', fetch: fakeFetch });
   await kiml('kimi-k3').doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], reasoningEffort: 'medium' }).catch(() => {});
   const kimlBody = JSON.parse(requests.at(-1).body);
   assert.match(requests.at(-1).url, /\/chat\/completions$/u);
@@ -171,14 +171,14 @@ test('qwen/kimi streaming requests ask for the usage chunk', async () => {
     }
   };
 
-  const qwem = qwemBundle.createYanQwemProvider({
+  const qwem = qwemBundle.createZQwemProvider({
     name: 'conn-qwem', apiKey: 'k', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', fetch: fakeFetch
   });
   await drain((await qwem('qwen3.8-max').doStream({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })).stream);
   const qwenBody = JSON.parse(requests.at(-1).body);
   assert.deepEqual(qwenBody.stream_options, { include_usage: true }, 'without this flag the gateway sends no usage chunk');
 
-  const kiml = kimlBundle.createYanKimlProvider({
+  const kiml = kimlBundle.createZKimlProvider({
     name: 'conn-kiml', apiKey: 'k', baseURL: 'https://api.moonshot.ai/v1', fetch: fakeFetch
   });
   await drain((await kiml('kimi-k3').doStream({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })).stream);
@@ -193,7 +193,7 @@ test('sidecar wiring: qwen/kimi presets select their adapters with reasoning rep
     apiKey: 'k', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
   });
   assert.match(qwem.provider['conn-qwem'].npm, /opencode-qwem-provider\.mjs$/);
-  assert.equal(qwem.provider['conn-qwem'].options.yanQwemCompatibility, true);
+  assert.equal(qwem.provider['conn-qwem'].options.zQwemCompatibility, true);
   assert.equal(qwem.provider['conn-qwem'].models['qwen3.8-max'].interleaved.field, 'reasoning_content');
 
   const kiml = buildOpenCodeConfig({
@@ -201,7 +201,7 @@ test('sidecar wiring: qwen/kimi presets select their adapters with reasoning rep
     apiKey: 'k', baseUrl: 'https://api.moonshot.ai/v1'
   });
   assert.match(kiml.provider['conn-kiml'].npm, /opencode-kiml-provider\.mjs$/);
-  assert.equal(kiml.provider['conn-kiml'].options.yanKimlCompatibility, true);
+  assert.equal(kiml.provider['conn-kiml'].options.zKimlCompatibility, true);
 
   // A vendor-named relay hosting a foreign model keeps the generic adapter.
   const foreign = buildOpenCodeConfig({

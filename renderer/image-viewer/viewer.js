@@ -1,4 +1,4 @@
-const bridge = window.yanImageViewer;
+const bridge = window.zImageViewer;
 const params = new URLSearchParams(window.location.search);
 const assetId = params.get('assetId') || '';
 const filePath = params.get('file') || '';

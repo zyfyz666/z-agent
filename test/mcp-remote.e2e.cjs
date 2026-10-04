@@ -8,8 +8,8 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-mcp-remote-e2e-'));
-const dataDir = path.join(userDataDir, 'YanData');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-mcp-remote-e2e-'));
+const dataDir = path.join(userDataDir, 'ZData');
 const outputDir = path.join(appRoot, 'output', 'playwright');
 const screenshotPath = path.join(outputDir, 'mcp-remote.png');
 const detailScreenshotPath = path.join(outputDir, 'mcp-remote-detail.png');
@@ -77,19 +77,19 @@ const mcpServer = http.createServer((request, response) => {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => document.readyState === 'complete' && typeof switchSidebarNav === 'function');
 
-    const servers = await page.evaluate(() => window.yan.mcpList());
+    const servers = await page.evaluate(() => window.z.mcpList());
     const remoteEntry = servers.find(server => server.id === 'e2e-remote-mcp');
     assert.ok(remoteEntry, 'remote server missing from mcpList');
     assert.equal(remoteEntry.type, 'remote');
     assert.equal(remoteEntry.url, serverUrl);
     assert.equal(remoteEntry.headerCount, 1);
 
-    const probe = await page.evaluate(() => window.yan.mcpStart('e2e-remote-mcp'));
+    const probe = await page.evaluate(() => window.z.mcpStart('e2e-remote-mcp'));
     assert.equal(probe.ok, true, probe.error || 'remote probe failed');
     assert.equal(probe.tools.length, 2);
 

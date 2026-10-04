@@ -107,7 +107,7 @@ test('Ghidra batch launcher preserves spaces and cmd metacharacters', { skip: pr
   const { promisify } = require('node:util');
   const exec = promisify(require('node:child_process').execFile);
   const { headlessCommand } = require('../lib/analysis/ghidra');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan headless '));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z headless '));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const batch = path.join(dir, 'analyzeHeadless.bat');
   fs.writeFileSync(batch, '@echo off\r\necho %1\r\necho %2\r\n');

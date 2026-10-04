@@ -35,7 +35,7 @@ test('buildPrListArgs normalizes state and clamps the limit', () => {
 
 test('parsePrList normalizes gh JSON rows and drops junk', () => {
   const rows = parsePrList(JSON.stringify([
-    { number: 12, title: 'Fix login', state: 'OPEN', headRefName: 'fix-login', baseRefName: 'main', url: 'https://github.com/o/r/pull/12', updatedAt: '2026-09-14T00:00:00Z', author: { login: 'yan' } },
+    { number: 12, title: 'Fix login', state: 'OPEN', headRefName: 'fix-login', baseRefName: 'main', url: 'https://github.com/o/r/pull/12', updatedAt: '2026-09-14T00:00:00Z', author: { login: 'z' } },
     { number: 'x' }
   ]));
   assert.deepEqual(rows, [{
@@ -46,7 +46,7 @@ test('parsePrList normalizes gh JSON rows and drops junk', () => {
     baseRefName: 'main',
     url: 'https://github.com/o/r/pull/12',
     updatedAt: '2026-09-14T00:00:00Z',
-    author: 'yan'
+    author: 'z'
   }]);
   assert.throws(() => parsePrList('not json'), GhError);
   assert.throws(() => parsePrList(''), GhError);
@@ -69,7 +69,7 @@ test('parsePrUrl extracts the PR link from gh output', () => {
 });
 
 test('detectGh degrades to null when the binary is unavailable', async t => {
-  const missing = process.platform === 'win32' ? 'yan-no-such-gh-binary' : '/yan/none/gh';
+  const missing = process.platform === 'win32' ? 'z-no-such-gh-binary' : '/z/none/gh';
   assert.equal(await detectGh({ ghPath: missing }), null);
 });
 

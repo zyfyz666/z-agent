@@ -6,7 +6,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-attachment-preview-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-attachment-preview-'));
 // 1x1 PNG, enough to prove the file is read, decoded and measured by the viewer.
 const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const firstPng = path.join(userDataDir, 'attachment-preview-1.png');
@@ -35,7 +35,7 @@ async function waitForDecodedViewer(viewer) {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));

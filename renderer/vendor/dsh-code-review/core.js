@@ -1067,7 +1067,7 @@ document.getElementById('copy-raw').addEventListener('click', function (event) {
 `;
   }
 
-  // lib/vendor/dsh-code-review/src/yan-bridge.ts
+  // lib/vendor/dsh-code-review/src/z-bridge.ts
   var REVIEW_MESSAGE_TYPE = "dsh-code-review-comments";
   var REVIEW_ACK_TYPE = "dsh-code-review-ack";
   var THEME_VARS = [
@@ -1109,7 +1109,7 @@ document.getElementById('copy-raw').addEventListener('click', function (event) {
     OPENER_COMPAT_PATCHES
   });
   globalThis.DshCodeReviewCore = DshCodeReviewCore;
-  var yan_bridge_default = DshCodeReviewCore;
+  var z_bridge_default = DshCodeReviewCore;
   function applyEmbeddingCompat(html) {
     let patched = html;
     const applied = [];

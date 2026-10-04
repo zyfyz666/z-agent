@@ -10,7 +10,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8
 const patterns = Array.isArray(pkg.build?.asarUnpack) ? pkg.build.asarUnpack : [];
 
 // Native MCP children run as `ELECTRON_RUN_AS_NODE`, where the app.asar
-// archive is not readable. Anything reachable from a yan-*-mcp.js entry must
+// archive is not readable. Anything reachable from a z-*-mcp.js entry must
 // therefore be unpacked next to the archive, or the child exits with code 1
 // and the MCP manager reports a crash.
 function globToRegExp(pattern) {
@@ -67,7 +67,7 @@ function collectDependencyTree(entry) {
 
 test('native MCP entries and their local dependency trees are unpacked', () => {
   const entries = fs.readdirSync(path.join(appRoot, 'lib'))
-    .filter(name => /^yan-.+-mcp\.js$/.test(name))
+    .filter(name => /^z-.+-mcp\.js$/.test(name))
     .map(name => path.join(appRoot, 'lib', name));
   assert.ok(entries.length >= 8, `expected the native MCP entries, found ${entries.length}`);
   assert.ok(matchers.length > 0, 'build.asarUnpack must not be empty');

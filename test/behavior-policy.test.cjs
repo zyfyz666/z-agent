@@ -39,7 +39,7 @@ test('durable search policy produces an executable route control', () => {
   assert.deepEqual(derivePolicyControls(current.content), {
     searchRoute: 'anysearch',
     requiredFirstTool: 'anysearch_cli',
-    blockedBeforeRequired: ['yan_browser', 'webfetch', 'websearch']
+    blockedBeforeRequired: ['z_browser', 'webfetch', 'websearch']
   });
   assert.equal(hasAnySearchRoute([current], { prompt: '搜索 Astra 模型介绍' }), true);
   assert.equal(hasAnySearchRoute([current], { prompt: '打开这个网页并截图' }), false);
@@ -58,7 +58,7 @@ test('search policy blocks browser permissions until AnySearch settles', () => {
     policies: [current],
     request: { prompt: '搜索 Astra' },
     state: {},
-    permission: 'yan_browser_open_builtin_browser'
+    permission: 'z_browser_open_builtin_browser'
   });
   assert.equal(before.reply, 'reject');
 
@@ -66,7 +66,7 @@ test('search policy blocks browser permissions until AnySearch settles', () => {
     policies: [current],
     request: { prompt: '搜索 Astra' },
     state: { anySearchFailed: true },
-    permission: 'yan_browser_open_builtin_browser'
+    permission: 'z_browser_open_builtin_browser'
   });
   assert.equal(after.reply, 'once');
 });
@@ -128,7 +128,7 @@ test('a successful AnySearch result does not authorize unrelated browser fallbac
     policies: [current],
     request: { prompt: '搜索 Astra 官网，然后打开页面核对截图' },
     state: { anySearchSucceeded: true },
-    permission: 'yan_browser_open_builtin_browser'
+    permission: 'z_browser_open_builtin_browser'
   });
   assert.equal(pageFollowUp.reply, 'once');
   const emptyResult = policyPermissionDecision({
@@ -146,12 +146,12 @@ test('active policies are placed in the authoritative system layer', () => {
   const system = combineSystem({
     workMode: 'evolution',
     prompt: '搜索 Astra 模型介绍',
-    yanBrowserAvailable: true,
+    zBrowserAvailable: true,
     behaviorPolicies: [policy()],
     availableSkills: [],
     availableMcpServers: []
   });
-  assert.match(system, /Yan authoritative durable policies/);
+  assert.match(system, /Z authoritative durable policies/);
   assert.match(system, /AnySearch first/);
   assert.match(authoritativePolicySystem([policy()], { prompt: '搜索 Astra' }), /binding/);
 });
@@ -163,9 +163,9 @@ test('session permissions turn on the application gate for a relevant search tas
     prompt: '搜索 Astra',
     behaviorPolicies: [policy()],
     permissions: { allowNetwork: true },
-    mcpServers: [{ id: 'yan_browser', enabled: true, command: 'node' }]
+    mcpServers: [{ id: 'z_browser', enabled: true, command: 'node' }]
   });
-  assert.equal(permissions['yan_browser_*'], 'ask');
+  assert.equal(permissions['z_browser_*'], 'ask');
   assert.equal(permissions.bash, 'ask');
   assert.equal(permissions.webfetch, 'ask');
   assert.equal(permissions.websearch, 'ask');
@@ -184,7 +184,7 @@ test('a completed AnySearch command releases the fallback gate', () => {
         tool: 'bash',
         state: {
           status: 'completed',
-          input: { command: 'node "C:\\Yan\\anysearch_cli.js" search Astra' }
+          input: { command: 'node "C:\\Z\\anysearch_cli.js" search Astra' }
         }
       }
     }
@@ -200,7 +200,7 @@ test('AnySearch completed output with a nonzero result remains a failure', () =>
 });
 
 test('explicit policies and legacy rejected refinements are durable in the Harness', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-policy-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-policy-'));
   const store = new ContinualHarnessStore({ globalPath: path.join(root, 'harness-state.json') });
   try {
     const rejected = await store.apply({

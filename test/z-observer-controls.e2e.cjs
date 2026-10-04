@@ -7,7 +7,7 @@ const { _electron: electron } = require('playwright');
 const appRoot = path.resolve(__dirname, '..');
 const output = path.join(appRoot, 'output', 'z-observer-controls');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'z-observer-e2e-'));
-const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile };
+const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile };
 delete env.ELECTRON_RUN_AS_NODE;
 fs.mkdirSync(output, { recursive: true });
 let application, page;
@@ -51,7 +51,7 @@ async function save() {
   await page.waitForFunction(() => !document.querySelector('#zConnectionDialog').open);
 }
 async function publicState() { return page.evaluate(async () => {
-  const cfg = await yan.getConfig(); return { agentModel: cfg.agentModel, observer: cfg.observer };
+  const cfg = await z.getConfig(); return { agentModel: cfg.agentModel, observer: cfg.observer };
 }); }
 (async () => {
   try {
@@ -67,15 +67,15 @@ async function publicState() { return page.evaluate(async () => {
     const connections = await page.evaluate(async () => {
       const results = [];
       for (const name of ['Main API', 'Observer API']) {
-        const result = await yan.connectionsSave({ name, preset: 'openai', apiFormat: 'openai', manualModelId: 'same-model', baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'isolated-test-secret' });
+        const result = await z.connectionsSave({ name, preset: 'openai', apiFormat: 'openai', manualModelId: 'same-model', baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'isolated-test-secret' });
         if (!result.ok) throw new Error(result.error || 'connection failed');
         results.push(result.connection);
       }
-      state.config = await yan.getConfig(); renderModelBadge();
+      state.config = await z.getConfig(); renderModelBadge();
       return results;
     });
     const [main, observer] = connections;
-    const safe = await page.evaluate(() => yan.listModelConnections());
+    const safe = await page.evaluate(() => z.listModelConnections());
     assert.doesNotMatch(JSON.stringify(safe), /isolated-test-secret|127\.0\.0\.1/);
     await open('main');
     await page.locator('#modelQuickSupplier').selectOption(key(observer));
@@ -122,7 +122,7 @@ async function publicState() { return page.evaluate(async () => {
       session.messages = [{ role: 'user', content: '检查项目', timestamp: Date.now() }]; renderMessages(session.messages); setEmptyState(false);
       const runCtx = createRunCtx(session.id, true, ''); initOpenCodeRunState(runCtx); runCtx.activeAgentRun.timeline = [];
       state.activeRuns.set(session.id, { sessionRef: session, runCtx, assistantEl: appendMessage('assistant', '正在检查。') });
-      applyOpenCodeEvent(runCtx, { type: 'yan.thrash.watchdog.status', data: { enabled: true, phase: 'observing', judgeEvery: 3, observedSteps: 9, judgedSteps: 9, checks: 2, interventions: 0, events: [], updatedAt: Date.now(), model: { name: 'same-model', modelId: 'same-model', phase: 'reviewing', checks: 2 } } });
+      applyOpenCodeEvent(runCtx, { type: 'z.thrash.watchdog.status', data: { enabled: true, phase: 'observing', judgeEvery: 3, observedSteps: 9, judgedSteps: 9, checks: 2, interventions: 0, events: [], updatedAt: Date.now(), model: { name: 'same-model', modelId: 'same-model', phase: 'reviewing', checks: 2 } } });
       updateTaskBar();
     });
     assert.match(await page.locator('.wd-model-state').innerText(), /正在判断/);
@@ -154,11 +154,11 @@ async function publicState() { return page.evaluate(async () => {
     assert.equal(cfg.observer.judgeEvery, 3);
     report.checks.push('restart persistence, localization and layout');
     for (const judgeEvery of [0, 101, 1.5]) {
-      const result = await page.evaluate(args => yan.configureObserver(args), { judgeEvery, model: null });
+      const result = await page.evaluate(args => z.configureObserver(args), { judgeEvery, model: null });
       assert.ok(result.error);
     }
-    await page.evaluate(id => yan.connectionsDelete(id), observer.id);
-    const deleted = await page.evaluate(model => yan.configureObserver({ judgeEvery: 3, model }), { providerId: observer.providerId, supplierId: observer.supplierId, modelId: 'same-model' });
+    await page.evaluate(id => z.connectionsDelete(id), observer.id);
+    const deleted = await page.evaluate(model => z.configureObserver({ judgeEvery: 3, model }), { providerId: observer.providerId, supplierId: observer.supplierId, modelId: 'same-model' });
     assert.ok(deleted.error);
     await open('observer');
     assert.match(await page.locator('#zConnectionNotice').innerText(), /不可用/);

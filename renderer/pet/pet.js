@@ -1,4 +1,4 @@
-const bridge = window.yanPet || null;
+const bridge = window.zPet || null;
 let orb = null;
 let activePetId = 'orb';
 let entertainmentAnimation = 'idle';
@@ -7,7 +7,7 @@ let entertainmentDragDirection = '';
 let passiveAnimationTimer = null;
 let animationReturnTimer = null;
 
-const petText = value => window.YanI18n?.translate(value) || String(value || '');
+const petText = value => window.ZI18n?.translate(value) || String(value || '');
 
 const PET_SPRITE_ANIMATIONS = Object.freeze({
   idle: { row: 0, frames: 6, duration: 1100 },
@@ -22,8 +22,8 @@ const PET_SPRITE_ANIMATIONS = Object.freeze({
 });
 
 function ensureOrb() {
-  if (orb || !window.yanParticlesOrb?.ParticlesOrb) return orb;
-  orb = new window.yanParticlesOrb.ParticlesOrb(document.getElementById('orbCanvas'), {
+  if (orb || !window.zParticlesOrb?.ParticlesOrb) return orb;
+  orb = new window.zParticlesOrb.ParticlesOrb(document.getElementById('orbCanvas'), {
     size: 212,
     speed: 2,
     colorFrom: '#f0abfc',
@@ -148,7 +148,7 @@ function applyState(next = {}) {
 }
 
 function applyPetConfig(config = {}) {
-  window.YanI18n?.apply(config.language || new URLSearchParams(window.location.search).get('lang') || 'zh-CN', document);
+  window.ZI18n?.apply(config.language || new URLSearchParams(window.location.search).get('lang') || 'zh-CN', document);
   const selected = ['orb', 'yuexinmiao', 'deepseek', 'claude'].includes(String(config.selected || ''))
     ? String(config.selected)
     : 'orb';

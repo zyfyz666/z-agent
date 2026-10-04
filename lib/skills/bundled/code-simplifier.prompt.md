@@ -58,7 +58,7 @@ You operate autonomously and proactively, refining code immediately after it's w
 - When the user asks to simplify, declutter, or de-spaghetti code
 - Prefer this skill over generic refactor when the goal is **clarity + consistency without behavior change**
 
-## Execution notes (Yan Agent)
+## Execution notes (Z Agent)
 
 - Read the target files before editing; do not guess.
 - Prefer minimal diffs that preserve behavior.

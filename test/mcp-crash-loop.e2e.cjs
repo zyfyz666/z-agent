@@ -12,9 +12,9 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-mcp-loop-e2e-'));
-const dataDir = path.join(userDataDir, 'YanData');
-const evidenceDir = path.join(appRoot, '.yanagent', 'evidence');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-mcp-loop-e2e-'));
+const dataDir = path.join(userDataDir, 'ZData');
+const evidenceDir = path.join(appRoot, '.zagent', 'evidence');
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(evidenceDir, { recursive: true });
 fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
@@ -36,7 +36,7 @@ fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => document.readyState === 'complete' && typeof switchSidebarNav === 'function');

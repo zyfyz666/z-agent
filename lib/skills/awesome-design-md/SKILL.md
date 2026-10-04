@@ -5,7 +5,7 @@ description: A curated library of brand-specific DESIGN.md references for inspec
 
 # Awesome DESIGN.md
 
-Yan Agent bundles the VoltAgent Awesome DESIGN.md reference library as read-only design material.
+Z Agent bundles the VoltAgent Awesome DESIGN.md reference library as read-only design material.
 
 1. Call `list_design_references` to see the available brand ids.
 2. Choose the one brand that materially matches the user's request or named reference.

@@ -10,7 +10,7 @@
   - `src/diff-view.ts` ← upstream `src/client/diff-view.ts`（审阅页 UI 的唯一来源）
   - `src/index.tsx` ← upstream `src/client/index.tsx`（不参与构建；保留作主题变量名单与
     上游宿主逻辑的单一事实来源）
-- Yan adapter (no UI): `src/yan-bridge.ts` — re-exports the pure pipeline and adds
+- Z adapter (no UI): `src/z-bridge.ts` — re-exports the pure pipeline and adds
   pure data-side helpers (`rawDiffFromSummary`, `sanitizeComments`,
   `applyEmbeddingCompat`).
 - Build: `node scripts/build-dsh-code-review.cjs` → `renderer/vendor/dsh-code-review/core.js`.
@@ -18,10 +18,10 @@
 ## Runtime compatibility patches
 
 The upstream review page posts inline comments to `window.opener` (popup
-semantics). When the page is embedded in Yan's review sidebar iframe,
+semantics). When the page is embedded in Z's review sidebar iframe,
 `window.opener` is `null`, so the host applies two minimal, documented string
 patches to the **generated HTML** (not to the vendored sources) before loading
-it — `OPENER_COMPAT_PATCHES` in `src/yan-bridge.ts`:
+it — `OPENER_COMPAT_PATCHES` in `src/z-bridge.ts`:
 
 1. `var target = window.opener` → `var target = window.opener || (window.parent !== window ? window.parent : null)`
 2. `if (event.source !== window.opener) return` → `if (event.source !== (window.opener || window.parent)) return`
@@ -32,7 +32,7 @@ back to upstream popup semantics) — no crash, no UI change.
 
 ## Why file: iframe instead of blob/srcdoc
 
-Yan's renderer CSP (`script-src 'self'`, `frame-src` without `blob:`) blocks
+Z's renderer CSP (`script-src 'self'`, `frame-src` without `blob:`) blocks
 inline scripts in srcdoc/blob documents. The generated page relies on inline
 scripts for copy-to-clipboard and inline comments, so the host persists it to a
 rotating temp file (`dsh-review:write-html`) and loads it as a `file:` document

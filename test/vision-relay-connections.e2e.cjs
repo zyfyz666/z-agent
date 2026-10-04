@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-vision-relay-connections-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-vision-relay-connections-'));
 
 function launch() {
   return electron.launch({
@@ -16,8 +16,8 @@ function launch() {
     cwd: appRoot,
     env: {
       ...process.env,
-      YAN_E2E_MODE: '1',
-      YAN_E2E_USER_DATA_DIR: userDataDir
+      Z_E2E_MODE: '1',
+      Z_E2E_USER_DATA_DIR: userDataDir
     }
   });
 }
@@ -27,9 +27,9 @@ function launch() {
   try {
     application = await launch();
     let page = await application.firstWindow();
-    await page.waitForFunction(() => typeof yan !== 'undefined');
+    await page.waitForFunction(() => typeof z !== 'undefined');
     await page.evaluate(async () => {
-      await yan.setConfig({
+      await z.setConfig({
         api: {
           connectionsMigrated: true,
           connections: [
@@ -131,7 +131,7 @@ function launch() {
         }
       });
     });
-    const status = await page.evaluate(() => yan.getVisionRelayStatus());
+    const status = await page.evaluate(() => z.getVisionRelayStatus());
     assert.equal(status.agnes.configured, true);
     assert.equal(status.agnes.available, true);
     assert.ok(status.agnes.models.some(model => model.providerId === 'conn-agnes-e2e'));
@@ -150,7 +150,7 @@ function launch() {
       'deepseek-ai/DeepSeek-OCR',
       'PaddlePaddle/PaddleOCR-VL-1.5'
     ]);
-    const providers = await page.evaluate(() => yan.listProviders());
+    const providers = await page.evaluate(() => z.listProviders());
     const senseNovaProvider = providers.find(provider => provider.id === 'conn-sensenova-e2e');
     assert.ok(senseNovaProvider);
     assert.equal(senseNovaProvider.mediaAdapterReady, true);
@@ -199,11 +199,11 @@ function launch() {
     assert.equal(await page.locator('#visionRelayGuideStepLabel').textContent(), '1 / 7');
     await page.locator('#visionRelayGuideClose').click();
 
-    const openedGuideUrl = await page.evaluate(() => yan.openVisionRelayGuideUrl('https://bigmodel.cn/glm-coding'));
+    const openedGuideUrl = await page.evaluate(() => z.openVisionRelayGuideUrl('https://bigmodel.cn/glm-coding'));
     assert.equal(openedGuideUrl.url, 'https://bigmodel.cn/glm-coding');
-    const openedSenseNovaUrl = await page.evaluate(() => yan.openVisionRelayGuideUrl('https://www.sensenova.cn/'));
+    const openedSenseNovaUrl = await page.evaluate(() => z.openVisionRelayGuideUrl('https://www.sensenova.cn/'));
     assert.equal(openedSenseNovaUrl.url, 'https://www.sensenova.cn/');
-    const openedSiliconFlowUrl = await page.evaluate(() => yan.openVisionRelayGuideUrl('https://www.siliconflow.cn/'));
+    const openedSiliconFlowUrl = await page.evaluate(() => z.openVisionRelayGuideUrl('https://www.siliconflow.cn/'));
     assert.equal(openedSiliconFlowUrl.url, 'https://www.siliconflow.cn/');
 
     console.log(JSON.stringify({

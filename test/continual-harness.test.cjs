@@ -8,7 +8,7 @@ const path = require('node:path');
 const { ContinualHarnessStore } = require('../lib/continual-harness');
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-'));
   const workspace = path.join(root, 'workspace');
   fs.mkdirSync(workspace, { recursive: true });
   return {

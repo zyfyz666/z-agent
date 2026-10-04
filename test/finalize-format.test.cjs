@@ -8,13 +8,13 @@ const path = require('node:path');
 const { formatRunAuthoredFiles, resolveLocalPrettier, runProcess, selectFormatTargets } = require('../lib/finalize-format');
 
 async function mkdtempWorkspace(t) {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-finalize-format-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-finalize-format-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   return workspace;
 }
 
 test('selectFormatTargets keeps authorable sources and drops machine artifacts', t => {
-  const workspace = path.join(os.tmpdir(), 'yan-finalize-format-fixture');
+  const workspace = path.join(os.tmpdir(), 'z-finalize-format-fixture');
   const targets = selectFormatTargets(workspace, [
     path.join(workspace, 'src', 'app.ts'),
     path.join(workspace, 'main.go'),
@@ -37,7 +37,7 @@ test('selectFormatTargets keeps authorable sources and drops machine artifacts',
 });
 
 test('selectFormatTargets deduplicates case-insensitively on Windows and resolves relative paths', t => {
-  const workspace = path.join(os.tmpdir(), 'yan-finalize-format-dup');
+  const workspace = path.join(os.tmpdir(), 'z-finalize-format-dup');
   const absolute = path.join(workspace, 'src', 'app.js');
   const targets = selectFormatTargets(workspace, [absolute, 'src/app.js', 'src\\APP.JS']);
   assert.equal(targets.length, process.platform === 'win32' ? 1 : 2);

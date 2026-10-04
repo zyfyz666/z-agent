@@ -5,11 +5,11 @@ const os = require('node:os');
 const http = require('node:http');
 const assert = require('node:assert/strict');
 const { OpenCodeSidecar, buildOpenCodeConfig, stageCodingEnvironmentModule } = require('../lib/opencode-sidecar');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-coding-kernel-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-coding-kernel-'));
 const workspace = path.join(root, 'workspace');
 fs.mkdirSync(path.join(workspace, 'src'), { recursive: true });
 fs.writeFileSync(path.join(workspace, 'AGENTS.md'), 'ROOT_PROJECT_RULE_739: keep the existing module style.');
-fs.writeFileSync(path.join(workspace, 'YAN.md'), 'YAN_PROJECT_RULE_739: verify syntax after edits.');
+fs.writeFileSync(path.join(workspace, 'Z.md'), 'Z_PROJECT_RULE_739: verify syntax after edits.');
 fs.writeFileSync(path.join(workspace, 'src', 'AGENTS.md'), 'SCOPED_RULE_739: applies only to src.');
 const file = path.join(workspace, 'src', 'sample.js');
 fs.writeFileSync(file, 'const value = 1;\n');
@@ -36,7 +36,7 @@ const server = http.createServer((req, res) => {
         assert.ok(++calls < 50, 'no runaway loop');
         const system = body.messages.filter(message => message.role === 'system').map(message => message.content).join('\n');
         assert.match(system, /ROOT_PROJECT_RULE_739/);
-        assert.match(system, /YAN_PROJECT_RULE_739/);
+        assert.match(system, /Z_PROJECT_RULE_739/);
         child ? childRules++ : parentRules++;
         const tools = body.messages.slice(lastUser + 1).filter(message => message.role === 'tool');
         const contents = tools.map(message => String(message.content));
@@ -45,11 +45,11 @@ const server = http.createServer((req, res) => {
         if (contents.some(text => text.includes('SCOPED_RULE_739'))) scopedRules++;
         if (!contents.some(text => /const value = 1/.test(text))) action = ['read', { filePath: file }];
         else if (child) delta = { content: 'Child read and verified rules.' };
-        else if (!contents.some(text => text.includes('Yan verification: code changed'))) action = ['write', { filePath: file, content: 'const value = ;\n' }];
-        else if (latest.includes('Yan check: syntax — failed')) {
+        else if (!contents.some(text => text.includes('Z verification: code changed'))) action = ['write', { filePath: file, content: 'const value = ;\n' }];
+        else if (latest.includes('Z check: syntax — failed')) {
           failedChecks++;
           action = ['edit', { filePath: file, oldString: 'const value = ;', newString: 'const value = 1;' }];
-        } else if (!contents.some(text => text.includes('Yan check: syntax — passed'))) action = ['bash', { command: `node --check "${file}"` }];
+        } else if (!contents.some(text => text.includes('Z check: syntax — passed'))) action = ['bash', { command: `node --check "${file}"` }];
         else if (!contents.some(text => text.includes('Child read and verified rules.'))) {
           passedChecks++;
           action = ['task', { subagent_type: 'explorer', description: 'Inspect module', prompt: 'CHILD_CODING_739 read ' + file }];
@@ -90,7 +90,7 @@ const server = http.createServer((req, res) => {
     const stopped = child && child.exitCode === null ? new Promise(resolve => child.once('exit', resolve)) : Promise.resolve();
     sidecar.close(); await stopped;
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    assert.ok(path.basename(root).startsWith('yan-coding-kernel-'));
+    assert.ok(path.basename(root).startsWith('z-coding-kernel-'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

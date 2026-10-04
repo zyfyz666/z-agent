@@ -7,8 +7,8 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-mcp-market-e2e-'));
-const dataDir = path.join(userDataDir, 'YanData');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-mcp-market-e2e-'));
+const dataDir = path.join(userDataDir, 'ZData');
 const outputDir = path.join(appRoot, 'output', 'playwright');
 const screenshotPath = path.join(outputDir, 'mcp-market.png');
 const detailScreenshotPath = path.join(outputDir, 'mcp-detail.png');
@@ -33,11 +33,11 @@ fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => document.readyState === 'complete' && typeof switchSidebarNav === 'function');
-    const servers = await page.evaluate(() => window.yan.mcpList());
+    const servers = await page.evaluate(() => window.z.mcpList());
     assert.ok(servers.length >= 1);
 
     await page.locator('.sidebar-nav-item[data-nav="mcp"]').click();
@@ -74,7 +74,7 @@ fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
       assert.equal(await page.locator(`#mcpPageList [data-id="${nativeServer.id}"] .mcp-card-state`).count(), 0);
     }
 
-    await page.locator('#mcpPageList [data-id="yan_analysis"] .mcp-open-btn').click();
+    await page.locator('#mcpPageList [data-id="z_analysis"] .mcp-open-btn').click();
     await page.locator('#mcpDetailView:not(.hidden)').waitFor();
     await page.waitForFunction(() => document.querySelectorAll('#mcpDetailTools .mcp-tool-row').length > 0);
     assert.equal(await page.locator('#mcpDetailTitle').textContent(), 'Z 项目分析');

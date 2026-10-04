@@ -6,6 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const content = require('../renderer/z-product-content');
+const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
+const legacyDefaultName = `${LEGACY_NAMESPACE.title}xi`;
+const obsoleteBrandPattern = new RegExp(`\\b${LEGACY_NAMESPACE.lower}(?:[- ]?Agent)?\\b|\\b${LEGACY_NAMESPACE.title[0]}Agent\\b|\\b${legacyDefaultName}\\b|ViaTumLab`, 'i');
 
 function strings(value) {
   if (typeof value === 'string') return [value];
@@ -33,7 +36,8 @@ test('Z onboarding covers the complete seven-step workflow with local guidance',
 
 test('product copy has no obsolete branding, contacts or release download promises', () => {
   const copy = strings([content.guide, content.releaseNotes, content.errors]).join('\n');
-  assert.doesNotMatch(copy, /Yan|YAgent|ViaTumLab|抖音|QQ群|https?:\/\/|994525685197|1103989964|1420894553/);
+  assert.doesNotMatch(copy, obsoleteBrandPattern);
+  assert.doesNotMatch(copy, /抖音|QQ群|https?:\/\/|994525685197|1103989964|1420894553/);
   assert.equal(content.releaseNotes.title, 'Z 更新说明');
   assert.match(strings(content.releaseNotes).join('\n'), /已有监控器/);
   assert.match(strings(content.releaseNotes).join('\n'), /不改变模型推理、评分或已有工具能力/);
@@ -46,19 +50,22 @@ test('all new Chinese copy has an English translation in the actual localization
   vm.runInNewContext(source, { window, URLSearchParams });
   const zhStrings = strings([content.guide, content.releaseNotes, content.errors]).filter(text => /[\u3400-\u9fff]/u.test(text));
   for (const text of zhStrings) {
-    const translation = window.YanI18n.translate(text, 'en');
+    const translation = window.ZI18n.translate(text, 'en');
     assert.notEqual(translation, text, `Missing translation: ${text}`);
     assert.doesNotMatch(translation, /[\u3400-\u9fff]/u);
-    assert.doesNotMatch(translation, /Yan|YAgent|ViaTumLab/);
+    assert.doesNotMatch(translation, obsoleteBrandPattern);
   }
 });
 
 test('legacy default names disappear from presentation without changing custom names', () => {
-  for (const name of ['', null, undefined, 'Yanxi', '  yanxi  ']) {
+  for (const name of ['', null, undefined, legacyDefaultName, `  ${legacyDefaultName.toLowerCase()}  `]) {
     assert.equal(content.normalizeUserName(name), '');
     assert.equal(content.greeting(name), '下一步，交给 Z。');
   }
   assert.equal(content.normalizeUserName('default'), 'default');
+  for (const name of ['Z', 'Zxi', `${legacyDefaultName}son`, `Dr ${legacyDefaultName}`]) {
+    assert.equal(content.normalizeUserName(name), name, 'only the exact former default is hidden');
+  }
   assert.equal(content.normalizeUserName('小李'), '小李');
   assert.equal(content.greeting('小李'), '小李，下一步做什么？');
   assert.equal(content.greeting('Chris', 'en'), 'Chris, what comes next?');
@@ -68,12 +75,12 @@ test('legacy default names disappear from presentation without changing custom n
 test('the release-notes bridge exposes only the current Z release data', () => {
   const window = { ZProductContent: content };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../renderer/release-notes.js'), 'utf8'), { window });
-  assert.equal(window.YanReleaseNotes, content.releaseNotes);
+  assert.equal(window.ZReleaseNotes, content.releaseNotes);
 });
 
 test('renderer uses the new guide and FAQ without old contact or updater actions', () => {
   const source = fs.readFileSync(path.join(__dirname, '../renderer/renderer.js'), 'utf8');
-  assert.match(source, /'yan-guide': window\.ZProductContent\.guide/);
+  assert.match(source, /'z-guide': window\.ZProductContent\.guide/);
   assert.match(source, /ABOUT_ERROR_PAGES = window\.ZProductContent\.errors/);
   assert.doesNotMatch(source, /ABOUT_CONTACTS|syncAboutContact|copyAboutContact|aboutContactPicker|aboutCheckUpdateBtn|checkForUpdatesFromAbout|updateInstall|updateDownload/);
 });
@@ -91,7 +98,7 @@ test('the new about page and welcome prompts have complete English coverage', ()
   for (const area of areas) {
     const values = [...area.matchAll(/>([^<>]+)</g)].map(match => match[1].trim());
     for (const value of values.filter(value => /[\u3400-\u9fff]/u.test(value))) {
-      assert.doesNotMatch(window.YanI18n.translate(value, 'en'), /[\u3400-\u9fff]/u, `Missing shell translation: ${value}`);
+      assert.doesNotMatch(window.ZI18n.translate(value, 'en'), /[\u3400-\u9fff]/u, `Missing shell translation: ${value}`);
     }
   }
 });
@@ -103,6 +110,14 @@ test('config normalization leaves new names empty and preserves saved personal n
   assert.equal(normalize(undefined), '');
   assert.equal(normalize(''), '');
   assert.equal(normalize(' Alice '), 'Alice');
-  assert.equal(normalize('Yanxi'), 'Yanxi', 'legacy saved values are not silently rewritten in storage');
+  assert.equal(normalize(legacyDefaultName), legacyDefaultName, 'legacy saved values are not silently rewritten in storage');
   assert.equal(normalize('小李'), '小李');
+});
+
+test('brand regression checks reject every former brand variant while accepting Z', () => {
+  for (const name of [LEGACY_NAMESPACE.title, LEGACY_NAMESPACE.agentTitle,
+    LEGACY_NAMESPACE.agentHyphen, `${LEGACY_NAMESPACE.title[0]}Agent`, legacyDefaultName]) {
+    assert.match(`Welcome to ${name}.`, obsoleteBrandPattern);
+  }
+  for (const text of ['Z', 'Z Agent', 'Using Z', '下一步，交给 Z。']) assert.doesNotMatch(text, obsoleteBrandPattern);
 });

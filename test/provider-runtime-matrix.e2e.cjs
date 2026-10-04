@@ -23,7 +23,7 @@ const providers = Object.freeze([
   ['hunyuan', 'Hunyuan'],
   ['siliconflow', 'SiliconFlow']
 ]);
-const executable = path.resolve(process.env.YAN_OPENCODE_EXECUTABLE || path.join(
+const executable = path.resolve(process.env.Z_OPENCODE_EXECUTABLE || path.join(
   appRoot,
   'dist',
   'win-unpacked',
@@ -34,7 +34,7 @@ const executable = path.resolve(process.env.YAN_OPENCODE_EXECUTABLE || path.join
   'bin',
   process.platform === 'win32' ? 'opencode.exe' : 'opencode'
 ));
-const providerModule = path.resolve(process.env.YAN_PROVIDER_MODULE_PATH || path.join(
+const providerModule = path.resolve(process.env.Z_PROVIDER_MODULE_PATH || path.join(
   appRoot,
   'dist',
   'win-unpacked',
@@ -43,7 +43,7 @@ const providerModule = path.resolve(process.env.YAN_PROVIDER_MODULE_PATH || path
   'lib',
   'opencode-dsml-provider.mjs'
 ));
-const packagedAppRoot = path.resolve(process.env.YAN_PACKAGED_APP_ROOT || path.join(
+const packagedAppRoot = path.resolve(process.env.Z_PACKAGED_APP_ROOT || path.join(
   appRoot,
   'dist',
   'win-unpacked',
@@ -72,11 +72,11 @@ for (const [providerId, providerName] of providers) {
     cwd: appRoot,
     env: {
       ...process.env,
-      YAN_OPENCODE_EXECUTABLE: executable,
-      YAN_PROVIDER_MODULE_PATH: providerModule,
-      YAN_PACKAGED_APP_ROOT: packagedAppRoot,
-      YAN_TEST_PROVIDER_ID: providerId,
-      YAN_TEST_PROVIDER_NAME: providerName
+      Z_OPENCODE_EXECUTABLE: executable,
+      Z_PROVIDER_MODULE_PATH: providerModule,
+      Z_PACKAGED_APP_ROOT: packagedAppRoot,
+      Z_TEST_PROVIDER_ID: providerId,
+      Z_TEST_PROVIDER_NAME: providerName
     },
     encoding: 'utf8',
     windowsHide: true,

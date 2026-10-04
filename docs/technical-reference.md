@@ -71,14 +71,14 @@
 
 ### 四层分工
 
-Z 使用 Electron 提供桌面壳，基于 OpenCode `1.18.11` 构建执行链，并在其外部增加自己的任务状态、权限、工程工具、观察者和产品交互。内部状态模块 Yan Core 与 OpenCode 不是两个同时竞争执行的 Agent 循环。
+Z 使用 Electron 提供桌面壳，基于 OpenCode `1.18.11` 构建执行链，并在其外部增加自己的任务状态、权限、工程工具、观察者和产品交互。内部状态模块 Z Core 与 OpenCode 不是两个同时竞争执行的 Agent 循环。
 
 ```mermaid
 flowchart TD
   UI[Electron 渲染层：任务 / 审阅 / 浏览器 / 观察者]
   IPC[preload：受控 IPC 接口]
   MAIN[主进程：配置 / 工作区 / 权限 / 服务管理]
-  CORE[Yan Core：线程 / 回合 / 意图 / 状态 / 日志]
+  CORE[Z Core：线程 / 回合 / 意图 / 状态 / 日志]
   SIDE[OpenCode Sidecar：会话 / 事件 / 工具调度 / 子代理]
   ADAPTER[模型适配器：DSML / GLMM / GPTL / QWEM / KIML]
   API[用户配置的模型 API]
@@ -95,7 +95,7 @@ flowchart TD
 
 - **渲染层**负责显示与用户操作，不自行模拟模型执行结果。
 - **主进程**持有配置、工作区、凭据、服务和 IPC，构造本轮请求及工具权限。
-- **Yan Core**记录任务生命周期，把 provider 事件转成可恢复的应用状态；存储实现位于 `lib/yan-core/`。
+- **Z Core**记录任务生命周期，把 provider 事件转成可恢复的应用状态；存储实现位于 `lib/z-core/`。
 - **Sidecar 与 OpenCode**负责实际模型回合、工具调用、权限交互、子会话及上下文操作；家族适配器处理线上协议差异。
 
 ### 一次任务如何运行
@@ -187,7 +187,7 @@ KIML 不把所有 Kimi 都当成同一种思考模型。请求整形区分支持
 
 ### 从仓库地图逐步缩小到符号
 
-Yan Analysis 提供的是可重复计算的工程信息，模型负责根据它推理。推荐路径为：仓库结构 → 模块入口 → 符号位置 → 必要引用 → 精确修改。工具已暴露不等于每个任务都必须调用全部工具。
+Z Analysis 提供的是可重复计算的工程信息，模型负责根据它推理。推荐路径为：仓库结构 → 模块入口 → 符号位置 → 必要引用 → 精确修改。工具已暴露不等于每个任务都必须调用全部工具。
 
 | 工具 | 输出与用途 |
 | --- | --- |
@@ -198,7 +198,7 @@ Yan Analysis 提供的是可重复计算的工程信息，模型负责根据它�
 | `slice` | 围绕变量进行数据流切片，辅助定位值的传播 |
 | `code_search` | 面向代码的检索与排序 |
 | `history_search` | 检索可用历史记录中的相关信息 |
-| `code_impact` | 文件导入图的反向依赖；属于 Yan Workspace MCP |
+| `code_impact` | 文件导入图的反向依赖；属于 Z Workspace MCP |
 
 #### 仓库地图如何生成
 
@@ -233,8 +233,8 @@ rename_symbol         safe_delete_symbol
 
 `lib/coding-environment-plugin.mjs` 按内核工作区运行，按会话保存状态。它在系统上下文和文件操作前后处理项目规则，不启动另一套生成模型。
 
-- 从工作区根目录到目标目录读取 `AGENTS.md` 与 `YAN.md`，保留每份规则的作用范围。
-- 更深目录覆盖父目录约定；同目录的 `YAN.md` 补充并优先处理冲突约定。用户要求与应用权限优先，文档不能授予权限或加载项目插件。
+- 从工作区根目录到目标目录读取 `AGENTS.md` 与 `Z.md`，保留每份规则的作用范围。
+- 更深目录覆盖父目录约定；同目录的 `Z.md` 补充并优先处理冲突约定。用户要求与应用权限优先，文档不能授予权限或加载项目插件。
 - 规则总读取预算为 24,000 字节，截断/读取失败会留下标记，相关剩余内容需要通过获准工具读取。
 - 对路径及已存在祖先的真实路径做检查，避免规则读取绕过工作区边界。
 - 记录规则版本与已交付状态，在操作进入新目录或规则发生变化时更新上下文。
@@ -252,7 +252,7 @@ Sidecar 捕获可读取目标的运行前基线，也为具体修改调用保存
 
 ### 逆向辅助
 
-Yan Analysis 还包含十六进制查看/统计/比较、CRC 探测、协议字段辅助、PCAP 概览与 Ghidra 桥接。PCAP 路径依赖可用的 tshark；Ghidra 反编译依赖安装与配置。它们是分析入口，不是随包拥有全部逆向环境，也不保证从流量或二进制自动还原协议。
+Z Analysis 还包含十六进制查看/统计/比较、CRC 探测、协议字段辅助、PCAP 概览与 Ghidra 桥接。PCAP 路径依赖可用的 tshark；Ghidra 反编译依赖安装与配置。它们是分析入口，不是随包拥有全部逆向环境，也不保证从流量或二进制自动还原协议。
 
 <a id="subagents"></a>
 ## 八类子代理与委派计划
@@ -275,7 +275,7 @@ Yan Analysis 还包含十六进制查看/统计/比较、CRC 探测、协议字�
 任务提示可以带有一行结构化标记，例如：
 
 ```text
-yan-plan: {"id":"login-ui","dependsOn":["auth-api"],"acceptance":"登录成功和错误提示均可验证"}
+z-plan: {"id":"login-ui","dependsOn":["auth-api"],"acceptance":"登录成功和错误提示均可验证"}
 ```
 
 `lib/subagent/plan.js` 解析 ID、依赖和验收条件，校验重复、未知依赖及环；`admission.js` 在分派时检查前置任务的实际完成状态。任务尚在运行、失败或依赖自身时，不能仅凭主代理说“可以开始”就通过准入。
@@ -299,7 +299,7 @@ builder 的验收条件与工具证据进入收尾判断；模型口头自称通
 
 ### 持久化模型
 
-Yan Core 把应用状态拆成 `threads`、`turns`、`items` 和 `intents`：
+Z Core 把应用状态拆成 `threads`、`turns`、`items` 和 `intents`：
 
 - thread 对应任务上下文；turn 对应一次运行。
 - item 表示消息、工具及相关条目。
@@ -363,7 +363,7 @@ provider 请求不简单用一个总时长上限截断所有长生成，仍设�
 
 ### 任务级 worktree
 
-`lib/worktree-service.js` 使用 Git worktree 为任务建立独立检出，默认目录为 `<repo>/.yanagent/worktrees/<taskId>`，分支前缀为 `yan-task-`。
+`lib/worktree-service.js` 使用 Git worktree 为任务建立独立检出，默认目录为 `<repo>/.zagent/worktrees/<taskId>`，分支前缀为 `z-task-`。
 
 任务 ID 会清洗和校验，Git 使用参数数组启动，不把任务名拼成 Shell 命令。工具支持创建、列表、状态、合并和移除；合并队列协调同一仓库上的操作。内部目录通过本地 exclude 等机制与用户改动视图区分。
 
@@ -505,16 +505,16 @@ Z 支持技能查找、安装、读取、资源分块和移除等路径。显式
 
 | 服务 | 职责 |
 | --- | --- |
-| Yan Analysis | 仓库、符号、调用链、检索和逆向辅助 |
-| Yan Workspace | worktree 与代码影响面 |
-| Yan Browser | 内置浏览器操作与注释目标修改 |
-| Yan Web | 已知 URL 的文本读取、文件下载、页面资源列表 |
-| Yan Skills | 技能与技能资源 |
-| Yan Session | 经授权的跨任务/工作区交接及来源上下文 |
-| Yan Media | 图片读取及图像/视频生成 |
+| Z Analysis | 仓库、符号、调用链、检索和逆向辅助 |
+| Z Workspace | worktree 与代码影响面 |
+| Z Browser | 内置浏览器操作与注释目标修改 |
+| Z Web | 已知 URL 的文本读取、文件下载、页面资源列表 |
+| Z Skills | 技能与技能资源 |
+| Z Session | 经授权的跨任务/工作区交接及来源上下文 |
+| Z Media | 图片读取及图像/视频生成 |
 | Continual Harness | 按模式启用的经验与改进管理 |
 
-Yan Web 默认文本读取上限 2 MiB、下载上限 64 MiB，允许的参数上限分别为 8 MiB 和 256 MiB。下载受权限及目标路径约束；它不替代需要登录或动态交互的浏览器。
+Z Web 默认文本读取上限 2 MiB、下载上限 64 MiB，允许的参数上限分别为 8 MiB 和 256 MiB。下载受权限及目标路径约束；它不替代需要登录或动态交互的浏览器。
 
 ### 视觉中继与媒体生成
 
@@ -556,17 +556,17 @@ Yan Web 默认文本读取上限 2 MiB、下载上限 64 MiB，允许的参数�
 
 ### 数据存放
 
-应用以 Electron `userData` 下的 `YanData` 为稳定数据根，常见路径为：
+新安装以 Electron `userData` 下的 `ZData` 为稳定数据根，常见路径为：
 
 ```text
-Windows 源码运行: %APPDATA%\wd-agent\YanData
-Windows 安装版:   %APPDATA%\WD Agent\YanData
-macOS:           ~/Library/Application Support/WD Agent/YanData
+Windows 源码运行: %APPDATA%\wd-agent\ZData
+Windows 安装版:   %APPDATA%\WD Agent\ZData
+macOS:           ~/Library/Application Support/WD Agent/ZData
 ```
 
-这些兼容目录沿用已有用户的数据位置；真实位置以运行时 `userData` 配置为准。配置、会话、运行状态、记忆和辅助运行时位于应用数据目录；工作区内 `.yanagent` 还可能保存日志、快照、证据和 worktree。
+升级时原有数据目录和浏览器分区保持原位，已有安装的目录名称可能不同，真实位置以运行时配置为准。配置、会话、运行状态、记忆和辅助运行时位于应用数据目录；工作区内 `.zagent` 还可能保存日志、快照、证据和 worktree。旧工作区数据同样兼容读取，不会为改名移动已注册的 Git 工作树。
 
-备份时应同时考虑用户项目、应用数据与未合并 worktree。**不要把整个 `.yanagent` 视作可随意清空的缓存**：其中可能有未提交的子任务成果。
+备份时应同时考虑用户项目、应用数据与未合并 worktree。**不要把整个 `.zagent` 视作可随意清空的缓存**：其中可能有未提交的子任务成果。
 
 配置持久化使用 Electron `safeStorage` 相关转换处理受支持的敏感字段。加密能力与系统环境相关，不代表任意手写文件、日志或导出的内容都已加密。对外报告问题前应检查并移除 API Key、认证头和私人项目内容。
 
@@ -619,8 +619,8 @@ macOS 输出为 `dist/Z-arm64-v1.6.1.dmg`（版本号以 `package.json` 为准�
 npm test
 
 # 指定模块
-node --test test/yan-core.test.cjs
-node --test test/yan-browser-mcp.test.cjs
+node --test test/z-core.test.cjs
+node --test test/z-browser-mcp.test.cjs
 
 # Electron 交互测试：逐项运行
 node test/browser-annotations.e2e.cjs
@@ -633,7 +633,7 @@ npm run verify:packaged-providers
 npm run verify:codegraph
 ```
 
-`npm test` 匹配 `test/*.test.cjs`，不等于自动运行全部 `.e2e.cjs`。Electron E2E 通常通过 `YAN_E2E_MODE` 和独立 `YAN_E2E_USER_DATA_DIR` 隔离数据；真实 API 测试需要其指定环境与凭据，可能产生调用费用。
+`npm test` 匹配 `test/*.test.cjs`，不等于自动运行全部 `.e2e.cjs`。Electron E2E 通常通过 `Z_E2E_MODE` 和独立 `Z_E2E_USER_DATA_DIR` 隔离数据；真实 API 测试需要其指定环境与凭据，可能产生调用费用。
 
 测试覆盖适配器请求/回放、任务恢复、上下文、分析工具、子代理依赖、Git/worktree、审阅大数据、浏览器注释、模式隔离、观察者和对话历史等。仓库存在测试文件不代表某次发布已经全部通过；发布说明应记录实际执行项与结果。
 
@@ -654,7 +654,7 @@ npm run verify:codegraph
 
 ### 相对 1.5.0 的收缩项
 
-当前源码移除了旧 xterm/内置终端实现、Nuphus 电脑操控包装及专用覆盖层、Yanxi 接入和旧语气模块。外部 PowerShell 入口不等于旧终端仍在；残留 desktop 类型或判断也不能证明旧电脑操控链完整可用。
+当前源码移除了旧内置终端、电脑操控包装及专用覆盖层和旧语气模块。外部 PowerShell 入口可执行命令；残留 desktop 类型不能证明旧电脑操控链仍可用。
 
 Goal、Serena、基础子代理、内置浏览器、基础 Git、DSML 与基础上下文压缩在前版已有。1.6.0 增强的是其中具体链路，不把全部既有能力重新标成新增。
 
@@ -667,7 +667,7 @@ Goal、Serena、基础子代理、内置浏览器、基础 Git、DSML 与基础�
 | --- | --- |
 | [main.js](../main.js) | 主进程、配置、IPC、服务与任务构造 |
 | [preload.js](../preload.js) | 桌面 UI 到主进程的接口 |
-| [lib/yan-core](../lib/yan-core) | 状态机、事件投影、持久化与 adapter |
+| [lib/z-core](../lib/z-core) | 状态机、事件投影、持久化与 adapter |
 | [lib/opencode-sidecar.js](../lib/opencode-sidecar.js) | 内核生命周期、请求、工具、子代理与收尾 |
 | [lib/observer-model.js](../lib/observer-model.js) | 模型观察、确认误区与纠偏提醒 |
 | [lib/wd-monitor-state.js](../lib/wd-monitor-state.js) | 观察者记录、运行状态与持久化 |

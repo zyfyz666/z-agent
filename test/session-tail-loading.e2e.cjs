@@ -6,7 +6,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-session-tail-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-session-tail-'));
 const MESSAGE_LOAD_LIMIT = 40;
 const TOTAL_MESSAGES = 60;
 
@@ -22,7 +22,7 @@ const TOTAL_MESSAGES = 60;
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -109,7 +109,7 @@ const TOTAL_MESSAGES = 60;
       await saveCurrentSession();
     });
     const storedAfterTailSave = JSON.parse(fs.readFileSync(
-      path.join(userDataDir, 'YanData', 'sessions', `${sessionId}.json`), 'utf8'));
+      path.join(userDataDir, 'ZData', 'sessions', `${sessionId}.json`), 'utf8'));
     assert.equal(storedAfterTailSave.messages.length, createdTotal + 1,
       `expected merged history, got ${storedAfterTailSave.messages.length} messages`);
     assert.equal(storedAfterTailSave.messages[0]?.content, firstContent, 'oldest message lost by tail save');

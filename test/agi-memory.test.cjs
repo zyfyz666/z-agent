@@ -21,7 +21,7 @@ const NOW = Date.parse('2026-01-15T00:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
 
 function withTempDir(run) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-memory-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-memory-'));
   try {
     return run(dir);
   } finally {

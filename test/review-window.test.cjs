@@ -13,7 +13,7 @@ const test = require('node:test');
 const git = require('../lib/git-service');
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-window-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-window-'));
 }
 
 function write(filePath, content) {
@@ -31,7 +31,7 @@ async function makeRepo(t) {
   const repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   await git.initRepository(repo);
-  await git.setIdentity(repo, 'Yan Review', 'review@example.com');
+  await git.setIdentity(repo, 'Z Review', 'review@example.com');
   write(path.join(repo, 'big.txt'), numberedLines('base', 6000));
   write(path.join(repo, 'small.txt'), 'a\nb\nc\n');
   await git.stageFiles(repo, [], true);

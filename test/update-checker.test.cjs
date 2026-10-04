@@ -18,10 +18,10 @@ const {
 
 const SAMPLE_YML = `version: 1.6.0-beta.3
 files:
-  - url: Yan.Agent.Setup.v1.6.0.Beta3.exe
+  - url: Z.Agent.Setup.v1.6.0.Beta3.exe
     sha512: E2WQ0zjkHD0w0iDgg5g8+LfTgakaHzKkhkKDLuimkT+/iDR7nwT8LL5RlYXO9KHURsBu9cSnZKhGJXX9SB9KVA==
     size: 322867034
-path: Yan.Agent.Setup.v1.6.0.Beta3.exe
+path: Z.Agent.Setup.v1.6.0.Beta3.exe
 sha512: E2WQ0zjkHD0w0iDgg5g8+LfTgakaHzKkhkKDLuimkT+/iDR7nwT8LL5RlYXO9KHURsBu9cSnZKhGJXX9SB9KVA==
 releaseDate: '2026-09-14T13:00:53.656Z'
 `;
@@ -29,8 +29,8 @@ releaseDate: '2026-09-14T13:00:53.656Z'
 test('parseLatestYml reads electron-builder feed fields', () => {
   const feed = parseLatestYml(SAMPLE_YML);
   assert.equal(feed.version, '1.6.0-beta.3');
-  assert.equal(feed.fileName, 'Yan.Agent.Setup.v1.6.0.Beta3.exe');
-  assert.equal(feed.fileUrl, 'Yan.Agent.Setup.v1.6.0.Beta3.exe');
+  assert.equal(feed.fileName, 'Z.Agent.Setup.v1.6.0.Beta3.exe');
+  assert.equal(feed.fileUrl, 'Z.Agent.Setup.v1.6.0.Beta3.exe');
   assert.equal(feed.size, 322867034);
   assert.equal(feed.releaseDate, '2026-09-14T13:00:53.656Z');
   assert.ok(feed.sha512.startsWith('E2WQ0zjkHD0w0iDgg5g8+'));
@@ -50,16 +50,16 @@ test('compareVersions orders stable and prerelease versions', () => {
 test('resolveFileUrl keeps absolute urls and encodes relative names', () => {
   assert.equal(resolveFileUrl('https://example.com/base/', 'https://cdn.example.com/a.exe'), 'https://cdn.example.com/a.exe');
   assert.equal(
-    resolveFileUrl('https://example.com/base', 'Yan Agent Setup.exe'),
-    'https://example.com/base/Yan%20Agent%20Setup.exe'
+    resolveFileUrl('https://example.com/base', 'Z Agent Setup.exe'),
+    'https://example.com/base/Z%20Agent%20Setup.exe'
   );
 });
 
 test('checkForUpdates and downloadUpdate work against a local server', async () => {
-  const payload = Buffer.from('yan-agent-update-payload');
+  const payload = Buffer.from('z-agent-update-payload');
   const sha512 = crypto.createHash('sha512').update(payload).digest('base64');
   const yml = SAMPLE_YML
-    .replaceAll('Yan.Agent.Setup.v1.6.0.Beta3.exe', 'pkg.bin')
+    .replaceAll('Z.Agent.Setup.v1.6.0.Beta3.exe', 'pkg.bin')
     .replace(/E2WQ0zjkHD0w0iDgg5g8\+LfTgakaHzKkhkKDLuimkT\+\/iDR7nwT8LL5RlYXO9KHURsBu9cSnZKhGJXX9SB9KVA==/g, sha512)
     .replace('size: 322867034', `size: ${payload.length}`);
 
@@ -93,7 +93,7 @@ test('checkForUpdates and downloadUpdate work against a local server', async () 
     assert.equal(upToDate.ok, true);
     assert.equal(upToDate.hasUpdate, false);
 
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-update-test-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-update-test-'));
     const target = path.join(tempDir, 'pkg.bin');
     const progress = [];
     const result = await downloadUpdate({

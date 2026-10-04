@@ -11,7 +11,7 @@ const fork = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 const { createSessionWriteQueue, inferSessionModelSelection, sessionModelSnapshot } = require('../lib/session-model');
 const { ensureTaskWorkspace } = require('../lib/task-workspace');
-const { normalizeIntent } = require('../lib/yan-core/protocol');
+const { normalizeIntent } = require('../lib/z-core/protocol');
 const { filterReviewSummary } = require('../lib/run-change-summary');
 
 const main = fs.readFileSync(path.resolve(__dirname, '../main.js'), 'utf8');
@@ -76,7 +76,7 @@ function fixture(t, { count = 64, branch = false } = {}) {
     sanitizeSessionReviewSummaries() {}, pruneSessionRuntimeBookkeeping() {},
     selectTailMessages: (messages, limit) => ({ tail: messages.slice(-limit), messagesStart: Math.max(0, messages.length - limit) }),
     manualContextCompressions: new Set(), openCodeActiveRuns: new Map(), openCodeRunAdmissions: new Map(),
-    yanCore: { state: { intents: {} }, enqueueIntent(payload) {
+    zCore: { state: { intents: {} }, enqueueIntent(payload) {
       const id = payload.intentId || 'fixture-intent';
       const record = { id, threadId: payload.threadId, status: 'queued', intent: normalizeIntent(payload.intent) };
       this.state.intents[id] = record;
@@ -94,7 +94,7 @@ function fixture(t, { count = 64, branch = false } = {}) {
     section('async function writeSessionFileAtomic(', "ipcMain.handle('session:save',"),
     section("ipcMain.handle('session:fork',", '// Session JSON is the only durable copy'),
     section("ipcMain.handle('session:save',", '// 会话级工作区'),
-    section("ipcMain.handle('yan:core-enqueue-intent',", "ipcMain.handle('yan:core-ack-intent',"),
+    section("ipcMain.handle('z:core-enqueue-intent',", "ipcMain.handle('z:core-ack-intent',"),
     section('async function setSessionModelRecord(', "ipcMain.handle('session:messages',")
   ]) vm.runInContext(code, context);
   // Execute production admission validation; the separate Electron E2E
@@ -111,9 +111,9 @@ function fixture(t, { count = 64, branch = false } = {}) {
     restore: request => handlers.get('session:rewind-restore')(null, request),
     save: session => handlers.get('session:save')(null, clone(session)),
     start: request => handlers.get('opencode:start-run')(null, clone(request)),
-    enqueue: request => handlers.get('yan:core-enqueue-intent')(null, request),
-    consume: id => handlers.get('yan:core-consume-intent')(null, id),
-    requeue: id => handlers.get('yan:core-requeue-intent')(null, id),
+    enqueue: request => handlers.get('z:core-enqueue-intent')(null, request),
+    consume: id => handlers.get('z:core-consume-intent')(null, id),
+    requeue: id => handlers.get('z:core-requeue-intent')(null, id),
     model: request => handlers.get('session:model-set')(null, request),
     enableProductionRead() {
       vm.runInContext(section('function sanitizeSessionReviewSummaries(', '// Subagent records keep live'), context);
@@ -179,7 +179,7 @@ test('withdraw-and-rewrite excludes only the selected user and supports an empty
   assert.equal(fork.isAuthoritativeHistorySession(result.session), true);
   const prompt = { role: 'user', content: 'Replacement', ts: 12345 };
   const saved = await f.save({ ...result.session, messages: [prompt] });
-  const started = await f.start({ yanSessionId: saved.id, conversationRevision: 1, prompt: prompt.content,
+  const started = await f.start({ zSessionId: saved.id, conversationRevision: 1, prompt: prompt.content,
     requestMessageIndex: 0, requestMessageAnchor: fork.messageForkAnchor(prompt), openCodeSessionId: 'OLD_NATIVE_HANDLE' });
   assert.equal(started.ok, true);
   assert.equal(started.request.history.length, 0);
@@ -197,7 +197,7 @@ test('stale full/tail saves, starts and late native bindings cannot overwrite a 
     { ...result.session, conversationRevision: '1' }, { ...result.session, conversationRevision: 99 }]) {
     assert.equal((await f.save(input)).code, 'SESSION_REVISION_CHANGED');
   }
-  assert.equal((await f.start({ yanSessionId: f.source.id, prompt: 'Old request' })).code, 'SESSION_REVISION_CHANGED');
+  assert.equal((await f.start({ zSessionId: f.source.id, prompt: 'Old request' })).code, 'SESSION_REVISION_CHANGED');
   await assert.rejects(f.context.persistForkKernelBinding(f.source.id, 'old-late-native', 0), { code: 'SESSION_REVISION_CHANGED' });
   assert.equal(fs.readFileSync(f.file(f.source.id), 'utf8'), before);
 });
@@ -209,7 +209,7 @@ test('each post-rewind run gets the full authoritative history and only the newl
   assert.equal(result.session.messagesStart, 16);
   const prompt = { role: 'user', content: 'Continue here', ts: 9999 };
   await f.save({ ...result.session, messages: [...result.session.messages, prompt], openCodeSessionId: 'OLD_NATIVE_HANDLE' });
-  const request = { yanSessionId: f.source.id, conversationRevision: 1, prompt: prompt.content,
+  const request = { zSessionId: f.source.id, conversationRevision: 1, prompt: prompt.content,
     requestMessageIndex: 56, requestMessageAnchor: fork.messageForkAnchor(prompt), history: [{ content: 'FORGED' }] };
   const first = await f.start(request);
   assert.equal(first.ok, true);
@@ -284,11 +284,11 @@ test('missing or changed backups fail restoration without creating records or tr
 test('active, admitting, queued, dispatching and compressing tasks refuse rewind without cancellation', async t => {
   const f = fixture(t);
   const contexts = [
-    [() => f.context.openCodeActiveRuns.set('run', { yanSessionId: f.source.id }), () => f.context.openCodeActiveRuns.clear()],
+    [() => f.context.openCodeActiveRuns.set('run', { zSessionId: f.source.id }), () => f.context.openCodeActiveRuns.clear()],
     [() => f.context.openCodeRunAdmissions.set('run', f.source.id), () => f.context.openCodeRunAdmissions.clear()],
     ...['queued', 'consumed'].map(status => [
-      () => { f.context.yanCore.state.intents.intent = { threadId: f.source.id, status }; },
-      () => { delete f.context.yanCore.state.intents.intent; }
+      () => { f.context.zCore.state.intents.intent = { threadId: f.source.id, status }; },
+      () => { delete f.context.zCore.state.intents.intent; }
     ]),
     [() => f.context.manualContextCompressions.add(f.source.id), () => f.context.manualContextCompressions.clear()]
   ];
@@ -395,17 +395,17 @@ test('late enqueue, consume and requeue requests cannot revive discarded prompts
   await f.rewind(f.boundary(13));
   const stale = await f.enqueue({ threadId: f.source.id, intentId: 'old-intent', intent: { prompt: 'DISCARDED_PROMPT' } });
   assert.equal(stale.code, 'SESSION_REVISION_CHANGED');
-  assert.equal(Object.keys(f.context.yanCore.state.intents).length, 0);
+  assert.equal(Object.keys(f.context.zCore.state.intents).length, 0);
   const fresh = await f.enqueue({ threadId: f.source.id, intentId: 'fresh-intent', conversationRevision: 1,
     intent: { prompt: 'New prompt', conversationRevision: 999 } });
   assert.equal(fresh.ok, true);
   assert.equal(fresh.intent.intent.conversationRevision, 1, 'The persisted normalized intent freezes the authoritative revision');
   // Simulate a restored old queue record from an earlier application run.
-  f.context.yanCore.state.intents.legacy = { id: 'legacy', threadId: f.source.id, status: 'queued', intent: { prompt: 'DISCARDED_PROMPT' } };
+  f.context.zCore.state.intents.legacy = { id: 'legacy', threadId: f.source.id, status: 'queued', intent: { prompt: 'DISCARDED_PROMPT' } };
   assert.equal((await f.consume('legacy')).code, 'SESSION_REVISION_CHANGED');
-  f.context.yanCore.state.intents.legacy.status = 'consumed';
+  f.context.zCore.state.intents.legacy.status = 'consumed';
   assert.equal((await f.requeue('legacy')).code, 'SESSION_REVISION_CHANGED');
-  assert.equal(f.context.yanCore.state.intents.legacy.status, 'consumed', 'Stale requests are refused without silently deleting the queue');
+  assert.equal(f.context.zCore.state.intents.legacy.status, 'consumed', 'Stale requests are refused without silently deleting the queue');
   assert.equal((await f.consume('fresh-intent')).ok, true);
   assert.equal((await f.requeue('fresh-intent')).ok, true);
 });

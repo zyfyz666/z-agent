@@ -28,7 +28,7 @@ function fakeFs(files = [], directories = []) {
 }
 
 test('detects VS Code in a standard Windows installation', async () => {
-  const env = { LOCALAPPDATA: 'C:\\Users\\Yan\\AppData\\Local' };
+  const env = { LOCALAPPDATA: 'C:\\Users\\Z\\AppData\\Local' };
   const [candidate] = getVsCodeCandidates(env, 'win32');
   const status = await detectVsCode({
     platform: 'win32',

@@ -10,7 +10,7 @@
 //   node scripts/agi-live-test.cjs --task "自定义任务"  # 覆盖默认任务
 //
 // 直接驱动 lib/opencode-sidecar（不经 Electron 主进程），使用真实用户配置的
-// 模型与密钥；每次 run 使用独立的临时 dataDir，不触碰正在运行的 Yan 实例。
+// 模型与密钥；每次 run 使用独立的临时 dataDir，不触碰正在运行的 Z 实例。
 
 const fs = require('fs');
 const os = require('os');
@@ -21,7 +21,7 @@ const { OpenCodeSidecar, buildOpenCodeConfig } = require('../lib/opencode-sideca
 const { sidepathCeiling } = require('../lib/agi/reasoning-sidepath');
 
 const repoRoot = path.resolve(__dirname, '..');
-const configPath = path.join(process.env.APPDATA, 'yan-agent', 'YanData', 'config.json');
+const configPath = path.join(process.env.APPDATA, 'z-agent', 'ZData', 'config.json');
 
 const args = process.argv.slice(2);
 const argOf = (name, fallback) => {
@@ -51,7 +51,7 @@ function loadProviderConfig() {
 }
 
 async function runOnce(mode, provider, runIndex) {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), `yan-agi-live-${mode}-`));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), `z-agi-live-${mode}-`));
   const workspace = path.join(dataDir, 'workspace');
   fs.mkdirSync(workspace, { recursive: true });
   const sidecar = new OpenCodeSidecar({
@@ -97,7 +97,7 @@ async function runOnce(mode, provider, runIndex) {
   };
   const onEvent = event => {
     const type = String(event?.type || '');
-    if (type.startsWith('yan.')) {
+    if (type.startsWith('z.')) {
       events.push({ type, data: event.data || event.properties || {} });
     }
   };
@@ -142,7 +142,7 @@ async function runOnce(mode, provider, runIndex) {
       artifactAudit: result?.artifactAudit
         ? { files: (result.artifactAudit.files || []).map(entry => ({ ok: entry.ok, missing: entry.missing })), interjected: result.artifactAudit.interjected }
         : null,
-      yanEvents: events.map(event => event.type),
+      zEvents: events.map(event => event.type),
       briefFull: brief
     };
     fs.writeFileSync(path.join(dataDir, 'summary.json'), JSON.stringify(summary, null, 2));

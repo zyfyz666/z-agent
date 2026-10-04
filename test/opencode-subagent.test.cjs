@@ -50,33 +50,33 @@ test('native subagent delegation is enabled with all roles by default', () => {
   assert.match(combineSystem({}), /native subagents are enabled/);
 });
 
-test('skill-only runtime keeps only Yan Skills MCP and its permission namespace', () => {
+test('skill-only runtime keeps only Z Skills MCP and its permission namespace', () => {
   const config = buildOpenCodeConfig({
     providerId: 'test',
     modelId: 'model',
     skillOnly: true,
     mcpServers: [
-      { id: 'yan_skills', runtime: 'yan-skills', command: process.execPath, enabled: true },
-      { id: 'yan_browser', runtime: 'yan-browser', command: process.execPath, enabled: true },
+      { id: 'z_skills', runtime: 'z-skills', command: process.execPath, enabled: true },
+      { id: 'z_browser', runtime: 'z-browser', command: process.execPath, enabled: true },
       { id: 'third-party', command: process.execPath, enabled: true }
     ],
     enableSubagents: true
   });
-  assert.deepEqual(Object.keys(config.mcp), ['yan_skills']);
+  assert.deepEqual(Object.keys(config.mcp), ['z_skills']);
   assert.equal(config.subagent_depth, undefined);
-  assert.equal(config.permission['yan_skills_*'], 'allow');
-  assert.equal(config.permission['yan_browser_*'], undefined);
+  assert.equal(config.permission['z_skills_*'], 'allow');
+  assert.equal(config.permission['z_browser_*'], undefined);
   assert.equal(config.permission['third-party_*'], undefined);
-  assert.equal(config.permission['yan_media_*'], undefined);
+  assert.equal(config.permission['z_media_*'], undefined);
 });
 
 test('skill-only session permissions exclude unrelated built-in MCP namespaces', () => {
   const permissions = sessionPermissionForRun({ skillOnly: true, hasUserWorkspace: false });
   const names = new Set(permissions.map(rule => rule.permission));
-  assert.equal(names.has('yan_skills_*'), true);
-  assert.equal(names.has('yan_browser_*'), false);
-  assert.equal(names.has('yan_media_*'), false);
-  assert.equal(names.has('yan_session_*'), false);
+  assert.equal(names.has('z_skills_*'), true);
+  assert.equal(names.has('z_browser_*'), false);
+  assert.equal(names.has('z_media_*'), false);
+  assert.equal(names.has('z_session_*'), false);
 });
 
 test('task capability flags deny irrelevant MCP tools at the session boundary', () => {
@@ -84,15 +84,15 @@ test('task capability flags deny irrelevant MCP tools at the session boundary', 
     hasUserWorkspace: true,
     permissions: { allowNetwork: true },
     mcpServers: [
-      { id: 'yan_skills', runtime: 'yan-skills', command: process.execPath, enabled: true, taskEnabled: true },
-      { id: 'yan_media', runtime: 'yan-media', command: process.execPath, enabled: true, taskEnabled: false },
-      { id: 'yan_browser', runtime: 'yan-browser', command: process.execPath, enabled: true, taskEnabled: false },
+      { id: 'z_skills', runtime: 'z-skills', command: process.execPath, enabled: true, taskEnabled: true },
+      { id: 'z_media', runtime: 'z-media', command: process.execPath, enabled: true, taskEnabled: false },
+      { id: 'z_browser', runtime: 'z-browser', command: process.execPath, enabled: true, taskEnabled: false },
       { id: 'custom-tools', command: process.execPath, enabled: true, taskEnabled: true }
     ]
   });
-  assert.equal(ruleFor(rules, 'yan_skills_*')?.action, 'allow');
-  assert.equal(ruleFor(rules, 'yan_media_*')?.action, 'deny');
-  assert.equal(ruleFor(rules, 'yan_browser_*')?.action, 'deny');
+  assert.equal(ruleFor(rules, 'z_skills_*')?.action, 'allow');
+  assert.equal(ruleFor(rules, 'z_media_*')?.action, 'deny');
+  assert.equal(ruleFor(rules, 'z_browser_*')?.action, 'deny');
   assert.equal(ruleFor(rules, 'custom-tools_*')?.action, 'ask');
 });
 
@@ -117,11 +117,11 @@ test('enabling native subagents exposes bounded child agents to the parent', () 
   assert.equal(config.agent.explorer.permission.task, 'deny');
   assert.equal(config.agent.explorer.permission.edit, 'deny');
   assert.equal(config.agent.explorer.permission.question, 'deny');
-  assert.equal(config.agent.explorer.permission['yan_skills_*'], 'allow');
+  assert.equal(config.agent.explorer.permission['z_skills_*'], 'allow');
   assert.equal(config.agent.explorer.permission.external_directory, 'deny');
   assert.match(config.agent.explorer.prompt, /High-throughput execution contract/);
   assert.match(config.agent.explorer.prompt, /batch independent read\/glob\/grep/);
-  assert.match(config.agent.explorer.prompt, /yan_skills_read_skill/);
+  assert.match(config.agent.explorer.prompt, /z_skills_read_skill/);
   assert.match(config.agent.explorer.prompt, /never return an empty result/);
   assert.equal(config.agent.explorer.permission.read['*'], 'allow');
   assert.equal(config.agent.explorer.permission.read[Object.keys(config.agent.explorer.permission.read)
@@ -156,20 +156,20 @@ test('assistant tool parts bypass role-gating so tool UI starts immediately', ()
 test('explorer instructions stay config-stable across runs (no per-run values)', () => {
   const config = buildOpenCodeConfig({
     providerId: 'test', modelId: 'model', enableSubagents: true,
-    yanTaskId: 'yan-run-cache-123', inputTokensPerSecond: 20_000
+    zTaskId: 'z-run-cache-123', inputTokensPerSecond: 20_000
   });
   assert.match(config.agent.explorer.prompt, /task_id stated in the turn-context system instructions/);
   assert.match(config.agent.explorer.prompt, /reuses the parent task cache/);
   assert.match(config.agent.explorer.prompt, /input_tokens_per_second value stated in the input-throughput instructions for the current turn/);
   // Per-run values must NOT leak into the config (they would change
   // configSignature and restart the kernel between tasks).
-  assert.doesNotMatch(config.agent.explorer.prompt, /yan-run-cache-123/);
+  assert.doesNotMatch(config.agent.explorer.prompt, /z-run-cache-123/);
   assert.doesNotMatch(config.agent.explorer.prompt, /20000/);
   const crypto = require('node:crypto');
   const signature = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
   const other = buildOpenCodeConfig({
     providerId: 'test', modelId: 'model', enableSubagents: true,
-    yanTaskId: 'a-different-task', measuredInputTokensPerSecond: 45_000
+    zTaskId: 'a-different-task', measuredInputTokensPerSecond: 45_000
   });
   assert.equal(signature(config), signature(other));
 });
@@ -241,7 +241,7 @@ test('mapper, tracer and reverser ship as independent tool-capable child agents'
   // All three keep the shared child-agent guards.
   for (const role of ['mapper', 'tracer', 'reverser']) {
     assert.equal(config.agent[role].permission.task, 'deny');
-    assert.equal(config.agent[role].permission['yan_skills_*'], 'allow');
+    assert.equal(config.agent[role].permission['z_skills_*'], 'allow');
   }
 });
 
@@ -259,9 +259,9 @@ test('reverser disables native edits but preserves script execution when file wr
 
 test('analysis tools honor file-read permissions for parent and analyst children', () => {
   const config = buildOpenCodeConfig({ providerId: 'test', modelId: 'model', permissions: { allowFileRead: false } });
-  assert.equal(config.permission['yan_analysis_*'], 'deny');
+  assert.equal(config.permission['z_analysis_*'], 'deny');
   for (const role of ['mapper', 'tracer', 'reverser']) {
-    assert.equal(config.agent[role].permission['yan_analysis_*'], 'deny');
+    assert.equal(config.agent[role].permission['z_analysis_*'], 'deny');
     assert.equal(config.agent[role].tools.bash, true);
   }
 });

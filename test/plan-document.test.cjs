@@ -21,7 +21,7 @@ test('plan document naming follows the xxx计划.md convention', () => {
 });
 
 test('writePlanDocument writes into <dataDir>/plans and avoids collisions', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-plan-test-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-plan-test-'));
   try {
     const first = writePlanDocument({ dataDir, text: '# 实现登录页计划\n\n第一步', now: 1 });
     const second = writePlanDocument({ dataDir, text: '# 实现登录页计划\n\n第一步', now: 2 });
@@ -39,17 +39,17 @@ test('sanitizes protocol blocks, tagged thinking, and leaked reasoning openers',
   const opener = '已确认：计划对象为「计划模式」本身——编写一份可执行的验收测试计划。工作区已勘察：test/24 为空。';
   const dirty = [
     opener,
-    '<yan-delivery-contract>',
+    '<z-delivery-contract>',
     'intent: presentable',
     'scope: leak',
-    '</yan-delivery-contract>',
+    '</z-delivery-contract>',
     '<thinking>内部思考不应出现</thinking>',
     '# 计划模式产品性验收测试计划',
     '',
     '正文。'
   ].join('\n');
   const cleaned = sanitizePlanDocumentText(dirty, `${opener}后续思考。`);
-  assert.doesNotMatch(cleaned, /yan-delivery-contract|intent:|内部思考不应该出现|内部思考不应出现/u);
+  assert.doesNotMatch(cleaned, /z-delivery-contract|intent:|内部思考不应该出现|内部思考不应出现/u);
   assert.doesNotMatch(cleaned, /已确认/u);
   assert.match(cleaned, /# 计划模式产品性验收测试计划/u);
   // Without matching reasoning the opening paragraph is normal content.
@@ -58,11 +58,11 @@ test('sanitizes protocol blocks, tagged thinking, and leaked reasoning openers',
 });
 
 test('writePlanDocument refuses content that sanitizes to nothing', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-plan-empty-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-plan-empty-'));
   try {
     assert.equal(writePlanDocument({
       dataDir,
-      text: '<yan-delivery-contract>\nintent: presentable\n</yan-delivery-contract>'
+      text: '<z-delivery-contract>\nintent: presentable\n</z-delivery-contract>'
     }), null);
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });

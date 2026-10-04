@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-quick-launch-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-quick-launch-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'playwright');
 const screenshotPath = path.join(outputDir, 'quick-launch-settings.png');
 fs.mkdirSync(outputDir, { recursive: true });
@@ -21,8 +21,8 @@ fs.mkdirSync(outputDir, { recursive: true });
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -36,23 +36,23 @@ fs.mkdirSync(outputDir, { recursive: true });
     await page.screenshot({ path: screenshotPath, fullPage: false });
 
     await page.locator('#quickLaunchEnabled').uncheck();
-    await page.waitForFunction(async () => (await window.yan.getQuickLaunch()).settings.enabled === false);
+    await page.waitForFunction(async () => (await window.z.getQuickLaunch()).settings.enabled === false);
 
     await page.locator('#quickLaunchShortcutRecorder').click();
     await page.keyboard.press('Control+Alt+K');
     await page.waitForFunction(async () => {
-      const state = await window.yan.getQuickLaunch();
+      const state = await window.z.getQuickLaunch();
       return state.settings.shortcut === 'Control+Alt+K' && state.settings.enabled === false;
     });
     assert.equal(await page.locator('#quickLaunchShortcutLabel').textContent(), 'Ctrl+Alt+K');
 
     await page.locator('#quickLaunchEnabled').check();
     await page.waitForFunction(async () => {
-      const state = await window.yan.getQuickLaunch();
+      const state = await window.z.getQuickLaunch();
       return state.settings.enabled === true && state.registered === true;
     });
     await page.locator('#quickLaunchEnabled').uncheck();
-    await page.waitForFunction(async () => (await window.yan.getQuickLaunch()).settings.enabled === false);
+    await page.waitForFunction(async () => (await window.z.getQuickLaunch()).settings.enabled === false);
 
     assert.equal(await page.locator('#quickLaunchReset').count(), 0);
     assert.equal(await page.locator('#quickLaunchPreviewLink').count(), 0);

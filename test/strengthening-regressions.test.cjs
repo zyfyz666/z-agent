@@ -12,7 +12,7 @@ const { SubagentEventBridge } = require('../lib/subagent/event-bridge');
 const { recordSubagentTask } = require('../lib/opencode-sidecar');
 
 test('call index refreshes immediately after edit, add and delete; file budgets stay independent', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-index-refresh-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-index-refresh-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const write = (name, text) => fs.writeFileSync(path.join(root, name), text);
   write('a.js', 'export function alpha() { return 1; }');
@@ -30,7 +30,7 @@ test('call index refreshes immediately after edit, add and delete; file budgets 
 });
 
 test('ES and CommonJS aliases resolve original symbols; non-JS files do not consume calltree cap', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-alias-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-alias-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'a.py'), 'def unrelated():\n  pass\n');
   fs.writeFileSync(path.join(root, 'b.js'), 'export function original() { return 1; }');
@@ -78,7 +78,7 @@ test('admission blocks unfinished/self dependencies and duplicate active ids', (
 
 test('partial terminal updates preserve delegation metadata and release acceptance correctly', () => {
   const run = { subagentTasks: [] };
-  recordSubagentTask(run, { state: { input: { subagent_type: 'builder', prompt: 'yan-plan: {"id":"feature","dependsOn":["schema"]}' } } }, 'running', 'a');
+  recordSubagentTask(run, { state: { input: { subagent_type: 'builder', prompt: 'z-plan: {"id":"feature","dependsOn":["schema"]}' } } }, 'running', 'a');
   const done = recordSubagentTask(run, { state: { output: 'done' } }, 'completed', 'a');
   assert.equal(done.role, 'builder');
   assert.equal(done.plan.id, 'feature');
@@ -86,7 +86,7 @@ test('partial terminal updates preserve delegation metadata and release acceptan
 });
 
 test('missed task input is recovered by call id and history lookup is cancellable', async () => {
-  const part = { tool: 'task', callID: 'wanted', state: { input: { prompt: 'yan-plan: {"id":"child"}' } } };
+  const part = { tool: 'task', callID: 'wanted', state: { input: { prompt: 'z-plan: {"id":"child"}' } } };
   const client = { session: { messages: async () => ({ data: [{ parts: [part] }] }) } };
   assert.equal(await recoverTaskInput(client, { callId: 'wanted' }), part);
   assert.equal(await recoverTaskInput(client, { callId: 'different' }), null);

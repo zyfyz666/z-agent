@@ -90,7 +90,7 @@ async function crash() {
 (async () => {
   try {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile, YAN_E2E_PARENT_PID: String(process.pid),
+    const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile, Z_E2E_PARENT_PID: String(process.pid),
       OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
     delete env.ELECTRON_RUN_AS_NODE;
     application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
@@ -101,15 +101,15 @@ async function crash() {
     assert.match(report.gpuFeatures.gpu_compositing, /disabled|unavailable/);
     report.checks.push('the real application starts with software compositing');
     const sessionId = await page.evaluate(async port => {
-      const result = await yan.connectionsSave({ name: 'Local recovery fixture', preset: 'openai', apiFormat: 'openai',
+      const result = await z.connectionsSave({ name: 'Local recovery fixture', preset: 'openai', apiFormat: 'openai',
         manualModelId: 'z-recovery-fixture', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'local-fixture-only' });
       if (!result.ok) throw new Error(result.error);
-      await yan.setConfig({ agent: { accessMode: 'full', workMode: 'normal' }, permissions: { allowNetwork: false } });
-      state.config = await yan.getConfig();
-      const session = await yan.createSession(true);
+      await z.setConfig({ agent: { accessMode: 'full', workMode: 'normal' }, permissions: { allowNetwork: false } });
+      state.config = await z.getConfig();
+      const session = await z.createSession(true);
       session.title = 'Renderer recovery fixture';
       session.messages = [{ role: 'user', content: 'Keep the isolated recovery fixture', ts: Date.now() }];
-      await yan.saveSession(session);
+      await z.saveSession(session);
       await refreshSessions();
       renderSessionList();
       await loadSession(session.id);
@@ -119,14 +119,14 @@ async function crash() {
     await page.locator('#sendBtn').click();
     await until(() => heldStream, 60000);
     await page.waitForFunction(() => document.querySelector('#messages').textContent.includes('RECOVERY_STREAM_BEFORE_1832'));
-    const before = await page.evaluate(async () => (await yan.openCodeSyncActiveRuns()).map(run => run.runId));
+    const before = await page.evaluate(async () => (await z.openCodeSyncActiveRuns()).map(run => run.runId));
     assert.equal(before.length, 1);
     await crash();
     console.log('first crash dispatched');
     await ready();
     console.log('first crash recovered');
     assert.equal(application.process().pid, mainPid);
-    const after = await evaluateUi(async () => (await yan.openCodeSyncActiveRuns()).map(run => run.runId));
+    const after = await evaluateUi(async () => (await z.openCodeSyncActiveRuns()).map(run => run.runId));
     console.log('active run inspected');
     assert.deepEqual(after, before);
     assert.equal(report.requests, 1);
@@ -137,7 +137,7 @@ async function crash() {
     if (gpu?.pid) {
       process.kill(gpu.pid);
       await until(() => {
-        const file = path.join(profile, 'YanData', 'logs', 'renderer-health.jsonl');
+        const file = path.join(profile, 'ZData', 'logs', 'renderer-health.jsonl');
         return fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('child-process-gone');
       });
       await ready();
@@ -158,14 +158,14 @@ async function crash() {
     assert.equal(report.requests, 1);
     writeChunk(heldStream, '\nRECOVERY_STREAM_AFTER_1832', 'stop');
     heldStream.end('data: [DONE]\n\n');
-    await until(async () => evaluateUi(async () => (await yan.openCodeSyncActiveRuns()).every(run => !run.running)));
+    await until(async () => evaluateUi(async () => (await z.openCodeSyncActiveRuns()).every(run => !run.running)));
     await evaluateUi(id => loadSession(id), sessionId);
     await until(() => evaluateUi(() => document.querySelector('#messages').textContent.includes('RECOVERY_STREAM_AFTER_1832')));
-    const saved = await evaluateUi(id => yan.getSession(id), sessionId);
+    const saved = await evaluateUi(id => z.getSession(id), sessionId);
     assert.equal(saved.messages.filter(message => message.role === 'user' && message.content.includes(marker)).length, 1);
     assert.ok(saved.messages.some(message => message.role === 'assistant' && message.content.includes('RECOVERY_STREAM_AFTER_1832')));
     report.checks.push('manual recovery reconnects to the same run and saves its completed answer exactly once');
-    const healthFile = path.join(profile, 'YanData', 'logs', 'renderer-health.jsonl');
+    const healthFile = path.join(profile, 'ZData', 'logs', 'renderer-health.jsonl');
     report.healthEvents = fs.readFileSync(healthFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     assert.equal(report.healthEvents.filter(entry => entry.event === 'renderer-process-gone').length, 3);
     assert.equal(report.fixtureError, undefined);

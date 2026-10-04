@@ -253,5 +253,5 @@
     }
   }
 
-  window.yanParticlesOrb = { ParticlesOrb };
+  window.zParticlesOrb = { ParticlesOrb };
 })();

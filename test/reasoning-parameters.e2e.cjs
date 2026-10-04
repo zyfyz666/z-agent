@@ -113,7 +113,7 @@ const server = http.createServer((request, response) => {
         item.providerModule = config.provider[providerId].npm.includes('@ai-sdk/')
           ? config.provider[providerId].npm : path.basename(config.provider[providerId].npm);
         const result = await Promise.race([
-          sidecar.run({ runId: `reasoning-${item.id}`, yanSessionId: item.id, providerId, modelId: requestedModel, workspace,
+          sidecar.run({ runId: `reasoning-${item.id}`, zSessionId: item.id, providerId, modelId: requestedModel, workspace,
             hasUserWorkspace: true, workMode: 'normal', accessMode: 'full', enableSubagents: false,
             reasoningSpeed: item.effort, openCodeConfig: config, prompt: `REASONING_PROBE_${item.id}: Reply with the fixture confirmation.` }),
           new Promise((_, reject) => { timer = setTimeout(() => {

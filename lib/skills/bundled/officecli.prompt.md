@@ -7,17 +7,17 @@ description: Create, analyze, proofread, and modify Office documents (.docx, .xl
 
 AI-friendly CLI for .docx, .xlsx, .pptx. Single binary, no dependencies, no Office installation needed.
 
-## Yan Agent runtime
+## Z Agent runtime
 
-When this Skill is used inside Yan Agent, run every command through the exact Yan OfficeCLI runner path appended by Yan Agent:
+When this Skill is used inside Z Agent, run every command through the exact Z OfficeCLI runner path appended by Z Agent:
 
-`node "<Yan OfficeCLI runner>" <officecli command> ...`
+`node "<Z OfficeCLI runner>" <officecli command> ...`
 
-Do not run an installer, use `npm install`, or search another Agent's Skill directory. Yan manages the bundled runtime and stores any downloaded fallback under its own `YanData` directory.
+Do not run an installer, use `npm install`, or search another Agent's Skill directory. Z manages the bundled runtime and stores any downloaded fallback under its own `ZData` directory.
 
 ## Runtime availability
 
-Yan Agent provides the runner and resolves the bundled binary, an existing user installation, or a Yan-owned downloaded fallback. If the runner reports that the runtime cannot be obtained, report that concrete error; do not install another copy or use another Agent's directory.
+Z Agent provides the runner and resolves the bundled binary, an existing user installation, or a Z-owned downloaded fallback. If the runner reports that the runtime cannot be obtained, report that concrete error; do not install another copy or use another Agent's directory.
 
 ---
 

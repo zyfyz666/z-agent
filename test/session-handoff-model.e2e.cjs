@@ -8,27 +8,27 @@ const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
 const sourceConfigPath = path.resolve(String(
-  process.env.YAN_E2E_CONFIG_PATH
-    || path.join(process.env.APPDATA || '', 'yan-agent', 'YanData', 'config.json')
+  process.env.Z_E2E_CONFIG_PATH
+    || path.join(process.env.APPDATA || '', 'z-agent', 'ZData', 'config.json')
 ));
-const timeoutMs = Math.max(60_000, Math.min(600_000, Number(process.env.YAN_E2E_MODEL_TIMEOUT_MS) || 360_000));
-const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-session-handoff-e2e-'));
+const timeoutMs = Math.max(60_000, Math.min(600_000, Number(process.env.Z_E2E_MODEL_TIMEOUT_MS) || 360_000));
+const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-session-handoff-e2e-'));
 const userDataDir = path.join(testRoot, 'user-data');
 const sourceWorkspace = path.join(testRoot, 'workspaces', '1');
 const targetWorkspace = path.join(testRoot, 'workspaces', '2');
 const deniedWorkspace = path.join(testRoot, 'workspaces', 'denied');
-const secret = `YAN-HANDOFF-${Date.now()}`;
+const secret = `Z-HANDOFF-${Date.now()}`;
 
 function prepareIsolatedConfig() {
-  assert.ok(fs.existsSync(sourceConfigPath), `Yan config is missing: ${sourceConfigPath}`);
-  fs.mkdirSync(path.join(userDataDir, 'YanData'), { recursive: true });
+  assert.ok(fs.existsSync(sourceConfigPath), `Z config is missing: ${sourceConfigPath}`);
+  fs.mkdirSync(path.join(userDataDir, 'ZData'), { recursive: true });
   fs.mkdirSync(sourceWorkspace, { recursive: true });
   fs.mkdirSync(targetWorkspace, { recursive: true });
   fs.mkdirSync(deniedWorkspace, { recursive: true });
   const config = JSON.parse(fs.readFileSync(sourceConfigPath, 'utf8'));
   config.workspace = '';
   config.agent = { ...(config.agent || {}), accessMode: 'full', workMode: 'normal' };
-  fs.writeFileSync(path.join(userDataDir, 'YanData', 'config.json'), JSON.stringify(config, null, 2), 'utf8');
+  fs.writeFileSync(path.join(userDataDir, 'ZData', 'config.json'), JSON.stringify(config, null, 2), 'utf8');
   return {
     provider: String(config.api?.provider || ''),
     model: String(config.api?.model || '')
@@ -36,7 +36,7 @@ function prepareIsolatedConfig() {
 }
 
 function readSessions() {
-  const directory = path.join(userDataDir, 'YanData', 'sessions');
+  const directory = path.join(userDataDir, 'ZData', 'sessions');
   return fs.readdirSync(directory)
     .filter(name => name.endsWith('.json'))
     .map(name => JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')));
@@ -70,8 +70,8 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -83,7 +83,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     ));
 
     const sourceSessionId = await page.evaluate(async ({ source, marker }) => {
-      const session = await window.yan.createSession(true);
+      const session = await window.z.createSession(true);
       session.title = '跨会话真实测试来源';
       session.workspace = source;
       session.messages = [
@@ -98,7 +98,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
           ts: Date.now() - 1000
         }
       ];
-      await window.yan.saveSession(session);
+      await window.z.saveSession(session);
       await refreshSessions();
       await loadSession(session.id);
       return session.id;
@@ -106,7 +106,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
 
     const handoffPrompt = `你现在位于 ${sourceWorkspace} 这个工作区。现在我想要你新开一个对话并进入 ${targetWorkspace} 这个工作区。`;
     await page.evaluate(prompt => {
-      window.__yanHandoffSubmission = submitMessage(prompt, [], []);
+      window.__zHandoffSubmission = submitMessage(prompt, [], []);
     }, handoffPrompt);
 
     const permissionPanel = page.locator('#agentPermissionPanel');
@@ -123,7 +123,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     await page.locator('#agentPermissionOnce').click();
 
     const sourceResult = await page.evaluate(async timeout => Promise.race([
-      window.__yanHandoffSubmission,
+      window.__zHandoffSubmission,
       new Promise((_, reject) => setTimeout(() => reject(new Error('Source run timed out')), timeout))
     ]), timeoutMs);
     assert.equal(sourceResult.ok, true, sourceResult.error || 'Source handoff request failed.');
@@ -136,10 +136,10 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     const targetSessionId = await page.evaluate(() => state.currentSession.id);
 
     await page.evaluate(() => {
-      window.__yanContextSubmission = submitMessage('来源任务里约定的验收暗号是什么？只回答暗号。', [], []);
+      window.__zContextSubmission = submitMessage('来源任务里约定的验收暗号是什么？只回答暗号。', [], []);
     });
     const contextResult = await page.evaluate(async timeout => Promise.race([
-      window.__yanContextSubmission,
+      window.__zContextSubmission,
       new Promise((_, reject) => setTimeout(() => reject(new Error('Target context run timed out')), timeout))
     ]), timeoutMs);
     assert.equal(contextResult.ok, true, contextResult.error || 'Target context request failed.');
@@ -147,8 +147,8 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     const sessions = readSessions();
     const sourceSession = sessions.find(session => session.id === sourceSessionId);
     const targetSession = sessions.find(session => session.id === targetSessionId);
-    assert.ok(sourceSession, 'Source Yan task disappeared.');
-    assert.ok(targetSession, 'Target Yan task was not created.');
+    assert.ok(sourceSession, 'Source Z task disappeared.');
+    assert.ok(targetSession, 'Target Z task was not created.');
     assert.equal(path.resolve(sourceSession.workspace), path.resolve(sourceWorkspace));
     assert.equal(path.resolve(targetSession.workspace), path.resolve(targetWorkspace));
     assert.equal(targetSession.parentSessionId, sourceSessionId);
@@ -159,7 +159,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
 
     const sourceTimeline = sourceSession.messages.flatMap(message => message.agentRun?.timeline || []);
     const handoffTool = sourceTimeline.find(item => (
-      item.type === 'tool_call' && String(item.name || '') === 'yan_session_create_handoff'
+      item.type === 'tool_call' && String(item.name || '') === 'z_session_create_handoff'
     ));
     const handoffResult = sourceTimeline.find(item => (
       item.type === 'tool_result' && item.callId === handoffTool?.callId
@@ -178,7 +178,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     const returnResult = await submitAuthorizedNavigation(
       page,
       `现在返回 ${sourceWorkspace} 的现有任务。`,
-      '__yanReturnToSourceSubmission'
+      '__zReturnToSourceSubmission'
     );
     assert.equal(returnResult.ok, true, returnResult.error || 'Returning to the source workspace failed.');
     await page.waitForFunction(expectedId => (
@@ -190,7 +190,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     const forwardResult = await submitAuthorizedNavigation(
       page,
       `现在再进入 ${targetWorkspace} 的现有任务。`,
-      '__yanReturnToTargetSubmission'
+      '__zReturnToTargetSubmission'
     );
     assert.equal(forwardResult.ok, true, forwardResult.error || 'Returning to the child workspace failed.');
     await page.waitForFunction(expectedId => (
@@ -208,9 +208,9 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     assert.equal(sessionsAfterReuse.find(session => session.id === targetSessionId)?.openCodeSessionId, targetOpenCodeSessionId);
 
     const sessionCountBeforeDenial = sessionsAfterReuse.length;
-    const denialPrompt = `请再新建一个 Yan 对话并进入 ${deniedWorkspace}。`;
+    const denialPrompt = `请再新建一个 Z 对话并进入 ${deniedWorkspace}。`;
     await page.evaluate(prompt => {
-      window.__yanDeniedSubmission = submitMessage(prompt, [], []);
+      window.__zDeniedSubmission = submitMessage(prompt, [], []);
     }, denialPrompt);
     await page.waitForFunction(() => {
       const panel = document.querySelector('#agentPermissionPanel');
@@ -220,7 +220,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     }, null, { timeout: timeoutMs });
     await page.locator('#agentPermissionDeny').click();
     const deniedResult = await page.evaluate(async timeout => Promise.race([
-      window.__yanDeniedSubmission,
+      window.__zDeniedSubmission,
       new Promise((_, reject) => setTimeout(() => reject(new Error('Denied run timed out')), timeout))
     ]), timeoutMs);
     assert.equal(deniedResult.ok, true, deniedResult.error || 'Model did not finish after handoff denial.');
@@ -228,7 +228,7 @@ async function submitAuthorizedNavigation(page, prompt, promiseKey) {
     assert.equal(sessionsAfterDenial.length, sessionCountBeforeDenial);
     assert.equal(sessionsAfterDenial.some(session => (
       path.resolve(String(session.workspace || '')) === path.resolve(deniedWorkspace)
-    )), false, 'A denied handoff still created a Yan task.');
+    )), false, 'A denied handoff still created a Z task.');
 
     process.stdout.write(`${JSON.stringify({
       ok: true,

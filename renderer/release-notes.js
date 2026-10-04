@@ -1,2 +1,2 @@
 // Keep the existing guide entry point for saved UI state.
-window.YanReleaseNotes = window.ZProductContent.releaseNotes;
+window.ZReleaseNotes = window.ZProductContent.releaseNotes;

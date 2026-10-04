@@ -13,7 +13,7 @@ const appRoot = path.resolve(__dirname, '..');
 const temporaryRoot = path.resolve(os.tmpdir());
 const profile = fs.mkdtempSync(path.join(temporaryRoot, 'z-observer-reasoning-'));
 const outputDir = path.join(appRoot, 'output', 'observer-reasoning');
-const configFile = path.join(profile, 'YanData', 'config.json');
+const configFile = path.join(profile, 'ZData', 'config.json');
 const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
 const modelId = 'claude-opus-4-7';
 const routes = [
@@ -64,8 +64,8 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -90,7 +90,7 @@ async function close() {
 
 async function publicSettings() {
   return page.evaluate(async () => {
-    const config = await yan.getConfig();
+    const config = await z.getConfig();
     return { observer: config.observer, mainEffort: config.api.reasoningSpeed, mainModel: config.agentModel };
   });
 }
@@ -165,12 +165,12 @@ async function runThroughMain(route, effort) {
   await page.evaluate(({ runId }) => {
     window.observerReasoningCompleted ||= {};
     window.observerReasoningCompleted[runId] = { pending: true };
-    const dispose = yan.onOpenCodeCompleted(detail => {
+    const dispose = z.onOpenCodeCompleted(detail => {
       if (detail.runId !== runId) return;
       window.observerReasoningCompleted[runId] = detail.result;
       dispose();
     });
-    yan.openCodeStartRun({ runId, yanSessionId: state.currentSession.id, utility: true,
+    z.openCodeStartRun({ runId, zSessionId: state.currentSession.id, utility: true,
       prompt: 'Exercise the isolated Observer request fixture.' }).then(result => {
       if (!result.ok) { window.observerReasoningCompleted[runId] = { error: result.error }; dispose(); }
     }).catch(error => { window.observerReasoningCompleted[runId] = { error: error.message }; dispose(); });
@@ -208,7 +208,7 @@ function assertWire(wire, route, effort) {
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     await launch();
-    await page.evaluate(() => yan.setConfig({ api: { reasoningSpeed: 'low' } }));
+    await page.evaluate(() => z.setConfig({ api: { reasoningSpeed: 'low' } }));
     await close();
     assert.ok(path.resolve(configFile).startsWith(path.resolve(profile) + path.sep));
     const legacy = JSON.parse(fs.readFileSync(configFile, 'utf8'));
@@ -219,7 +219,7 @@ function assertWire(wire, route, effort) {
     let settings = await publicSettings();
     assert.equal(settings.mainEffort, 'low');
     assert.equal(settings.observer.reasoningEffort, 'max', 'existing profiles without the field default to max');
-    assert.equal((await page.evaluate(() => yan.listModelConnections())).observer.reasoningEffort, 'max');
+    assert.equal((await page.evaluate(() => z.listModelConnections())).observer.reasoningEffort, 'max');
     await openObserver();
     assert.equal(await page.locator('#zObserverReasoning').inputValue(), 'max');
     assert.equal(await page.locator('#zObserverReasoning').isDisabled(), true);
@@ -231,14 +231,14 @@ function assertWire(wire, route, effort) {
     const connections = await page.evaluate(async ({ port, routes, modelId }) => {
       const savedConnections = {};
       for (const route of routes) {
-        const saved = await yan.connectionsSave({ name: `Observer fixture ${route.id}`,
+        const saved = await z.connectionsSave({ name: `Observer fixture ${route.id}`,
           preset: route.apiFormat === 'anthropic' ? 'anthropic' : 'openai', apiFormat: route.apiFormat,
           manualModelId: modelId, baseUrl: `http://127.0.0.1:${port}/${route.id}/v1`, apiKey: 'local-fixture-only' });
         if (!saved.ok) throw new Error(saved.error || 'Cannot save fixture connection');
         savedConnections[route.id] = saved.connection;
       }
-      state.config = await yan.getConfig();
-      const selected = await yan.setSessionModel(state.currentSession.id, state.config.agentModel);
+      state.config = await z.getConfig();
+      const selected = await z.setSessionModel(state.currentSession.id, state.config.agentModel);
       if (!selected.ok) throw new Error(selected.error || 'Cannot select the fixture Agent model');
       state.currentSession.modelSelection = selected.modelSelection;
       renderModelBadge();

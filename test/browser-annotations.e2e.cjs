@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {pathToFileURL}=require('node:url'),{_electron:electron}=require('playwright');
-(async()=>{let app;const root=path.resolve(__dirname,'..'),data=fs.mkdtempSync(path.join(os.tmpdir(),'yan-annotations-'));try{
-app=await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,YAN_E2E_MODE:'1',YAN_E2E_USER_DATA_DIR:data}});
+(async()=>{let app;const root=path.resolve(__dirname,'..'),data=fs.mkdtempSync(path.join(os.tmpdir(),'z-annotations-'));try{
+app=await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,Z_E2E_MODE:'1',Z_E2E_USER_DATA_DIR:data}});
 const page=await app.firstWindow();await page.waitForFunction(()=>typeof createRightSidebarTab==='function'&&state.currentSession);
 const id=await page.evaluate(async url=>{const tab=createRightSidebarTab('browser');activateRightSidebarTab(tab.id);const c=browserTabControllers.get(tab.id);await c.navigate(url,{waitForLoad:true});return tab.id;},pathToFileURL(path.join(root,'test/fixtures/browser-agent.html')).href);
 const panel=page.locator('[data-browser-tab-id="'+id+'"]');
@@ -55,13 +55,13 @@ const applied=await page.evaluate(async id=>{
  state.activeRuns.set(sessionId,{runCtx:{runId,sessionId,workspace:'',browserAnnotation:annotation}});
  try {
   const count=browserTabControllers.size;
-  const opened=await executeBrowserAgentCommand({action:'open',params:{yan_run_id:runId,url_or_path:annotation.url}});
+  const opened=await executeBrowserAgentCommand({action:'open',params:{z_run_id:runId,url_or_path:annotation.url}});
   const c=browserTabControllers.get(id);
   await c.webview.executeJavaScript(`document.querySelector('#actionButton').innerHTML='<span>Run action</span><svg aria-hidden="true"></svg>'`);
-  const result=await executeBrowserAgentCommand({action:'apply_annotation',params:{yan_run_id:runId,text:'老妹你真美'}});
+  const result=await executeBrowserAgentCommand({action:'apply_annotation',params:{z_run_id:runId,text:'老妹你真美'}});
   const dom=await c.webview.executeJavaScript(`({text:document.querySelector('#actionButton span').textContent,size:getComputedStyle(document.querySelector('#actionButton')).fontSize,svg:!!document.querySelector('#actionButton svg'),clicked:document.querySelector('#actionState').textContent})`);
   await c.webview.executeJavaScript(`document.querySelector('#actionButton').remove()`);
-  const stale=await executeBrowserAgentCommand({action:'apply_annotation',params:{yan_run_id:runId,text:'stale'}});
+  const stale=await executeBrowserAgentCommand({action:'apply_annotation',params:{z_run_id:runId,text:'stale'}});
   return {result,dom,stale,sameTab:opened.tabId===id,noExtraTab:count===browserTabControllers.size};
  } finally {state.activeRuns.delete(sessionId);setBrowserAgentControl(browserTabControllers.get(id),false);}
 },id);

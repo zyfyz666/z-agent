@@ -99,8 +99,8 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -139,19 +139,19 @@ async function switchTo(id) {
   await page.waitForFunction(id => state.currentSession?.id === id && !observerPendingSessionId, id);
 }
 
-async function readSession(id) { return page.evaluate(id => yan.getSession(id), id); }
+async function readSession(id) { return page.evaluate(id => z.getSession(id), id); }
 
 async function runDirect(session, action, extra = {}, expectFailure = false) {
   const runId = `fork-direct-${action.toLowerCase()}`;
   await page.evaluate(({ session, action, runId, extra }) => {
     window.forkDirectRuns ||= {};
     window.forkDirectRuns[runId] = { pending: true };
-    const stop = yan.onOpenCodeCompleted(detail => {
+    const stop = z.onOpenCodeCompleted(detail => {
       if (detail.runId !== runId) return;
       window.forkDirectRuns[runId] = detail.result;
       stop();
     });
-    yan.openCodeStartRun({ runId, yanSessionId: session.id, utility: true,
+    z.openCodeStartRun({ runId, zSessionId: session.id, utility: true,
       openCodeSessionId: session.openCodeSessionId || '', history: session.messages,
       prompt: `FORK_RUN_${action}_5731: Reply with the fixture confirmation.`, ...extra }).then(result => {
       if (!result.ok) { window.forkDirectRuns[runId] = { error: result.error }; stop(); }
@@ -272,19 +272,19 @@ function observerSnapshot(message, ts) {
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     await launch();
-    assert.equal(await page.evaluate(() => typeof yan.forkSession), 'function');
+    assert.equal(await page.evaluate(() => typeof z.forkSession), 'function');
     await page.evaluate(async ({ port, modelId }) => {
-      const saved = await yan.connectionsSave({ name: 'Session fork fixture', preset: 'openai', apiFormat: 'openai',
+      const saved = await z.connectionsSave({ name: 'Session fork fixture', preset: 'openai', apiFormat: 'openai',
         manualModelId: modelId, baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'local-fixture-only' });
       if (!saved.ok) throw new Error(saved.error);
-      await yan.setConfig({ api: { reasoningSpeed: 'low' }, agent: { accessMode: 'full' } });
-      state.config = await yan.getConfig();
+      await z.setConfig({ api: { reasoningSpeed: 'low' }, agent: { accessMode: 'full' } });
+      state.config = await z.getConfig();
       renderModelBadge();
     }, { port: server.address().port, modelId });
     const originalWatchdog = observerSnapshot(markers.originalObserver, 1_800_000_000_053);
     const laterWatchdog = observerSnapshot(markers.futureObserver, 1_800_000_000_111);
     source = await page.evaluate(async ({ markers, cutoff, originalWatchdog, laterWatchdog }) => {
-      const session = await yan.createSession(true);
+      const session = await z.createSession(true);
       session.title = 'Fork source fixture';
       session.messages = Array.from({ length: 112 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user',
         content: `Earlier fixture message ${index}`, ts: 1_800_000_000_000 + index }));
@@ -299,17 +299,17 @@ function observerSnapshot(message, ts) {
         openCodeSessionId: 'stale-source-native-id', textContent: markers.future, timeline: [], watchdog: laterWatchdog };
       session.handoff = { id: 'source-future-handoff', context: markers.handoff, messages: [{ role: 'user', content: markers.future }],
         sourceSessionId: 'fixture-prior-source', sourceTitle: 'Earlier handoff', targetWorkspace: session.workspace };
-      await yan.saveSession(session);
+      await z.saveSession(session);
       await refreshSessions();
-      return yan.getSession(session.id);
+      return z.getSession(session.id);
     }, { markers, cutoff, originalWatchdog, laterWatchdog });
     const seeded = await runDirect(source, 'SOURCE_SEED');
     assert.ok(seeded.openCodeSessionId);
     source = await page.evaluate(async ({ id, nativeId }) => {
-      const saved = await yan.getSession(id);
+      const saved = await z.getSession(id);
       saved.openCodeSessionId = nativeId;
-      await yan.saveSession(saved);
-      return yan.getSession(id);
+      await z.saveSession(saved);
+      return z.getSession(id);
     }, { id: source.id, nativeId: seeded.openCodeSessionId });
     await switchTo(source.id);
     assert.equal(await page.evaluate(() => state.currentSession.messagesStart), 72);
@@ -317,7 +317,7 @@ function observerSnapshot(message, ts) {
     assert.equal(await page.evaluate(() => state.currentSession.messagesStart), 12);
     await page.evaluate(text => setComposerText(text), markers.sourceDraft);
     await installResponseGate();
-    const beforeCount = (await page.evaluate(() => yan.listSessions())).length;
+    const beforeCount = (await page.evaluate(() => z.listSessions())).length;
     await application.evaluate(() => { globalThis.forkTestGate.hold = true; });
     await clickSelectedFork(true);
     await waitForkGate();
@@ -328,7 +328,7 @@ function observerSnapshot(message, ts) {
     assert.equal(forked.ok, true, forked.error);
     branch = forked.session;
     await page.waitForFunction(id => state.currentSession?.id === id, branch.id);
-    assert.equal((await page.evaluate(() => yan.listSessions())).length, beforeCount + 1);
+    assert.equal((await page.evaluate(() => z.listSessions())).length, beforeCount + 1);
     branch = await readSession(branch.id);
     assert.equal(branch.messages.length, cutoff + 1);
     assert.equal(branch.messages[0].content, markers.prefix);
@@ -394,8 +394,8 @@ function observerSnapshot(message, ts) {
     source = await readSession(source.id);
     assert.doesNotMatch(JSON.stringify(branch.messages), /FORK_RUN_SOURCE_HOLD_5731|FORK_RUN_SOURCE_NEXT_5731/);
     assert.doesNotMatch(JSON.stringify(source.messages), /FORK_RUN_BRANCH_ONE_5731|FORK_RUN_BRANCH_TWO_5731/);
-    const normalContext = await page.evaluate(() => yan.getConfig().then(config => config.context));
-    await page.evaluate(() => yan.setConfig({ context: { maxTokens: 1024, compactionThreshold: 800 } }));
+    const normalContext = await page.evaluate(() => z.getConfig().then(config => config.context));
+    await page.evaluate(() => z.setConfig({ context: { maxTokens: 1024, compactionThreshold: 800 } }));
     const requestsBeforeFailure = report.requests.length;
     await runDirect(delayedBranch, 'PREFLIGHT', {}, true);
     assert.equal(report.requests.length, requestsBeforeFailure, 'context preflight fails before sending a model request');
@@ -403,7 +403,7 @@ function observerSnapshot(message, ts) {
     assert.ok(delayedBranch.openCodeSessionId, 'the first failed attempt already created and bound a native session');
     const failedNativeId = delayedBranch.openCodeSessionId;
     assert.deepEqual(await nativeSessionAction(delayedBranch, 'inspect'), { messageCount: 0 }, 'the bound native session has never received its prefix');
-    await page.evaluate(context => yan.setConfig({ context }), normalContext);
+    await page.evaluate(context => z.setConfig({ context }), normalContext);
     const forged = await runDirect(delayedBranch, 'FORGED', { openCodeSessionId: source.openCodeSessionId,
       history: source.messages, handoff: source.handoff });
     assert.notEqual(forged.openCodeSessionId, source.openCodeSessionId);
@@ -434,7 +434,7 @@ function observerSnapshot(message, ts) {
     assert.deepEqual(restartedBranch.forkedFrom, persistedBranch.forkedFrom);
     assert.deepEqual(restartedBranch.modelSelection, persistedBranch.modelSelection);
     assert.deepEqual(restartedBranch.messages, persistedBranch.messages);
-    const deleted = await page.evaluate(id => yan.deleteSession(id, true), source.id);
+    const deleted = await page.evaluate(id => z.deleteSession(id, true), source.id);
     assert.equal(deleted.ok, true, deleted.error);
     assert.equal(await readSession(source.id), null);
     await page.evaluate(async () => { await refreshSessions(); renderSessionList(); });
@@ -461,8 +461,8 @@ function observerSnapshot(message, ts) {
   } finally {
     if (heldSource && !heldSource.released) { heldSource.released = true; heldSource.response.destroy(); }
     if (page && !page.isClosed()) await page.evaluate(async () => {
-      const active = await yan.openCodeSyncActiveRuns();
-      for (const run of active?.runs || []) await yan.openCodeCancelRun(run.runId).catch(() => {});
+      const active = await z.openCodeSyncActiveRuns();
+      for (const run of active?.runs || []) await z.openCodeCancelRun(run.runId).catch(() => {});
     }).catch(() => {});
     await close().catch(() => {});
     server.closeAllConnections?.();

@@ -115,8 +115,8 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -152,7 +152,7 @@ async function guidance(marker, enter = false) {
 }
 async function settled(id) {
   await page.waitForFunction(id => !state.activeRuns.has(id), id, { timeout: 75_000 });
-  return page.evaluate(id => yan.getSession(id), id);
+  return page.evaluate(id => z.getSession(id), id);
 }
 async function assertOrder(label, order) {
   // Completed history initially hides its work transcript. Exercise the real
@@ -202,18 +202,18 @@ function boundary(session, messageIndex) {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     await launch();
     [sessionA, sessionB] = await page.evaluate(async ({ port, modelId }) => {
-      const connection = await yan.connectionsSave({ name: 'Guidance timeline fixture', preset: 'openai', apiFormat: 'openai',
+      const connection = await z.connectionsSave({ name: 'Guidance timeline fixture', preset: 'openai', apiFormat: 'openai',
         manualModelId: modelId, baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'local-fixture-only' });
       if (!connection.ok) throw new Error(connection.error);
-      await yan.setConfig({ agent: { accessMode: 'full', workMode: 'normal' },
+      await z.setConfig({ agent: { accessMode: 'full', workMode: 'normal' },
         permissions: { allowFileRead: true, allowFileWrite: true, allowNetwork: false } });
-      state.config = await yan.getConfig();
+      state.config = await z.getConfig();
       const result = [];
       for (const title of ['Guidance timeline source', 'Guidance timeline independent conversation']) {
-        const session = await yan.createSession(true);
+        const session = await z.createSession(true);
         session.title = title;
         session.messages = [{ role: 'user', content: `Keep ${title}`, ts: Date.now() }];
-        await yan.saveSession(session);
+        await z.saveSession(session);
         result.push(session);
       }
       await refreshSessions(); renderSessionList();
@@ -263,7 +263,7 @@ function boundary(session, messageIndex) {
     assert.ok(completedReplies > 0);
     completeOrder.push(...Array.from({ length: completedReplies }, (_, index) => `${markers.done}_${index + 1}`));
     await assertOrder('completed run', completeOrder);
-    assert.equal((await page.evaluate(id => yan.getSession(id), sessionB.id)).messages.length, 1);
+    assert.equal((await page.evaluate(id => z.getSession(id), sessionB.id)).messages.length, 1);
     await page.reload();
     await page.waitForFunction(() => typeof quickInputHandlerReady !== 'undefined' && quickInputHandlerReady && state.currentSession && state.config);
     await switchTo(sessionA.id);
@@ -290,16 +290,16 @@ function boundary(session, messageIndex) {
     await application.close(); application = null; page = null;
     await launch();
     await switchTo(sessionA.id);
-    assertRelationship(await page.evaluate(id => yan.getSession(id), sessionA.id), [markers.pauseGuide], 'interrupted');
+    assertRelationship(await page.evaluate(id => z.getSession(id), sessionA.id), [markers.pauseGuide], 'interrupted');
     await assertOrder('completed and interrupted history after full restart', pauseOrder);
     await page.screenshot({ path: path.join(outputDir, 'restored-guidance.png') });
     report.checks.push('a later run keeps its own guidance relationship; interruption, conversation switching and full Electron restart preserve the same chronological display');
 
-    const original = await page.evaluate(id => yan.getSession(id), sessionA.id);
-    const fork = await page.evaluate(payload => yan.forkSession(payload), boundary(original, original.messages.length - 1));
+    const original = await page.evaluate(id => z.getSession(id), sessionA.id);
+    const fork = await page.evaluate(payload => z.forkSession(payload), boundary(original, original.messages.length - 1));
     assert.equal(fork.ok, true, fork.error);
     await switchTo(fork.session.id);
-    assertRelationship(await page.evaluate(id => yan.getSession(id), fork.session.id), [markers.pauseGuide], 'interrupted');
+    assertRelationship(await page.evaluate(id => z.getSession(id), fork.session.id), [markers.pauseGuide], 'interrupted');
     await assertOrder('branch with detached runtime identities', pauseOrder);
     assert.ok(fork.session.messages.filter(message => message.agentRun).every(message => !message.agentRun.runId),
       'inherited branch history has no live run handles');
@@ -316,15 +316,15 @@ function boundary(session, messageIndex) {
     assert.notEqual(branchRun.agentRun.guidanceTimelineKey,
       original.messages.findLast(message => message.agentRun)?.agentRun.guidanceTimelineKey);
     await assertOrder('branch interruption retains separate guidance timelines', branchOrder);
-    assert.equal((await page.evaluate(id => yan.getSession(id), sessionA.id)).messages.length, original.messages.length);
+    assert.equal((await page.evaluate(id => z.getSession(id), sessionA.id)).messages.length, original.messages.length);
     const completedIndex = original.messages.findIndex(message => message.agentRun?.status === 'done');
     assert.ok(completedIndex >= 0);
-    const rewind = await page.evaluate(payload => yan.rewindSession(payload), boundary(original, completedIndex));
+    const rewind = await page.evaluate(payload => z.rewindSession(payload), boundary(original, completedIndex));
     assert.equal(rewind.ok, true, rewind.error);
     await switchTo(sessionA.id);
     await assertOrder('rewind keeps earlier guidance positions', completeOrder);
     assert.equal(await page.evaluate(marker => document.querySelector('#messages').textContent.includes(marker), markers.pauseGuide), false);
-    const restored = await page.evaluate(payload => yan.restoreSessionRewind(payload), {
+    const restored = await page.evaluate(payload => z.restoreSessionRewind(payload), {
       sessionId: sessionA.id, conversationRevision: rewind.conversationRevision
     });
     assert.equal(restored.ok, true, restored.error);
@@ -348,9 +348,9 @@ function boundary(session, messageIndex) {
     throw error;
   } finally {
     if (page && !page.isClosed()) await page.evaluate(async () => {
-      const active = await yan.openCodeSyncActiveRuns();
+      const active = await z.openCodeSyncActiveRuns();
       for (const run of Array.isArray(active) ? active : active?.runs || []) {
-        if (run.running) await yan.openCodeCancelRun(run.runId).catch(() => {});
+        if (run.running) await z.openCodeCancelRun(run.runId).catch(() => {});
       }
     }).catch(() => {});
     for (const response of streams.values()) response.destroy();

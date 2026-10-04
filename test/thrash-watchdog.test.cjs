@@ -1,8 +1,8 @@
 'use strict';
 
-// Yan adapter for the vendored thrash-watchdog core. The core itself is tested
+// Z adapter for the vendored thrash-watchdog core. The core itself is tested
 // upstream against shared vectors; here we pin the vendored copy and test the
-// Yan-specific glue (verification classification, observer, guidance, audit).
+// Z-specific glue (verification classification, observer, guidance, audit).
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -19,7 +19,7 @@ test('vendored core is the pinned criteria version', () => {
   assert.strictEqual(wd.CRITERIA_SHA256, 'd2cc221b28a697d88f1e94574759ca38ff9682ecad253aa9a366f93cb11a5a42');
 });
 
-test('steps use the stated plan once and Yan verification classification', () => {
+test('steps use the stated plan once and Z verification classification', () => {
   const steps = wd.stepsFromMessages([
     { info: { role: 'user' }, parts: [{ type: 'text', text: 'go' }] },
     assistant([
@@ -60,7 +60,7 @@ test('guidance carries the message and the machine-readable marker', () => {
 });
 
 test('audit chain round trip', () => {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wd-yan-')), 'audit.jsonl');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wd-z-')), 'audit.jsonl');
   const watch = wd.createThrashWatch({ judgeEvery: 6 });
   const messages = [];
   for (let i = 1; i <= 12; i++) {

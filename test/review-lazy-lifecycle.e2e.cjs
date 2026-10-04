@@ -6,13 +6,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const appRoot = path.resolve(__dirname, '..');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-lifecycle-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-lifecycle-'));
 
 (async () => {
   let application;
   try {
     application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: root } });
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: root } });
     const page = await application.firstWindow();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -42,9 +42,9 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-lifecycle-'));
       openRunChangeReview(run, '');
       for (let i = 0; i < 20; i++) void renderRightSidebarReview({ force: true });
     });
-    await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame')?.contentDocument?.querySelectorAll('main .file').length === 400);
+    await page.waitForFunction(() => document.querySelector('#zDshReviewFrame')?.contentDocument?.querySelectorAll('main .file').length === 400);
     const openMs = Date.now() - openedAt;
-    assert.equal(await page.frameLocator('#yanDshReviewFrame').locator('.dsh-cr-row').count(), 0);
+    assert.equal(await page.frameLocator('#zDshReviewFrame').locator('.dsh-cr-row').count(), 0);
     assert.deepEqual(await application.evaluate(() => globalThis.reviewCalls), { history: 0, writes: 1 });
     assert.ok(openMs < 5000, `cached manifest took ${openMs}ms`);
 
@@ -65,7 +65,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-lifecycle-'));
     await page.evaluate(() => closeRightSidebarTool('review'));
     await application.evaluate(() => globalThis.releaseReview({ files: [{ path: 'stale.js', additions: 1, deletions: 0, status: 'created' }] }));
     await page.waitForTimeout(150);
-    assert.equal(await page.evaluate(() => document.querySelector('#yanDshReviewPanel').classList.contains('hidden')), true);
+    assert.equal(await page.evaluate(() => document.querySelector('#zDshReviewPanel').classList.contains('hidden')), true);
     assert.equal((await application.evaluate(() => globalThis.reviewCalls)).writes, 1);
 
     // Refreshing while a file loads permits the new request for the same path;
@@ -73,18 +73,18 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-lifecycle-'));
     await page.evaluate(async () => {
       const summary = { files: [{ path: 'same.js', additions: 1, deletions: 0, status: 'created' }] };
       globalThis.lifecycleSummary = summary;
-      await YanDshReview.open({ summary, lazy: true, selectedPath: 'same.js', loadFile: () => new Promise(resolve => { globalThis.releaseOldFile = resolve; }) });
+      await ZDshReview.open({ summary, lazy: true, selectedPath: 'same.js', loadFile: () => new Promise(resolve => { globalThis.releaseOldFile = resolve; }) });
     });
     await page.waitForFunction(() => typeof globalThis.releaseOldFile === 'function');
     await page.evaluate(async () => {
-      await YanDshReview.open({ summary: globalThis.lifecycleSummary, lazy: true, selectedPath: 'same.js',
+      await ZDshReview.open({ summary: globalThis.lifecycleSummary, lazy: true, selectedPath: 'same.js',
         loadFile: async () => ({ path: 'same.js', status: 'created', diff: { rows: [{ type: 'add', newLine: 1, text: 'NEW_GENERATION' }] } }) });
     });
-    await page.frameLocator('#yanDshReviewFrame').getByText('NEW_GENERATION', { exact: true }).waitFor({ state: 'attached' });
+    await page.frameLocator('#zDshReviewFrame').getByText('NEW_GENERATION', { exact: true }).waitFor({ state: 'attached' });
     await page.evaluate(() => globalThis.releaseOldFile({ path: 'same.js', status: 'created', diff: { rows: [{ type: 'add', newLine: 1, text: 'OLD_GENERATION' }] } }));
     await page.waitForTimeout(100);
-    assert.equal(await page.frameLocator('#yanDshReviewFrame').getByText('OLD_GENERATION', { exact: true }).count(), 0);
-    assert.equal(await page.frameLocator('#yanDshReviewFrame').getByText('NEW_GENERATION', { exact: true }).count(), 1);
+    assert.equal(await page.frameLocator('#zDshReviewFrame').getByText('OLD_GENERATION', { exact: true }).count(), 0);
+    assert.equal(await page.frameLocator('#zDshReviewFrame').getByText('NEW_GENERATION', { exact: true }).count(), 1);
     // Real embedded file tree: nested disclosure controls must not load rows.
     await page.evaluate(async () => {
       globalThis.treeLoads = 0;
@@ -93,44 +93,44 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-lifecycle-'));
         lazy: true,
         loadFile: async path => { treeLoads++; return { path, status: 'created', diff: { rows: [{ type: 'add', newLine: 1, text: 'TREE_CONTENT' }] } }; }
       };
-      await YanDshReview.open(treeOptions);
+      await ZDshReview.open(treeOptions);
     });
-    await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame')?.contentDocument?.querySelectorAll('.yan-review-folder').length === 3);
-    await page.evaluate(() => document.querySelector('#yanDshReviewFrame').contentDocument.querySelector('details[data-folder="src"] > summary').click());
-    await page.waitForFunction(() => !document.querySelector('#yanDshReviewFrame').contentDocument.querySelector('details[data-folder="src"]').open);
+    await page.waitForFunction(() => document.querySelector('#zDshReviewFrame')?.contentDocument?.querySelectorAll('.z-review-folder').length === 3);
+    await page.evaluate(() => document.querySelector('#zDshReviewFrame').contentDocument.querySelector('details[data-folder="src"] > summary').click());
+    await page.waitForFunction(() => !document.querySelector('#zDshReviewFrame').contentDocument.querySelector('details[data-folder="src"]').open);
     await page.waitForTimeout(50);
-    await page.evaluate(() => YanDshReview.open(treeOptions));
-    await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame').contentDocument.querySelector('details[data-folder="src"]')?.open === false);
+    await page.evaluate(() => ZDshReview.open(treeOptions));
+    await page.waitForFunction(() => document.querySelector('#zDshReviewFrame').contentDocument.querySelector('details[data-folder="src"]')?.open === false);
     assert.equal(await page.evaluate(() => treeLoads), 0);
     await page.evaluate(() => {
-      const doc = document.querySelector('#yanDshReviewFrame').contentDocument;
+      const doc = document.querySelector('#zDshReviewFrame').contentDocument;
       doc.querySelector('details[data-folder="src"] > summary').click();
       doc.querySelector('.navitem[href="#file-0"]').click();
     });
-    await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame').contentDocument.querySelector('#file-0')?.dataset.yanState === 'loaded');
+    await page.waitForFunction(() => document.querySelector('#zDshReviewFrame').contentDocument.querySelector('#file-0')?.dataset.zState === 'loaded');
     assert.equal(await page.evaluate(() => treeLoads), 1);
     // Huge single lines are rejected before highlighter work. Large row sets
     // receive a clearly marked preview, not an unbounded DOM insertion.
     await page.evaluate(async () => {
-      await YanDshReview.open({ summary: { files: [{ path: 'huge.js', status: 'created' }] }, lazy: true, selectedPath: 'huge.js',
+      await ZDshReview.open({ summary: { files: [{ path: 'huge.js', status: 'created' }] }, lazy: true, selectedPath: 'huge.js',
         loadFile: async () => ({ path: 'huge.js', diff: { rows: [{ type: 'add', newLine: 1, text: 'x'.repeat(1000000) }] } }) });
     });
-    await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame').contentDocument.querySelector('#file-0')?.dataset.yanState === 'error');
-    assert.equal(await page.frameLocator('#yanDshReviewFrame').locator('.dsh-cr-row').count(), 0);
+    await page.waitForFunction(() => document.querySelector('#zDshReviewFrame').contentDocument.querySelector('#file-0')?.dataset.zState === 'error');
+    assert.equal(await page.frameLocator('#zDshReviewFrame').locator('.dsh-cr-row').count(), 0);
     await page.evaluate(async () => {
-      await YanDshReview.open({ summary: { files: [{ path: 'many.js', status: 'created' }] }, lazy: true, selectedPath: 'many.js',
+      await ZDshReview.open({ summary: { files: [{ path: 'many.js', status: 'created' }] }, lazy: true, selectedPath: 'many.js',
         loadFile: async () => ({ path: 'many.js', diff: { rows: Array.from({ length: 3000 }, (_, i) => ({ type: 'add', newLine: i + 1, text: 'const n = 1;' })) } }) });
     });
-    await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame').contentDocument.querySelector('#file-0')?.dataset.yanState === 'loaded');
-    const previewRows = await page.frameLocator('#yanDshReviewFrame').locator('.dsh-cr-row').count();
+    await page.waitForFunction(() => document.querySelector('#zDshReviewFrame').contentDocument.querySelector('#file-0')?.dataset.zState === 'loaded');
+    const previewRows = await page.frameLocator('#zDshReviewFrame').locator('.dsh-cr-row').count();
     assert.ok(previewRows > 0 && previewRows <= 1200);
-    assert.equal(await page.frameLocator('#yanDshReviewFrame').locator('[data-copy-file]').isDisabled(), true);
+    assert.equal(await page.frameLocator('#zDshReviewFrame').locator('[data-copy-file]').isDisabled(), true);
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ ok: true, openMs, files: 400, duplicateOpens: 20, manifestHistoryReads: 0, staleCompletionsIgnored: true }));
   } finally {
     await application?.close();
     assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(root).startsWith('yan-review-lifecycle-'));
+    assert.ok(path.basename(root).startsWith('z-review-lifecycle-'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

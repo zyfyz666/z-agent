@@ -38,7 +38,7 @@ test('reuses the most recently updated task in the target workspace', () => {
   assert.equal(findLatestWorkspaceSession(sessions, path.resolve('workspace-missing')), null);
 });
 
-test('Yan Session MCP advertises the handoff and bounded source tools', () => {
+test('Z Session MCP advertises the handoff and bounded source tools', () => {
   const input = [
     JSON.stringify({
       jsonrpc: '2.0',
@@ -49,7 +49,7 @@ test('Yan Session MCP advertises the handoff and bounded source tools', () => {
     JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
     ''
   ].join('\n');
-  const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'lib', 'yan-session-mcp.js')], {
+  const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'lib', 'z-session-mcp.js')], {
     input,
     encoding: 'utf8',
     timeout: 10_000
@@ -57,7 +57,7 @@ test('Yan Session MCP advertises the handoff and bounded source tools', () => {
 
   assert.equal(result.status, 0, result.stderr);
   const responses = result.stdout.trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(responses[0].result.serverInfo.name, 'Yan Session');
+  assert.equal(responses[0].result.serverInfo.name, 'Z Session');
   assert.deepEqual(responses[1].result.tools.map(tool => tool.name), [
     'create_handoff',
     'read_source_context'
@@ -65,10 +65,10 @@ test('Yan Session MCP advertises the handoff and bounded source tools', () => {
   assert.deepEqual(responses[1].result.tools[0].inputSchema.required, ['target_path', 'reason']);
 });
 
-test('Yan Session tools stay callable with or without a user workspace', () => {
+test('Z Session tools stay callable with or without a user workspace', () => {
   const server = {
-    id: 'yan_session',
-    runtime: 'yan-session',
+    id: 'z_session',
+    runtime: 'z-session',
     enabled: true,
     command: process.execPath
   };
@@ -79,7 +79,7 @@ test('Yan Session tools stay callable with or without a user workspace', () => {
       mcpServers: [server]
     });
     assert.ok(rules.some(rule => (
-      rule.permission === 'yan_session_*'
+      rule.permission === 'z_session_*'
       && rule.pattern === '*'
       && rule.action === 'allow'
     )));

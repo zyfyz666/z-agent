@@ -6,7 +6,7 @@ const { parsePlanMarker, formatPlanMarker, validatePlanGraph } = require('../lib
 
 test('parsePlanMarker reads the marker line and ignores surrounding prompt text', () => {
   const prompt = [
-    ' yan-plan: {"id":"auth","dependsOn":["db","schema"],"acceptance":"node test/auth.test.js passes"} ',
+    ' z-plan: {"id":"auth","dependsOn":["db","schema"],"acceptance":"node test/auth.test.js passes"} ',
     'Implement the auth module in src/auth.js.',
     'Do not touch src/db.js.'
   ].join('\n');
@@ -20,14 +20,14 @@ test('parsePlanMarker reads the marker line and ignores surrounding prompt text'
 test('parsePlanMarker returns null for missing, malformed, or id-less markers', () => {
   assert.equal(parsePlanMarker('no marker here'), null);
   assert.equal(parsePlanMarker(''), null);
-  assert.equal(parsePlanMarker('yan-plan: {not json}'), null);
-  assert.equal(parsePlanMarker('yan-plan: ["array"]'), null);
-  assert.equal(parsePlanMarker('yan-plan: {"dependsOn":["db"]}'), null);
-  assert.equal(parsePlanMarker('yan-plan: {"id":"  "}'), null);
+  assert.equal(parsePlanMarker('z-plan: {not json}'), null);
+  assert.equal(parsePlanMarker('z-plan: ["array"]'), null);
+  assert.equal(parsePlanMarker('z-plan: {"dependsOn":["db"]}'), null);
+  assert.equal(parsePlanMarker('z-plan: {"id":"  "}'), null);
 });
 
 test('parsePlanMarker clamps oversized fields and drops bad dependencies', () => {
-  const plan = parsePlanMarker(`yan-plan: {"id":"${'x'.repeat(100)}","dependsOn":["ok","",123],"acceptance":"${'y'.repeat(500)}"}`);
+  const plan = parsePlanMarker(`z-plan: {"id":"${'x'.repeat(100)}","dependsOn":["ok","",123],"acceptance":"${'y'.repeat(500)}"}`);
   assert.ok(plan.id.length <= 64);
   assert.deepEqual(plan.dependsOn, ['ok']);
   assert.ok(plan.acceptance.length <= 400);
@@ -37,7 +37,7 @@ test('formatPlanMarker round-trips through parsePlanMarker', () => {
   const plan = { id: 'ui', dependsOn: ['api'], acceptance: 'npm test' };
   assert.deepEqual(parsePlanMarker(formatPlanMarker(plan)), plan);
   assert.equal(formatPlanMarker({ id: '' }), '');
-  assert.equal(formatPlanMarker({ id: 'solo' }), 'yan-plan: {"id":"solo"}');
+  assert.equal(formatPlanMarker({ id: 'solo' }), 'z-plan: {"id":"solo"}');
 });
 
 test('validatePlanGraph orders dependencies first and reports cycles and unknowns', () => {

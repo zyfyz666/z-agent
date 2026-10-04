@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-wallpaper-delete-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-wallpaper-delete-e2e-'));
 
 async function launch() {
   return electron.launch({
@@ -16,8 +16,8 @@ async function launch() {
     cwd: appRoot,
     env: {
       ...process.env,
-      YAN_E2E_MODE: '1',
-      YAN_E2E_USER_DATA_DIR: userDataDir
+      Z_E2E_MODE: '1',
+      Z_E2E_USER_DATA_DIR: userDataDir
     }
   });
 }
@@ -29,7 +29,7 @@ async function launch() {
     let page = await application.firstWindow();
     await page.waitForFunction(() => typeof applyWallpaperConfig === 'function');
     await page.evaluate(async () => {
-      const config = await yan.setConfig({ wallpaper: { id: 'sword-and-sakura', removed: [], custom: [] } });
+      const config = await z.setConfig({ wallpaper: { id: 'sword-and-sakura', removed: [], custom: [] } });
       applyWallpaperConfig(config);
     });
     await page.locator('#settingsBtn').click();
@@ -48,7 +48,7 @@ async function launch() {
     await page.locator('#genericConfirmModal:not(.hidden)').waitFor();
     await page.locator('#genericConfirmAccept').click();
     await page.waitForFunction(() => document.querySelector('[data-wallpaper-id="sword-and-sakura"]')?.hidden === true);
-    const afterDelete = await page.evaluate(() => yan.getConfig());
+    const afterDelete = await page.evaluate(() => z.getConfig());
     assert.equal(afterDelete.wallpaper.id, '');
     assert.ok(afterDelete.wallpaper.removed.includes('sword-and-sakura'));
 

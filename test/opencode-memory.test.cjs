@@ -17,7 +17,7 @@ function completedPayload() {
     providerId: 'deepseek',
     modelId: 'deepseek-v4-flash',
     workspace: 'C:\\workspace',
-    sessionId: 'yan-session',
+    sessionId: 'z-session',
     runId: 'run-memory',
     prompt: 'Use the project build command and fix the compile error.',
     history: [{ role: 'user', content: 'Keep the final response concise.' }],
@@ -40,9 +40,9 @@ test('injects retrieved memory into the current turn while keeping the system pr
   };
   const system = combineSystem(request);
   const turn = combineTurnPrompt(request, 'Fix the build.', false);
-  assert.doesNotMatch(system, /yan-long-term-memory/);
+  assert.doesNotMatch(system, /z-long-term-memory/);
   assert.doesNotMatch(system, /npm run verify/);
-  assert.match(turn, /yan-long-term-memory/);
+  assert.match(turn, /z-long-term-memory/);
   assert.match(turn, /npm run verify/);
   assert.match(turn, /not fresh tool evidence/i);
   assert.match(turn, /reverify paths/i);
@@ -59,7 +59,7 @@ test('dynamic run context never changes the cacheable system prefix', () => {
   const first = {
     ...stable,
     runId: 'run-a',
-    yanSessionId: 'session-a',
+    zSessionId: 'session-a',
     workspace: 'C:\\workspace-a',
     workMode: 'normal',
     memoryContext: 'memory-a',
@@ -70,7 +70,7 @@ test('dynamic run context never changes the cacheable system prefix', () => {
   const second = {
     ...stable,
     runId: 'run-b',
-    yanSessionId: 'session-b',
+    zSessionId: 'session-b',
     workspace: 'C:\\workspace-b',
     workMode: 'goal',
     memoryContext: 'memory-b',
@@ -93,11 +93,11 @@ test('GLMM measurement and repo updates preserve the prefix and refresh only the
     const request = { ...stable, measuredInputTokensPerSecond: speed, repoMap: `snapshot-${speed}` };
     assert.equal(combineSystem(request), system);
     const turn = combineTurnPrompt(request, 'Continue.');
-    assert.match(turn, new RegExp(`<yan-repo-map>\\nsnapshot-${speed}\\n</yan-repo-map>`));
+    assert.match(turn, new RegExp(`<z-repo-map>\\nsnapshot-${speed}\\n</z-repo-map>`));
     if (speed) assert.match(turn, /Recent effective input throughput/);
     else assert.doesNotMatch(turn, /Recent effective input throughput/);
   }
-  assert.match(system, /current yan-turn-context; older turns are historical/);
+  assert.match(system, /current z-turn-context; older turns are historical/);
   assert.match(system, /no measurement, use input_tokens_per_second=10000/);
 });
 
@@ -236,7 +236,7 @@ test('normalization keeps a valid workspace work state and drops empty ones', ()
 
 test('memory reviewer uses an isolated no-tool session and deletes it after structured output', async t => {
   const calls = { create: null, prompt: null, deleted: null };
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-memory-reviewer-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-memory-reviewer-'));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const sidecar = new OpenCodeSidecar({ appRoot: process.cwd(), dataDir });
   sidecar.client = {
@@ -284,7 +284,7 @@ test('memory reviewer uses an isolated no-tool session and deletes it after stru
 
 test('memory review failure is non-fatal and still cleans up the isolated session', async t => {
   let deleted = false;
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-memory-reviewer-failed-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-memory-reviewer-failed-'));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const sidecar = new OpenCodeSidecar({
     appRoot: process.cwd(),

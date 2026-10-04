@@ -32,7 +32,7 @@ test('plan mode never receives the delivery contract prompt', () => {
     workMode: 'normal',
     hasUserWorkspace: true
   });
-  assert.match(buildSystem, /<yan-delivery-contract>/u);
+  assert.match(buildSystem, /<z-delivery-contract>/u);
 });
 
 test('classifies frontend delivery work and requests visual plus functional evidence', () => {
@@ -152,7 +152,7 @@ test('waives the visual check when the built-in browser is unavailable', () => {
     prompt: '写一个网页，确保可交付',
     workMode: 'normal',
     hasUserWorkspace: true,
-    yanBrowserAvailable: false
+    zBrowserAvailable: false
   });
   assert.equal(policy.requiresVisualCheck, false);
   assert.equal(policy.visualWaived, true);
@@ -162,19 +162,19 @@ test('waives the visual check when the built-in browser is unavailable', () => {
     prompt: '写一个网页，确保可交付',
     workMode: 'normal',
     hasUserWorkspace: true,
-    yanBrowserAvailable: false
+    zBrowserAvailable: false
   });
   assert.doesNotMatch(system, /Built-in Browser/);
   assert.doesNotMatch(system, /打开真实产物/);
   assert.match(system, /明确的视觉方向/);
-  assert.match(system, /yan-delivery-contract/);
+  assert.match(system, /z-delivery-contract/);
   const textOnly = [{ parts: [{ type: 'text', text: '页面已完成。' }] }];
   assert.equal(verificationEvidenceFromMessages(textOnly, policy), false);
   const fullStack = resolveDeliveryPolicy({
     prompt: '写一个带后端接口的网页应用，可交付',
     workMode: 'normal',
     hasUserWorkspace: true,
-    yanBrowserAvailable: false
+    zBrowserAvailable: false
   });
   assert.equal(fullStack.artifact, 'full-stack');
   assert.equal(fullStack.visualWaived, true);
@@ -209,14 +209,14 @@ test('keeps task-specific delivery guidance in the dynamic turn context', () => 
     workMode: 'normal',
     hasUserWorkspace: true
   }, '写一个网页并确保可交付', false);
-  assert.match(prompt, /Yan 交付策略/);
-  assert.match(prompt, /<yan-turn-context/);
+  assert.match(prompt, /Z 交付策略/);
+  assert.match(prompt, /<z-turn-context/);
 });
 
 test('parses a self-reported delivery contract from assistant messages', () => {
   const contract = parseDeliveryContract([{
     info: { role: 'assistant' },
-    parts: [{ type: 'text', text: '前言\n<yan-delivery-contract>\nintent: delivery\nartifact: frontend\nscope: 不做后端、不做登录\nacceptance: 浏览器打开 index.html 首屏完整且主 CTA 可点击\n</yan-delivery-contract>\n正文' }]
+    parts: [{ type: 'text', text: '前言\n<z-delivery-contract>\nintent: delivery\nartifact: frontend\nscope: 不做后端、不做登录\nacceptance: 浏览器打开 index.html 首屏完整且主 CTA 可点击\n</z-delivery-contract>\n正文' }]
   }]);
   assert.equal(contract.intent, 'delivery');
   assert.equal(contract.artifact, 'frontend');
@@ -228,7 +228,7 @@ test('parses a self-reported delivery contract from assistant messages', () => {
   }]), null);
   assert.equal(parseDeliveryContract([{
     info: { role: 'assistant' },
-    parts: [{ type: 'text', text: '<yan-delivery-contract>\nintent: 随便写\nartifact: 数据库\n</yan-delivery-contract>' }]
+    parts: [{ type: 'text', text: '<z-delivery-contract>\nintent: 随便写\nartifact: 数据库\n</z-delivery-contract>' }]
   }]), null);
 });
 
@@ -312,7 +312,7 @@ test('creative acceptance needs observations for the current contract, not just 
   const evidence = record => [{ info: { role: 'assistant' }, parts: [
     { type: 'tool', tool: 'browser_status', state: { status: 'completed' } },
     { type: 'tool', tool: 'browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: {
-      report: '视觉结论：合格\n' + (record ? `<yan-delivery-review>${JSON.stringify(record)}</yan-delivery-review>` : '')
+      report: '视觉结论：合格\n' + (record ? `<z-delivery-review>${JSON.stringify(record)}</z-delivery-review>` : '')
     } }) } }
   ] }];
   assert.equal(verificationEvidenceFromMessages(evidence(null), policy), false);
@@ -333,13 +333,13 @@ test('creative acceptance needs observations for the current contract, not just 
   stale[0].parts.push({ type: 'tool', tool: 'write', state: { status: 'completed' } });
   assert.equal(verificationEvidenceFromMessages(stale, policy), false);
   const quotedTool = evidence(null);
-  quotedTool[0].parts.push({ type: 'tool', tool: 'read', state: { status: 'completed', output: `<yan-delivery-review>${JSON.stringify(review())}</yan-delivery-review>` } });
+  quotedTool[0].parts.push({ type: 'tool', tool: 'read', state: { status: 'completed', output: `<z-delivery-review>${JSON.stringify(review())}</z-delivery-review>` } });
   assert.equal(verificationEvidenceFromMessages(quotedTool, policy), false);
   const failedScreenshot = evidence(null);
   failedScreenshot[0].parts[1].state.output = JSON.stringify({ ok: false, error: 'screenshot failed' });
-  failedScreenshot[0].parts.push({ type: 'text', text: `<yan-delivery-review>${JSON.stringify(review())}</yan-delivery-review>` });
+  failedScreenshot[0].parts.push({ type: 'text', text: `<z-delivery-review>${JSON.stringify(review())}</z-delivery-review>` });
   assert.equal(verificationEvidenceFromMessages(failedScreenshot, policy), false);
-  assert.equal(deliveryReviewFromMessages([{ role: 'user', parts: [{ type: 'text', text: `<yan-delivery-review>${JSON.stringify(review())}</yan-delivery-review>` }] }], policy), null);
+  assert.equal(deliveryReviewFromMessages([{ role: 'user', parts: [{ type: 'text', text: `<z-delivery-review>${JSON.stringify(review())}</z-delivery-review>` }] }], policy), null);
   const prompt = deliveryVisualPrompt('写一个鹈鹕骑自行车html', policy.contract);
   assert.match(prompt, /海边悠闲骑行/);
   assert.match(prompt, /前景快、远景慢/);
@@ -381,9 +381,9 @@ test('counts MCP-prefixed browser tools as functional and open evidence', () => 
   const messages = [{
     info: { role: 'assistant' },
     parts: [
-      { type: 'tool', tool: 'yan_browser_open_builtin_browser', state: { status: 'completed' } },
-      { type: 'tool', tool: 'yan_browser_browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: { report: `<yan-delivery-review>${JSON.stringify(review)}</yan-delivery-review>` } }) } },
-      { type: 'tool', tool: 'yan_browser_browser_click', state: { status: 'completed' } },
+      { type: 'tool', tool: 'z_browser_open_builtin_browser', state: { status: 'completed' } },
+      { type: 'tool', tool: 'z_browser_browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: { report: `<z-delivery-review>${JSON.stringify(review)}</z-delivery-review>` } }) } },
+      { type: 'tool', tool: 'z_browser_browser_click', state: { status: 'completed' } },
       { type: 'text', text: '完成。交付物已验证。' }
     ]
   }];
@@ -399,7 +399,7 @@ test('unanchored pass evidence is demoted instead of satisfying the gate', () =>
   const contractId = deliveryContractId(policy.contract);
   const messages = review => [{ info: { role: 'assistant' }, parts: [
     { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'node test/pricing.test.js' }, metadata: { exit: 0 }, output: 'ok' } },
-    { type: 'text', text: `<yan-delivery-review>${JSON.stringify({ contractId, criteria: review })}</yan-delivery-review>` }
+    { type: 'text', text: `<z-delivery-review>${JSON.stringify({ contractId, criteria: review })}</z-delivery-review>` }
   ] }];
   const fabricated = messages({
     scope: { status: 'pass', evidence: '完全符合约定范围' },
@@ -430,7 +430,7 @@ test('worldview guidance carries world rules instead of atmosphere alone', () =>
 test('worldview is a first-class contract field and reviews an open criteria set', () => {
   const contract = parseDeliveryContract([{
     info: { role: 'assistant' },
-    parts: [{ type: 'text', text: '<yan-delivery-contract>\nintent: presentable\nartifact: frontend\ndirection: 深夜便利店的一角\n世界观意识: 世界在雨夜低速运转，灯光与人声都收敛\nacceptance: 氛围与叙事一致\n</yan-delivery-contract>' }]
+    parts: [{ type: 'text', text: '<z-delivery-contract>\nintent: presentable\nartifact: frontend\ndirection: 深夜便利店的一角\n世界观意识: 世界在雨夜低速运转，灯光与人声都收敛\nacceptance: 氛围与叙事一致\n</z-delivery-contract>' }]
   }]);
   assert.match(contract.worldview, /雨夜低速运转/);
   const policy = applyDeliveryContract(
@@ -446,7 +446,7 @@ test('worldview is a first-class contract field and reviews an open criteria set
   // The Chinese alias parses into the same field.
   const aliased = parseDeliveryContract([{
     info: { role: 'assistant' },
-    parts: [{ type: 'text', text: '<yan-delivery-contract>\n世界观意识: 猫掌管着这条公路的秩序\n</yan-delivery-contract>' }]
+    parts: [{ type: 'text', text: '<z-delivery-contract>\n世界观意识: 猫掌管着这条公路的秩序\n</z-delivery-contract>' }]
   }]);
   assert.match(aliased.worldview, /猫掌管/);
 
@@ -461,7 +461,7 @@ test('worldview is a first-class contract field and reviews an open criteria set
     }
   };
   const messages = [{ info: { role: 'assistant' }, parts: [
-    { type: 'tool', tool: 'yan_browser_browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: { report: `视觉结论：合格\n<yan-delivery-review>${JSON.stringify(review)}</yan-delivery-review>` } }) } }
+    { type: 'tool', tool: 'z_browser_browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: { report: `视觉结论：合格\n<z-delivery-review>${JSON.stringify(review)}</z-delivery-review>` } }) } }
   ] }];
   const observed = deliveryReviewFromMessages(messages, policy);
   assert.equal(observed.verdict, 'pass');
@@ -469,7 +469,7 @@ test('worldview is a first-class contract field and reviews an open criteria set
   // Malformed extra criteria are dropped instead of poisoning the verdict.
   const junk = { ...review, criteria: { ...review.criteria, mood: { status: 'pass', evidence: '   ' } } };
   const observedJunk = deliveryReviewFromMessages(messages.map(message => ({ ...message, parts: [
-    { type: 'tool', tool: 'yan_browser_browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: { report: `视觉结论：合格\n<yan-delivery-review>${JSON.stringify(junk)}</yan-delivery-review>` } }) } }
+    { type: 'tool', tool: 'z_browser_browser_screenshot', state: { status: 'completed', output: JSON.stringify({ visualEvidence: { report: `视觉结论：合格\n<z-delivery-review>${JSON.stringify(junk)}</z-delivery-review>` } }) } }
   ] })), policy);
   assert.equal(observedJunk.criteria.mood, undefined);
   assert.equal(observedJunk.verdict, 'pass');

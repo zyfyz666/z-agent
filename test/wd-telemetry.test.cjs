@@ -128,7 +128,7 @@ test('unavailable observer connection preserves normal rule monitoring', async t
 test('disabled WD reports disabled from startup through the saved result', async t => {
   const f = fixture(t, { enabled: false });
   const result = await f.run();
-  const statuses = f.events.filter(event => event.type === 'yan.thrash.watchdog.status');
+  const statuses = f.events.filter(event => event.type === 'z.thrash.watchdog.status');
   assert.equal(statuses.length, 1);
   assert.equal(statuses[0].data.enabled, false);
   assert.equal(statuses[0].data.phase, 'disabled');
@@ -169,7 +169,7 @@ test('custom rule intervals honor the initial six-action warmup then the selecte
 test('repeated busy polls neither increment counters nor emit unchanged snapshots', async t => {
   const f = fixture(t);
   const result = await f.run();
-  const statuses = f.events.filter(event => event.type === 'yan.thrash.watchdog.status');
+  const statuses = f.events.filter(event => event.type === 'z.thrash.watchdog.status');
   assert.deepEqual(statuses.map(event => event.data.phase), ['waiting', 'observing', 'completed']);
   assert.equal(result.status, 'done');
   assert.equal(result.watchdog.observedSteps, 6);
@@ -194,8 +194,8 @@ test('existing history counts as session actions and final-only tools are counte
 test('decisions retain the compatible event and update delivery only after confirmation', async t => {
   const f = fixture(t, { repetitive: true });
   const result = await f.run();
-  const statuses = f.events.filter(event => event.type === 'yan.thrash.watchdog.status');
-  const decision = f.events.find(event => event.type === 'yan.thrash.watchdog');
+  const statuses = f.events.filter(event => event.type === 'z.thrash.watchdog.status');
+  const decision = f.events.find(event => event.type === 'z.thrash.watchdog');
   assert.equal(decision.data.sessionID, 'session-wd');
   assert.equal(decision.data.delivery, 'pending');
   assert.equal(decision.data.step, 6);
@@ -233,14 +233,14 @@ test('an unconfirmed delivery is still pending when the run finishes', async t =
   assert.equal(result.watchdog.events[0].delivery, 'pending');
   confirm({ ok: true, delivered: true });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(f.events.filter(event => event.type === 'yan.thrash.watchdog.status').at(-1).data.events[0].delivery, 'delivered');
+  assert.equal(f.events.filter(event => event.type === 'z.thrash.watchdog.status').at(-1).data.events[0].delivery, 'delivered');
   assert.equal(result.watchdog.events[0].delivery, 'pending', 'returned snapshots are detached point-in-time values');
 });
 
 test('closed status consumers cannot block the run or watchdog reminder', async t => {
   const f = fixture(t, { repetitive: true, polls: 1 });
   const result = await f.run(event => {
-    if (event.type.startsWith('yan.thrash.watchdog')) throw new Error('renderer closed');
+    if (event.type.startsWith('z.thrash.watchdog')) throw new Error('renderer closed');
   });
   assert.equal(result.status, 'done');
   assert.equal(result.watchdog.events[0].delivery, 'delivered');
@@ -264,7 +264,7 @@ test('startup error and cancellation preserve truthful terminal snapshots', asyn
       await assert.rejects(f.run(), error => error.message === 'startup stopped' && error.watchdog.phase === 'error');
     }
     assert.equal(f.calls.prompts, 0);
-    const latest = f.events.filter(event => event.type === 'yan.thrash.watchdog.status').at(-1).data;
+    const latest = f.events.filter(event => event.type === 'z.thrash.watchdog.status').at(-1).data;
     assert.equal(latest.outcome, interrupted ? 'interrupted' : 'error');
   });
 });

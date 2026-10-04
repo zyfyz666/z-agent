@@ -107,7 +107,7 @@ const server = http.createServer((request, response) => {
       }
       assert.ok(userText.includes(markers.firstGuide) && userText.includes(markers.secondGuide), 'the next model step receives guidance within the same run');
       const firstDeliveries = messages.filter(message => message.role === 'user'
-        && JSON.stringify(message.content).includes('YAN LIVE USER INTERJECTION')
+        && JSON.stringify(message.content).includes('Z LIVE USER INTERJECTION')
         && JSON.stringify(message.content).includes(markers.firstGuide));
       assert.equal(firstDeliveries.reduce((count, message) => count + JSON.stringify(message.content).split(markers.firstGuide).length - 1, 0),
         1, 'a repeated requestId inserts only one native guidance message');
@@ -122,7 +122,7 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile, YAN_E2E_PARENT_PID: String(process.pid),
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile, Z_E2E_PARENT_PID: String(process.pid),
     OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
@@ -137,7 +137,7 @@ async function launch() {
   page.on('pageerror', error => report.pageErrors.push(error.message));
   await page.waitForFunction(() => typeof quickInputHandlerReady !== 'undefined' && quickInputHandlerReady && state.currentSession && state.config);
   assert.equal(path.resolve(await application.evaluate(({ app }) => app.getPath('userData'))), path.resolve(profile));
-  assert.equal(await page.evaluate(() => typeof yan.openCodeSteerRun), 'function');
+  assert.equal(await page.evaluate(() => typeof z.openCodeSteerRun), 'function');
 }
 
 async function composerSend(text, enter = false) {
@@ -154,7 +154,7 @@ async function waitRunning(sessionId) {
 }
 async function waitSettled(sessionId) {
   await page.waitForFunction(id => !state.activeRuns.has(id), sessionId, { timeout: 75_000 });
-  return page.evaluate(id => yan.getSession(id), sessionId);
+  return page.evaluate(id => z.getSession(id), sessionId);
 }
 async function waitGuidance(text, status = 'queued') {
   await page.waitForFunction(({ marker, status }) => state.currentSession.messages?.some(message => message.content === marker
@@ -187,17 +187,17 @@ function assertPaused(session, expectedKernelId) {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     await launch();
     const sessions = await page.evaluate(async port => {
-      const connection = await yan.connectionsSave({ name: 'Live steering fixture', preset: 'openai', apiFormat: 'openai',
+      const connection = await z.connectionsSave({ name: 'Live steering fixture', preset: 'openai', apiFormat: 'openai',
         manualModelId: 'live-steering-fixture', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'local-fixture-only' });
       if (!connection.ok) throw new Error(connection.error);
-      await yan.setConfig({ agent: { accessMode: 'full', workMode: 'normal' }, permissions: { allowFileRead: true, allowFileWrite: true, allowNetwork: false } });
-      state.config = await yan.getConfig();
+      await z.setConfig({ agent: { accessMode: 'full', workMode: 'normal' }, permissions: { allowFileRead: true, allowFileWrite: true, allowNetwork: false } });
+      state.config = await z.getConfig();
       const result = [];
       for (const title of ['Steering conversation A', 'Isolated conversation B']) {
-        const session = await yan.createSession(true);
+        const session = await z.createSession(true);
         session.title = title;
         session.messages = [{ role: 'user', content: `Keep ${title}`, ts: Date.now() }];
-        await yan.saveSession(session);
+        await z.saveSession(session);
         result.push(session);
       }
       await refreshSessions(); renderSessionList();
@@ -218,15 +218,15 @@ function assertPaused(session, expectedKernelId) {
     assert.equal(await page.evaluate(id => state.queuedTurns.has(id), sessionA.id), false, 'Enter immediately steers instead of queueing');
     assert.equal(await page.evaluate(id => state.activeRuns.get(id)?.runCtx?.runId, sessionA.id), initialRun.runId);
     assert.ok(pendingStreams.has('steer'), 'guidance is acknowledged before the current model call finishes');
-    const duplicate = await page.evaluate(payload => yan.openCodeSteerRun(payload), {
-      runId: initialRun.runId, yanSessionId: sessionA.id, requestId: firstGuide.liveGuidance.requestId, text: markers.firstGuide
+    const duplicate = await page.evaluate(payload => z.openCodeSteerRun(payload), {
+      runId: initialRun.runId, zSessionId: sessionA.id, requestId: firstGuide.liveGuidance.requestId, text: markers.firstGuide
     });
     assert.equal(duplicate.ok, true, duplicate.error);
     assert.equal(duplicate.accepted, true);
     assert.equal(duplicate.delivered, false);
     assert.equal(await page.locator('.msg-live-guidance').last().textContent(), '等待引导');
-    const wrongSession = await page.evaluate(payload => yan.openCodeSteerRun(payload), {
-      runId: initialRun.runId, yanSessionId: sessionB.id, requestId: 'wrong-session-4197', text: 'MUST_NOT_REACH_OTHER_SESSION_4197'
+    const wrongSession = await page.evaluate(payload => z.openCodeSteerRun(payload), {
+      runId: initialRun.runId, zSessionId: sessionB.id, requestId: 'wrong-session-4197', text: 'MUST_NOT_REACH_OTHER_SESSION_4197'
     });
     assert.equal(wrongSession.ok, false, 'another conversation cannot steer this run');
     await composerSend(markers.secondGuide);
@@ -242,7 +242,7 @@ function assertPaused(session, expectedKernelId) {
     assert.ok(guidedRequestSeen, 'a subsequent real kernel model step received both guidance messages');
     assert.equal(guided.openCodeSessionId, initialRun.kernelSessionId);
     assert.ok(guided.messages.some(message => message.role === 'assistant' && message.content.includes(markers.guided)));
-    const savedB = await page.evaluate(id => yan.getSession(id), sessionB.id);
+    const savedB = await page.evaluate(id => z.getSession(id), sessionB.id);
     assert.equal(savedB.messages.length, 1, 'conversation B remains untouched');
     report.checks.push('Enter and Send insert guidance into the active kernel run; duplicate IDs and wrong sessions are guarded');
     console.log('live steering and isolation passed');
@@ -274,7 +274,7 @@ function assertPaused(session, expectedKernelId) {
     await page.reload();
     await page.waitForFunction(() => typeof state !== 'undefined' && state.currentSession && state.config);
     await page.evaluate(id => loadSession(id), sessionA.id);
-    assertPaused(await page.evaluate(id => yan.getSession(id), sessionA.id), initialRun.kernelSessionId);
+    assertPaused(await page.evaluate(id => z.getSession(id), sessionA.id), initialRun.kernelSessionId);
     await page.waitForFunction(marker => document.body.textContent.includes(marker), markers.partial);
     report.checks.push('separate Stop preserves a nonempty unsent draft; original/guidance messages, partial text and native tool trace survive switching and reload');
     console.log('manual pause and reload persistence passed');
@@ -282,7 +282,7 @@ function assertPaused(session, expectedKernelId) {
     await application.close(); application = null; page = null;
     await launch();
     await page.evaluate(id => loadSession(id), sessionA.id);
-    assertPaused(await page.evaluate(id => yan.getSession(id), sessionA.id), initialRun.kernelSessionId);
+    assertPaused(await page.evaluate(id => z.getSession(id), sessionA.id), initialRun.kernelSessionId);
     await page.waitForFunction(marker => document.body.textContent.includes(marker), markers.partial);
     await composerSend(`${markers.resume}: Continue this same task using its previous context and read ${fixtureFile} once more.`);
     const resumedRun = await waitRunning(sessionA.id);
@@ -315,7 +315,7 @@ function assertPaused(session, expectedKernelId) {
     throw error;
   } finally {
     if (page && !page.isClosed()) await page.evaluate(async () => {
-      for (const run of await yan.openCodeSyncActiveRuns()) if (run.running) await yan.openCodeCancelRun(run.runId).catch(() => {});
+      for (const run of await z.openCodeSyncActiveRuns()) if (run.running) await z.openCodeCancelRun(run.runId).catch(() => {});
     }).catch(() => {});
     for (const response of pendingStreams.values()) response.destroy();
     await application?.close().catch(() => {});

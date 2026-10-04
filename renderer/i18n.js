@@ -1,6 +1,6 @@
 /* Z UI localization. The source language remains Chinese so existing
  * sessions and user-authored content are never rewritten in storage. */
-(function installYanI18n(global) {
+(function installZI18n(global) {
   const ZH_EN = Object.freeze({
     '最近': 'Recent', '按最近更新时间排列': 'Sorted by last updated', '显示更多': 'Show more',
     '重命名': 'Rename', '操作失败，请重试': 'Action failed. Try again.', '对话名称保存失败': 'Could not save conversation name',
@@ -563,7 +563,7 @@
     return language;
   }
 
-  global.YanI18n = Object.freeze({ apply, normalize, translate, dictionary: ZH_EN });
+  global.ZI18n = Object.freeze({ apply, normalize, translate, dictionary: ZH_EN });
   const initialLanguage = new URLSearchParams(global.location?.search || '').get('lang');
   if (initialLanguage) {
     document.documentElement.lang = normalize(initialLanguage);

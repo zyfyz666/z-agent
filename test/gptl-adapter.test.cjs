@@ -74,9 +74,9 @@ test('unspecified GPTL effort uses the profile default without forcing high', ()
 });
 
 test('unnamed GPTL providers also disable Responses storage by default', async () => {
-  const { createYanGptlProvider } = await import(pathToFileURL(gptlBundle).href);
+  const { createZGptlProvider } = await import(pathToFileURL(gptlBundle).href);
   let body;
-  const provider = createYanGptlProvider({ apiKey: 'test', fetch: async (_input, init) => {
+  const provider = createZGptlProvider({ apiKey: 'test', fetch: async (_input, init) => {
     body = JSON.parse(init.body);
     return new Response('{}', { status: 400, headers: { 'content-type': 'application/json' } });
   } });
@@ -200,7 +200,7 @@ test('tool-name aliases round-trip back to the registered tool name', () => {
 });
 
 test('GPTL provider routes the real request per model capability', async () => {
-  const { createYanGptlProvider } = await import(pathToFileURL(gptlBundle).href);
+  const { createZGptlProvider } = await import(pathToFileURL(gptlBundle).href);
   const requests = [];
   const fakeFetch = async (input, init) => {
     requests.push({ url: String(input), body: init?.body ? String(init.body) : '' });
@@ -209,7 +209,7 @@ test('GPTL provider routes the real request per model capability', async () => {
       headers: { 'content-type': 'application/json' }
     });
   };
-  const provider = createYanGptlProvider({
+  const provider = createZGptlProvider({
     name: 'conn-gptl',
     apiKey: 'test-key',
     baseURL: 'https://api.openai.com/v1',
@@ -249,12 +249,12 @@ test('GPTL provider routes the real request per model capability', async () => {
 });
 
 test('GPTL streams restore aliased tool names for the kernel tool registry', async () => {
-  const { createYanGptlProvider } = await import(pathToFileURL(gptlBundle).href);
+  const { createZGptlProvider } = await import(pathToFileURL(gptlBundle).href);
   const sse = [
     { id: 'chat-1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'mcp_default_playwright_browser_click', arguments: '{}' } }] }, finish_reason: null }] },
     { id: 'chat-1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }
   ].map(payload => `data: ${JSON.stringify(payload)}\n\n`).join('');
-  const provider = createYanGptlProvider({
+  const provider = createZGptlProvider({
     name: 'conn-gptl',
     apiKey: 'test-key',
     baseURL: 'https://api.openai.com/v1',
@@ -290,7 +290,7 @@ test('sidecar selects the GPTL module explicitly and only auto-upgrades official
   });
   assert.equal(explicit.provider['conn-gptl'].npm, gptlModuleUrl);
   assert.equal(explicit.provider['conn-gptl'].options.apiFormat, 'openai');
-  assert.equal('yanDsmlCompatibility' in explicit.provider['conn-gptl'].options, false);
+  assert.equal('zDsmlCompatibility' in explicit.provider['conn-gptl'].options, false);
 
   const auto = buildOpenCodeConfig({
     providerId: 'openai',
@@ -325,7 +325,7 @@ test('sidecar selects the GPTL module explicitly and only auto-upgrades official
 });
 
 test('stages the GPTL bundle outside the application directory', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-gptl-stage-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-gptl-stage-'));
   try {
     const moduleUrl = stageGptlProviderModule({ appRoot, dataDir });
     const stagedPath = fileURLToPath(moduleUrl);

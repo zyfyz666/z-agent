@@ -85,14 +85,14 @@ test('a kernel acceptance is queued until its exact random token receives provid
   sidecar.recordGuidanceReceipt({ token, at: 123 }); assert.equal(events.length, 0);
   sidecar.recordGuidanceReceipt({ token: run.interjections[0].receiptToken, at: 456 });
   sidecar.recordGuidanceReceipt({ token: run.interjections[0].receiptToken, at: 789 });
-  assert.deepEqual(events, [{ type: 'yan.guidance.status', data: { requestId: 'guide', status: 'delivered', deliveredAt: 456, deliveryEvidence: 'provider-response' } }]);
+  assert.deepEqual(events, [{ type: 'z.guidance.status', data: { requestId: 'guide', status: 'delivered', deliveredAt: 456, deliveryEvidence: 'provider-response' } }]);
 });
 
 test('delivery proof survives replay-ring eviction and a later failed event cannot downgrade it', () => {
   const entry = { events: [] };
-  const event = { type: 'yan.guidance.status', data: { requestId: 'guide', status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' } };
+  const event = { type: 'z.guidance.status', data: { requestId: 'guide', status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' } };
   recordReconcileEvent(entry, event, { cap: 1 });
   recordReconcileEvent(entry, { type: 'text.delta', data: { delta: 'later' } }, { cap: 1 });
-  recordReconcileEvent(entry, { type: 'yan.guidance.status', data: { requestId: 'guide', status: 'failed' } }, { cap: 1 });
+  recordReconcileEvent(entry, { type: 'z.guidance.status', data: { requestId: 'guide', status: 'failed' } }, { cap: 1 });
   assert.deepEqual(watchdogReplay(entry).events, [event]);
 });

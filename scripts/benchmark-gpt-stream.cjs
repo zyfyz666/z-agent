@@ -10,11 +10,11 @@ const { performance } = require('node:perf_hooks');
 
 // Windows safeStorage uses the profile's DPAPI-protected key. A windowless
 // Electron child can decrypt it with the same OS user without touching the
-// running Yan profile or putting a plaintext credential on disk/in argv.
+// running Z profile or putting a plaintext credential on disk/in argv.
 async function runWithSafeStorage() {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-stream-benchmark-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'z-stream-benchmark-'));
   try {
-    const localState = JSON.parse(fs.readFileSync(path.join(process.env.APPDATA, 'yan-agent', 'Local State'), 'utf8'));
+    const localState = JSON.parse(fs.readFileSync(path.join(process.env.APPDATA, 'z-agent', 'Local State'), 'utf8'));
     fs.writeFileSync(path.join(profile, 'Local State'), JSON.stringify({ os_crypt: localState.os_crypt }));
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -27,7 +27,7 @@ async function runWithSafeStorage() {
     });
   } finally {
     const relative = path.relative(os.tmpdir(), profile);
-    if (relative.startsWith('yan-stream-benchmark-') && !relative.includes(path.sep)) {
+    if (relative.startsWith('z-stream-benchmark-') && !relative.includes(path.sep)) {
       fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
     }
   }
@@ -92,7 +92,7 @@ async function measure(fetchImpl, url, body, apiKey, label) {
   const connectionId = option('connection');
   const model = option('model');
   if (!connectionId || !model) throw new Error('connection and model must be explicit');
-  const config = JSON.parse(fs.readFileSync(path.join(process.env.APPDATA, 'yan-agent', 'YanData', 'config.json'), 'utf8'));
+  const config = JSON.parse(fs.readFileSync(path.join(process.env.APPDATA, 'z-agent', 'ZData', 'config.json'), 'utf8'));
   const provider = config.api?.providerConfigs?.[connectionId];
   if (!provider?.baseUrl || !provider?.apiKey) throw new Error('Configured connection requires a base URL and API key');
   let apiKey = provider.apiKey;
@@ -111,11 +111,11 @@ async function measure(fetchImpl, url, body, apiKey, label) {
   const prompt = 'Output exactly 60 lines. Each line is "stream test line NN", numbered 01 through 60. No introduction, explanation, markdown, or conclusion.';
   const chat = { model, messages: [{ role: 'user', content: prompt }], stream: true,
     reasoning_effort: 'low', max_completion_tokens: 1200, stream_options: { include_usage: true } };
-  const { createYanProviderFetch } = await import('../lib/opencode-dsml-provider.mjs');
+  const { createZProviderFetch } = await import('../lib/opencode-dsml-provider.mjs');
   const results = [];
   const runs = [
     ['chat-direct', fetch, `${baseUrl}/chat/completions`, chat],
-    ['chat-yan-adapter', createYanProviderFetch(fetch), `${baseUrl}/chat/completions`, chat],
+    ['chat-z-adapter', createZProviderFetch(fetch), `${baseUrl}/chat/completions`, chat],
     ['responses-direct', fetch, `${baseUrl}/responses`, {
       model, input: prompt, stream: true, store: false, reasoning: { effort: 'low' }, max_output_tokens: 1200
     }]

@@ -22,7 +22,7 @@ const patch = [
   '--- src/app.js',
   '+++ src/app.js',
   '@@ -1,3 +1,4 @@',
-  ' const title = "Yan";',
+  ' const title = "Z";',
   '-const state = "old";',
   '+const state = "live";',
   '+const review = true;',
@@ -31,7 +31,7 @@ const patch = [
 ].join('\n');
 
 async function mkdtempWorkspace(t) {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   return workspace;
 }
@@ -45,7 +45,7 @@ test('converts an OpenCode unified patch into review rows', () => {
     newLine: row.newLine,
     text: row.text
   })), [
-    { type: 'context', oldLine: 1, newLine: 1, text: 'const title = "Yan";' },
+    { type: 'context', oldLine: 1, newLine: 1, text: 'const title = "Z";' },
     { type: 'del', oldLine: 2, newLine: null, text: 'const state = "old";' },
     { type: 'add', oldLine: null, newLine: 2, text: 'const state = "live";' },
     { type: 'add', oldLine: null, newLine: 3, text: 'const review = true;' },
@@ -71,7 +71,7 @@ test('normalizes OpenCode live diffs for the review panel', () => {
 });
 
 test('drops binary files from OpenCode review while preserving text changes', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-binary-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-binary-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const binaryPath = path.join(workspace, 'capture.asset');
   await fs.writeFile(binaryPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0x10]));
@@ -124,7 +124,7 @@ test('removes deleted image diffs already persisted in an older session', () => 
 });
 
 test('legacy review summaries also ignore binary snapshots', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-legacy-binary-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-legacy-binary-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const imagePath = path.join(workspace, 'frame.png');
   await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]));
@@ -137,7 +137,7 @@ test('legacy review summaries also ignore binary snapshots', async t => {
 });
 
 test('recovers an edit from structured tool metadata when session diff is empty', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-edit-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-edit-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const filePath = path.join(workspace, '0.cpp');
   const before = 'int main() {\n  return 0\n}\n';
@@ -175,10 +175,10 @@ test('recovers an edit from structured tool metadata when session diff is empty'
 });
 
 test('recovers newly written files without a pre-existing workspace snapshot', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-write-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-write-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const filePath = path.join(workspace, 'index.html');
-  const content = '<!doctype html>\n<title>Yan</title>\n';
+  const content = '<!doctype html>\n<title>Z</title>\n';
   await fs.writeFile(filePath, content);
   const messages = [{
     info: { id: 'assistant-2', role: 'assistant', time: { created: 200 } },
@@ -201,7 +201,7 @@ test('recovers newly written files without a pre-existing workspace snapshot', a
 });
 
 test('keeps every touched text file when OpenCode returns mixed diff metadata', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-complete-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-complete-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const indexPath = path.join(workspace, 'index.html');
   const cssPath = path.join(workspace, 'styles.css');
@@ -209,9 +209,9 @@ test('keeps every touched text file when OpenCode returns mixed diff metadata', 
   const cssBefore = 'body { color: black; }\n';
   const cssAfter = 'body { color: white; }\n';
   await Promise.all([
-    fs.writeFile(indexPath, '<main>Yan</main>\n'),
+    fs.writeFile(indexPath, '<main>Z</main>\n'),
     fs.writeFile(cssPath, cssAfter),
-    fs.writeFile(jsPath, 'console.log("Yan");\n')
+    fs.writeFile(jsPath, 'console.log("Z");\n')
   ]);
   const messages = [{
     info: { id: 'assistant-mixed', role: 'assistant', time: { created: 250 } },
@@ -295,8 +295,8 @@ test('collectWorkspaceFileSweep batches HEAD baselines for tracked git changes',
   const git = (...args) => execFileSync('git', args, { cwd: workspace });
   try {
     git('init', '-q');
-    git('config', 'user.email', 'test@yan.local');
-    git('config', 'user.name', 'Yan Test');
+    git('config', 'user.email', 'test@z.local');
+    git('config', 'user.name', 'Z Test');
   } catch {
     t.skip('git unavailable');
     return;
@@ -347,7 +347,7 @@ test('buildRollbackChanges prefers baselines and falls back to reversed patches'
 });
 
 test('collapses multiple edits into the final per-run file diff', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-multi-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-multi-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const filePath = path.join(workspace, 'app.js');
   const before = 'const state = "old";\n';
@@ -383,7 +383,7 @@ test('collapses multiple edits into the final per-run file diff', async t => {
 });
 
 test('uses the authoritative tool patch when a live baseline arrives after the edit', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-late-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-late-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const filePath = path.join(workspace, 'late.cpp');
   const before = 'int value = 1;\n';
@@ -409,7 +409,7 @@ test('uses the authoritative tool patch when a live baseline arrives after the e
 });
 
 test('summarize memoizes per file on stat identity across polls', async t => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'yan-review-cache-'));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'z-review-cache-'));
   t.after(() => fs.rm(workspace, { recursive: true, force: true }));
   const filePath = path.join(workspace, 'app.js');
   const before = 'const a = 1;\n';

@@ -64,11 +64,11 @@ test('readSkillWithRetry does not retry permanent failures', async () => {
 });
 
 test('a malformed installed Skill reaches the three-attempt parse threshold', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-skill-broken-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skill-broken-'));
   try {
     const directory = path.join(dataDir, 'skills', 'broken-skill');
     fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(path.join(directory, '.yan-skill.json'), JSON.stringify({
+    fs.writeFileSync(path.join(directory, '.z-skill.json'), JSON.stringify({
       schema: 1,
       id: 'broken-skill',
       name: 'Broken Skill'
@@ -102,11 +102,11 @@ test('OpenCode does not scan or expose native Skills', () => {
   const system = combineSystem({
     providerId: 'qwen',
     modelId: 'qwen3.5-plus',
-    yanSkillDirectory: path.join(os.tmpdir(), 'yan-skills'),
+    zSkillDirectory: path.join(os.tmpdir(), 'z-skills'),
     availableSkills: [{ id: 'demo', name: 'Demo', description: 'demo' }]
   });
-  assert.match(system, /Yan Skills read_skill/);
-  assert.match(system, /Yan installed Skill catalog/);
+  assert.match(system, /Z Skills read_skill/);
+  assert.match(system, /Z installed Skill catalog/);
   assert.match(system, /demo \| Demo \| demo/);
   assert.match(system, /fetch every chunkPlan entry with read_skill_resource in one parallel tool batch via read_skill_resources/);
   assert.match(system, /reconstruct the exact instruction document in chunk_index order/);
@@ -118,10 +118,10 @@ test('OpenCode does not scan or expose native Skills', () => {
 });
 
 test('skill store read remains available after retry helpers are loaded', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-skill-runtime-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skill-runtime-'));
   try {
     const cfg = { customSkills: [] };
-    const installed = skillRegistry.installYanUserSkill(dataDir, {
+    const installed = skillRegistry.installZUserSkill(dataDir, {
       id: 'runtime-demo', name: 'Runtime Demo', desc: 'demo', prompt: 'Run demo.'
     });
     assert.equal(installed.ok, true);
@@ -137,11 +137,11 @@ test('skill store read remains available after retry helpers are loaded', async 
 });
 
 test('read_skill resolves parent-prefixed companion ids to their canonical ids', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-skill-prefixed-id-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skill-prefixed-id-'));
   try {
     const cfg = { customSkills: [] };
     for (const [id, prompt] of [['animate', 'Run animation.'], ['gsap-core', 'Use GSAP core.']]) {
-      const installed = skillRegistry.installYanUserSkill(dataDir, { id, name: id, desc: 'test', prompt });
+      const installed = skillRegistry.installZUserSkill(dataDir, { id, name: id, desc: 'test', prompt });
       assert.equal(installed.ok, true);
     }
     const animate = await skillRegistry.readSkillWithRetry('emil-motion/animate', '', cfg, appRoot, dataDir, () => {}, { retryDelaysMs: [0, 0] });
@@ -158,10 +158,10 @@ test('read_skill resolves parent-prefixed companion ids to their canonical ids',
 });
 
 test('renderer-facing Skill catalogs never carry instruction bodies', () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-skill-metadata-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skill-metadata-'));
   try {
     const cfg = { customSkills: [] };
-    skillRegistry.installYanUserSkill(dataDir, {
+    skillRegistry.installZUserSkill(dataDir, {
       id: 'metadata-demo', name: 'Metadata Demo', prompt: 'Private instruction body.'
     });
     const list = skillRegistry.getMergedSkillsForList(cfg, appRoot, dataDir);

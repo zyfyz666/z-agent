@@ -11,7 +11,7 @@ Source: https://github.com/KaTeX/KaTeX
 
 ## Prime Agent Continual Harness
 
-Yan Agent's Continual Harness implementation adapts architectural ideas and
+Z Agent's Continual Harness implementation adapts architectural ideas and
 selected data-model patterns from Prime Agent, copyright 2025 Mario Zechner and
 copyright 2026 Prime Intellect, licensed under the MIT License.
 

@@ -1,9 +1,9 @@
-/* In-scene workbench. Data comes exclusively from Yan's local Electron bridge. */
+/* In-scene workbench. Data comes exclusively from Z's local Electron bridge. */
 (() => {
   'use strict';
   const $=s=>document.querySelector(s),titles={hall:['天工殿','主任务 · 实现与编排'],east:['协作东阙','子代理 · 委派与进展'],library:['藏经阁','Skill · MCP'],gate:['南天门','任务接收 · 开始新的工作'],return:['归卷台','成果 · 文件改动']};
   let bridge=null,active='',generation=0,lastFocus=null,unsubscribe=null,timer=0,busy=false;
-  try { bridge=window.parent!==window?window.parent.YanTiangongHost:null; } catch {}
+  try { bridge=window.parent!==window?window.parent.ZTiangongHost:null; } catch {}
   const dialog=document.createElement('dialog');dialog.className='palace-panel';dialog.setAttribute('aria-labelledby','palace-title');
   dialog.innerHTML='<header class="palace-heading"><div><p class="eyebrow" id="palace-kicker"></p><h2 id="palace-title"></h2></div><button class="palace-close" aria-label="关闭阁楼面板">×</button></header><nav class="palace-nav" aria-label="阁楼入口"></nav><div class="palace-toolbar"><span id="palace-connection"></span><button id="palace-refresh">刷新</button></div><div class="palace-content" aria-live="polite"></div><footer class="palace-footer">云阙之间，诸事有序。<span>ESC 返回天宫</span></footer>';
   document.body.append(dialog);const content=dialog.querySelector('.palace-content');

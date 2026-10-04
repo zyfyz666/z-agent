@@ -135,7 +135,7 @@ async function boundedRun(sidecar, request) {
     assert.deepEqual(Object.keys(config.provider), [providerId]);
     assert.equal(config.provider[providerId].options.baseURL, baseUrl);
     const common = {
-      providerId, modelId, yanSessionId: 'default-conversation', workspace,
+      providerId, modelId, zSessionId: 'default-conversation', workspace,
       hasUserWorkspace: true, workspaceKind: 'default', workMode: 'normal',
       accessMode: 'full', permissions, enableSubagents: false, openCodeConfig: config
     };
@@ -170,7 +170,7 @@ async function boundedRun(sidecar, request) {
     assert.equal(path.resolve(session.directory), path.resolve(workspace));
     assert.deepEqual(tools.map(part => part.tool), ['write', 'read', 'read', 'edit', 'read']);
     assert.ok(tools.every(part => part.state?.status === 'completed'));
-    assert.equal(events.filter(event => event.type === 'yan.opencode.finished').length, 2);
+    assert.equal(events.filter(event => event.type === 'z.opencode.finished').length, 2);
     assert.ok(!events.some(event => ['permission.asked', 'permission.v2.asked', 'permission.updated'].includes(event.type)),
       'normal permitted file work must not wait for folder selection or permission');
     assert.equal(new Set(modelRequests).size, 1);

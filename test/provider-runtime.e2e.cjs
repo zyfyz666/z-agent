@@ -16,21 +16,21 @@ const {
 const { stageOpenCodeRuntime } = require('../lib/opencode-runtime');
 
 const appRoot = path.resolve(__dirname, '..');
-const executable = path.resolve(process.env.YAN_OPENCODE_EXECUTABLE || path.join(
+const executable = path.resolve(process.env.Z_OPENCODE_EXECUTABLE || path.join(
   appRoot,
   'node_modules',
   `opencode-windows-${process.arch}`,
   'bin',
   process.platform === 'win32' ? 'opencode.exe' : 'opencode'
 ));
-const providerModule = path.resolve(process.env.YAN_PROVIDER_MODULE_PATH || path.join(
+const providerModule = path.resolve(process.env.Z_PROVIDER_MODULE_PATH || path.join(
   appRoot,
   'lib',
   'opencode-dsml-provider.mjs'
 ));
 const responsesBundle = path.join(appRoot, 'lib', 'opencode-openai-responses-provider.bundle.mjs');
-const providerId = String(process.env.YAN_TEST_PROVIDER_ID || 'deepseek').trim();
-const providerName = String(process.env.YAN_TEST_PROVIDER_NAME || providerId).trim();
+const providerId = String(process.env.Z_TEST_PROVIDER_ID || 'deepseek').trim();
+const providerName = String(process.env.Z_TEST_PROVIDER_NAME || providerId).trim();
 const modelId = `${providerId}-packaged-test`;
 
 function runProcess(command, args, options, timeoutMs = 30_000) {
@@ -58,8 +58,8 @@ function runProcess(command, args, options, timeoutMs = 30_000) {
 }
 
 function stageProviderPackage(runtimeRoot) {
-  const packageName = '@yan-agent/deepseek-dsml-provider';
-  const packageDir = path.join(runtimeRoot, 'config', 'opencode', 'node_modules', '@yan-agent', 'deepseek-dsml-provider');
+  const packageName = '@z-agent/deepseek-dsml-provider';
+  const packageDir = path.join(runtimeRoot, 'config', 'opencode', 'node_modules', '@z-agent', 'deepseek-dsml-provider');
   const sourceRoot = path.dirname(providerModule);
   const sourceNodeModules = path.resolve(sourceRoot, '..', 'node_modules');
   const targetNodeModules = path.join(runtimeRoot, 'config', 'opencode', 'node_modules');
@@ -92,7 +92,7 @@ function stageProviderBundle(runtimeRoot) {
   assert.equal(fs.existsSync(executable), true, `Missing OpenCode executable: ${executable}`);
   assert.equal(fs.existsSync(providerModule), true, `Missing provider module: ${providerModule}`);
   assert.equal(fs.existsSync(responsesBundle), true, `Missing responses module: ${responsesBundle}`);
-  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-provider-runtime-'));
+  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-provider-runtime-'));
   const requests = [];
   const server = http.createServer((request, response) => {
     let body = '';
@@ -112,14 +112,14 @@ function stageProviderBundle(runtimeRoot) {
       });
       const created = Math.floor(Date.now() / 1000);
       response.write(`data: ${JSON.stringify({
-        id: 'yan-provider-test',
+        id: 'z-provider-test',
         object: 'chat.completion.chunk',
         created,
         model: 'deepseek-packaged-test',
         choices: [{ index: 0, delta: { role: 'assistant', content: 'PACKAGED_PROVIDER_OK' }, finish_reason: null }]
       })}\n\n`);
       response.write(`data: ${JSON.stringify({
-        id: 'yan-provider-test',
+        id: 'z-provider-test',
         object: 'chat.completion.chunk',
         created,
         model: 'deepseek-packaged-test',
@@ -133,15 +133,15 @@ function stageProviderBundle(runtimeRoot) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
     const providerModuleSpecifier = providerId === 'glm'
-      ? stageGlmmProviderModule({ appRoot: process.env.YAN_PACKAGED_APP_ROOT || appRoot, dataDir: runtimeRoot })
+      ? stageGlmmProviderModule({ appRoot: process.env.Z_PACKAGED_APP_ROOT || appRoot, dataDir: runtimeRoot })
       : providerId === 'qwen'
-      ? stageQwemProviderModule({ appRoot: process.env.YAN_PACKAGED_APP_ROOT || appRoot, dataDir: runtimeRoot })
-      : process.env.YAN_PACKAGED_APP_ROOT
+      ? stageQwemProviderModule({ appRoot: process.env.Z_PACKAGED_APP_ROOT || appRoot, dataDir: runtimeRoot })
+      : process.env.Z_PACKAGED_APP_ROOT
       ? stageDeepSeekProviderModule({
-          appRoot: process.env.YAN_PACKAGED_APP_ROOT,
+          appRoot: process.env.Z_PACKAGED_APP_ROOT,
           dataDir: runtimeRoot
         })
-      : String(process.env.YAN_PROVIDER_MODULE_SPECIFIER || pathToFileURL(providerModule).href);
+      : String(process.env.Z_PROVIDER_MODULE_SPECIFIER || pathToFileURL(providerModule).href);
     const config = buildOpenCodeConfig({
       providerId,
       providerName,
@@ -196,10 +196,10 @@ function stageProviderBundle(runtimeRoot) {
     // and route the model call to POST {baseURL}/responses instead of
     // /chat/completions. The mock body is intentionally a chat-shaped stream,
     // so this scenario asserts routing and factory loading, not parsing.
-    const responsesRuntimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-responses-runtime-'));
+    const responsesRuntimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-responses-runtime-'));
     try {
       const responsesModuleUrl = String(
-        process.env.YAN_RESPONSES_PROVIDER_MODULE_SPECIFIER || pathToFileURL(responsesBundle).href
+        process.env.Z_RESPONSES_PROVIDER_MODULE_SPECIFIER || pathToFileURL(responsesBundle).href
       );
       const responsesConfig = buildOpenCodeConfig({
         providerId: 'conn-responses-test',

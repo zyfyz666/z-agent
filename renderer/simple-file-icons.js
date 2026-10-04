@@ -49,5 +49,5 @@
     }
   }
 
-  globalThis.YanSimpleFileIcons = Object.freeze({ slugForFile, urlForSlug });
+  globalThis.ZSimpleFileIcons = Object.freeze({ slugForFile, urlForSlug });
 })();

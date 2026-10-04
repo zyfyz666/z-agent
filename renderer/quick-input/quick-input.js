@@ -1,7 +1,7 @@
 (() => {
   const input = document.getElementById('quickInput');
   const submit = document.getElementById('quickSubmit');
-  const bridge = window.yanQuickInput;
+  const bridge = window.zQuickInput;
   if (!input || !submit || !bridge) return;
 
   const send = () => {

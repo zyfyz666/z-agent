@@ -11,12 +11,12 @@ const patch = require('../vendor/opencode/runtime-patch.json');
 
 function removeFixture(directory) {
   assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-  assert.ok(path.basename(directory).startsWith('yan-runtime-patch-'));
+  assert.ok(path.basename(directory).startsWith('z-runtime-patch-'));
   fs.rmSync(directory, { recursive: true, force: true });
 }
 
 test('unknown runtime fails explicitly without modifying it or producing a fallback', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-runtime-patch-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-runtime-patch-'));
   const executable = path.join(directory, 'unknown.exe');
   fs.writeFileSync(executable, patch.filter);
   try {
@@ -29,7 +29,7 @@ test('unknown runtime fails explicitly without modifying it or producing a fallb
 test('stages only the pinned registry change, shares concurrent work, and repairs a corrupt cache', {
   skip: process.platform !== 'win32' || process.arch !== 'x64'
 }, async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-runtime-patch-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-runtime-patch-'));
   const executable = path.resolve('node_modules/opencode-windows-x64/bin/opencode.exe');
   const options = { executable, dataDir: directory };
   const sourceStat = fs.statSync(executable);

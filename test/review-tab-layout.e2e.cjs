@@ -5,14 +5,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const root = path.resolve(__dirname, '..');
-const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-layout-'));
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-layout-'));
 (async () => {
   let app;
   try {
     app = await electron.launch({ executablePath: require('electron'), args: [root], cwd: root,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userData } });
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userData } });
     const page = await app.firstWindow();
-    await page.waitForFunction(() => typeof YanDshReview !== 'undefined');
+    await page.waitForFunction(() => typeof ZDshReview !== 'undefined');
     await page.waitForFunction(() => state.config && document.querySelector('#app')?.getBoundingClientRect().height > 0);
     await page.waitForTimeout(1000);
     await page.evaluate(async () => {
@@ -27,13 +27,13 @@ const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-layout-'));
       activateRightSidebarTab('review');
       setBrowserFocusMode(true);
       await renderRightSidebarReview();
-      await YanDshReview.open({ summary, selectedPath: 'second.js' });
+      await ZDshReview.open({ summary, selectedPath: 'second.js' });
     });
     const waitReview = async () => {
-      await page.waitForFunction(() => document.querySelector('#yanDshReviewFrame')?.contentDocument?.getElementById('file-1'));
+      await page.waitForFunction(() => document.querySelector('#zDshReviewFrame')?.contentDocument?.getElementById('file-1'));
       await page.waitForTimeout(150);
       const position = await page.evaluate(() => {
-        const frame = document.querySelector('#yanDshReviewFrame');
+        const frame = document.querySelector('#zDshReviewFrame');
         return { y: frame.contentWindow.scrollY, target: frame.contentDocument.getElementById('file-1').getBoundingClientRect().top };
       });
       assert.ok(position.y > 100, JSON.stringify(position));
@@ -52,7 +52,7 @@ const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-layout-'));
         await new Promise(resolve => requestAnimationFrame(resolve));
         activateRightSidebarTab('review');
         await renderRightSidebarReview();
-        await YanDshReview.open({ summary: window.__layoutSummary, selectedPath: 'second.js' });
+        await ZDshReview.open({ summary: window.__layoutSummary, selectedPath: 'second.js' });
       });
       await waitReview();
       assert.deepEqual(await measure(), before);

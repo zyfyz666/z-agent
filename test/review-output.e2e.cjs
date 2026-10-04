@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-output-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-output-e2e-'));
 
 (async () => {
   let application;
@@ -18,8 +18,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-output-e2e
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -36,7 +36,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-output-e2e
     const initial = await page.evaluate(async () => {
       if (!state.currentSession) await newSession();
       clearMessages();
-      state.currentSession.workspace = 'C:\\yan-review-test';
+      state.currentSession.workspace = 'C:\\z-review-test';
       state.currentSession.messages = [];
       const agentRun = {
         runId: 'single-line-review-run',
@@ -131,8 +131,8 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-output-e2e
     });
 
     await page.waitForFunction(() => document.querySelector('#rs-review')?.classList.contains('active'));
-    await page.locator('#yanDshReviewFrame').waitFor();
-    const reviewFrame = page.frameLocator('#yanDshReviewFrame');
+    await page.locator('#zDshReviewFrame').waitFor();
+    const reviewFrame = page.frameLocator('#zDshReviewFrame');
     await reviewFrame.locator('.sidenav .navitem').first().waitFor();
     // The panel is lazy: the selected file loads its rows right after the
     // manifest document is up, so the diff body only appears on demand.
@@ -140,7 +140,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-output-e2e
     await page.screenshot({ path: path.join(appRoot, 'output', 'playwright', 'review-embedded-sidebar.png'), fullPage: false });
     const review = await page.evaluate(() => ({
       selectedPath: rsReviewState.selectedPath,
-      reviewRole: document.querySelector('#yanDshReviewPanel')?.getAttribute('role') || '',
+      reviewRole: document.querySelector('#zDshReviewPanel')?.getAttribute('role') || '',
       parentRefreshHidden: document.querySelector('#reviewRefreshBtn')?.classList.contains('hidden') || false
     }));
     review.navCount = await reviewFrame.locator('.sidenav .navitem').count();
@@ -157,7 +157,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-output-e2e
       const persisted = await api.saveSession({
         id: `sess_binary-review-${Date.now()}`,
         title: 'Binary review filter fixture',
-        workspace: 'C:\\yan-review-test',
+        workspace: 'C:\\z-review-test',
         messages: [{
           role: 'assistant',
           content: '旧审阅记录',

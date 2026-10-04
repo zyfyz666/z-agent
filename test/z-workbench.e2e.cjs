@@ -9,7 +9,7 @@ const { _electron: electron } = require('playwright');
 const appRoot = path.resolve(__dirname, '..');
 const outputDir = path.join(appRoot, 'output', 'z-workbench');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-workbench-e2e-'));
-const launchEnv = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir };
+const launchEnv = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir };
 delete launchEnv.ELECTRON_RUN_AS_NODE;
 const errors = [];
 const report = { ok: false, modelRequests: 0, checks: {}, screenshots: [], pageErrors: errors };
@@ -102,7 +102,7 @@ fs.mkdirSync(outputDir, { recursive: true });
         rules: ['R1_loop'], advisories: ['R5_stale_verification'], streak: 1,
         message: '刚才的操作多次重复。先运行一次最小验证，再决定下一步。', delivery: 'delivered'
       };
-      const statusEvent = { type: 'yan.thrash.watchdog.status', data: {
+      const statusEvent = { type: 'z.thrash.watchdog.status', data: {
         enabled: true, phase: 'observing', judgeEvery: 6,
         observedSteps: 36, judgedSteps: 36, checks: 6, interventions: 1, streak: 1,
         updatedAt: ts, events: [event]
@@ -123,8 +123,8 @@ fs.mkdirSync(outputDir, { recursive: true });
     await page.evaluate(() => {
       const { runCtx, event, statusEvent } = window.__zWorkbench;
       applyOpenCodeEvent(runCtx, statusEvent);
-      applyOpenCodeEvent(runCtx, { type: 'yan.thrash.watchdog', data: event });
-      applyOpenCodeEvent(runCtx, { type: 'yan.thrash.watchdog', data: event });
+      applyOpenCodeEvent(runCtx, { type: 'z.thrash.watchdog', data: event });
+      applyOpenCodeEvent(runCtx, { type: 'z.thrash.watchdog', data: event });
     });
     report.checks.replay = await readPanel();
     assert.deepEqual(report.checks.replay.stats, ['6', '36', '1']);
@@ -135,7 +135,7 @@ fs.mkdirSync(outputDir, { recursive: true });
     await page.evaluate(() => {
       const { runCtx, event, statusEvent } = window.__zWorkbench;
       applyOpenCodeEvent(runCtx, statusEvent);
-      applyOpenCodeEvent(runCtx, { type: 'yan.thrash.watchdog', data: event });
+      applyOpenCodeEvent(runCtx, { type: 'z.thrash.watchdog', data: event });
       updateTaskBar();
     });
     await settle();

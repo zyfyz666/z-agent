@@ -16,12 +16,12 @@ test('Chinese runs do not add the English-only response contract', () => {
   assert.doesNotMatch(system, /interface language is English/i);
 });
 
-test('Z product identity preserves the actual model and scoped upstream attribution', () => {
+test('Z product identity preserves the actual model and execution architecture', () => {
   const system = combineSystem({ providerId: 'test-provider', modelId: 'test-model' });
   assert.match(system, /You are the test-model model from test-provider, serving as the current text model inside Z\./);
   assert.match(system, /product\/runtime identity \(Z \/ Z runtime\) and actual model identity \(provider\/model\)/);
-  assert.match(system, /Z is a desktop agent adapted from Yan-Agent and built on an OpenCode-based runtime\./);
-  assert.match(system, /Explain this origin only when the user asks about its source or architecture\./);
-  assert.doesNotMatch(system, /Yan Kernel|current text model inside Yan Agent/);
+  assert.match(system, /Z is a desktop agent built on an OpenCode-based execution runtime\./);
+  assert.match(system, /Explain the execution architecture when the user asks about it\./);
+  assert.doesNotMatch(system, /Z Kernel|current text model inside Z Agent/);
   assert.match(system, /Do not claim a model, Skill, MCP, browser action, media result, permission, workspace, or verification that is not available in this run/);
 });

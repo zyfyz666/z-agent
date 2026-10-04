@@ -7,12 +7,12 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-interjection-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-interjection-e2e-'));
 const screenshotDir = path.join(appRoot, 'output', 'playwright');
 fs.mkdirSync(screenshotDir, { recursive: true });
-const dockScreenshotPath = path.join(screenshotDir, `yan-right-dock-${Date.now()}.png`);
-const screenshotPath = path.join(screenshotDir, `yan-auxiliary-dialogue-${Date.now()}.png`);
-const lightScreenshotPath = path.join(screenshotDir, `yan-auxiliary-dialogue-light-${Date.now()}.png`);
+const dockScreenshotPath = path.join(screenshotDir, `z-right-dock-${Date.now()}.png`);
+const screenshotPath = path.join(screenshotDir, `z-auxiliary-dialogue-${Date.now()}.png`);
+const lightScreenshotPath = path.join(screenshotDir, `z-auxiliary-dialogue-light-${Date.now()}.png`);
 
 (async () => {
   let application;
@@ -23,8 +23,8 @@ const lightScreenshotPath = path.join(screenshotDir, `yan-auxiliary-dialogue-lig
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -68,7 +68,7 @@ const lightScreenshotPath = path.join(screenshotDir, `yan-auxiliary-dialogue-lig
     await page.locator('#rs-interjection.active').waitFor();
     assert.equal(await page.locator('[data-rs-tab="interjection"] .rs-work-tab-label').textContent(), '临时对话');
     assert.equal(await page.locator('#interjectionInput').isEnabled(), true);
-    assert.equal(await page.locator('#interjectionTranscript .auxiliary-dialogue-empty span').textContent(), 'Yan Agent工作期间，提问以辅助工作');
+    assert.equal(await page.locator('#interjectionTranscript .auxiliary-dialogue-empty span').textContent(), 'Z Agent工作期间，提问以辅助工作');
     const geometry = await page.locator('#rs-interjection').evaluate(node => {
       const panel = node.getBoundingClientRect();
       const composer = node.querySelector('.auxiliary-dialogue-composer').getBoundingClientRect();

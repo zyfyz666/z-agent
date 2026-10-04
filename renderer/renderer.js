@@ -4,7 +4,18 @@
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-const api = window.yan;
+const api = window.z;
+const { LEGACY_STORAGE, readCompatibleField } = window.ZLegacyCompat;
+
+function storedPreference(currentKey, previousKey) {
+  try {
+    const current = window.localStorage.getItem(currentKey);
+    if (current !== null) return current;
+    const previous = window.localStorage.getItem(previousKey);
+    if (previous !== null) window.localStorage.setItem(currentKey, previous);
+    return previous;
+  } catch { return null; }
+}
 
 const SUBAGENT_ROLE_LABELS = Object.freeze({
   explorer: 'Sub Explore Agent',
@@ -107,14 +118,14 @@ const state = {
   activeRuns: new Map()    // sessionId -> { sessionRef, runCtx, assistantEl } 所有运行中的任务（完全独立）
 };
 
-const WORKSPACE_SIDEBAR_META_KEY = 'yan.workspace-sidebar-meta.v1';
-const WORKSPACE_COLLAPSED_KEY = 'yan.workspace-sidebar-collapsed.v1';
+const WORKSPACE_SIDEBAR_META_KEY = 'z.workspace-sidebar-meta.v1';
+const WORKSPACE_COLLAPSED_KEY = 'z.workspace-sidebar-collapsed.v1';
 const RECENT_COLLAPSED_KEY = 'z.recent-sessions-collapsed.v1';
 const RECENT_SESSION_PAGE_SIZE = 10;
 
 function loadWorkspaceSidebarMeta() {
   try {
-    const value = JSON.parse(window.localStorage.getItem(WORKSPACE_SIDEBAR_META_KEY) || '{}');
+    const value = JSON.parse(storedPreference(WORKSPACE_SIDEBAR_META_KEY, LEGACY_STORAGE.sidebarMetaKey) || '{}');
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   } catch {
     return {};
@@ -127,7 +138,7 @@ function saveWorkspaceSidebarMeta() {
 
 function loadCollapsedWorkspaceGroups() {
   try {
-    const value = JSON.parse(window.localStorage.getItem(WORKSPACE_COLLAPSED_KEY) || '[]');
+    const value = JSON.parse(storedPreference(WORKSPACE_COLLAPSED_KEY, LEGACY_STORAGE.sidebarCollapsedKey) || '[]');
     return new Set(Array.isArray(value) ? value.map(item => String(item)) : []);
   } catch {
     return new Set();
@@ -851,8 +862,8 @@ function clipPetText(value, limit = 42) {
   return text.length > limit ? text.slice(0, limit - 1) + '…' : text;
 }
 
-const PET_TOOL_PREFIXES = ['yan_browser_', 'yan_media_', 'yan_skills_', 'yan_session_'];
-const PET_MCP_SERVERS = new Set(['yan_browser', 'yan_media', 'yan_skills', 'yan_session']);
+const PET_TOOL_PREFIXES = ['z_browser_', 'z_media_', 'z_skills_', 'z_session_'];
+const PET_MCP_SERVERS = new Set(['z_browser', 'z_media', 'z_skills', 'z_session']);
 
 const PET_TOOL_LABELS = new Map([
   ['read', '读取文件'],
@@ -1165,14 +1176,14 @@ async function init() {
   await syncPetWindowButton();
   await refreshSessions();
   await hydrateQueuedTurns();
-  const recoveredTurns = await listRecoveredYanCoreTurns();
+  const recoveredTurns = await listRecoveredZCoreTurns();
   // Replay interrupted Turns from the Core journal before the first session
   // paint so the recovered content is part of the conversation from the start.
   const recoveredRunCount = await recoverInterruptedOpenCodeRuns(recoveredTurns);
   updateContextInfo();
   // Subscribe before active-run reconciliation so a terminal Core event that
   // arrives during descriptor replay cannot be missed.
-  api.onYanCoreEvent?.(applyYanCoreEvent);
+  api.onZCoreEvent?.(applyZCoreEvent);
   // Reconnect to runs that survived a renderer reload.
   await reconcileOpenCodeActiveRuns().catch(error => console.warn('[opencode-sync]', error));
   updateGreeting();
@@ -1185,7 +1196,7 @@ async function init() {
 
   bindUI();
   parkSettingsOverlay();
-  window.YanUnderstandAnything?.init({
+  window.ZUnderstandAnything?.init({
     api,
     hooks: {
       getWorkspace: () => state.currentSession?.workspace || state.config?.workspace || '',
@@ -1215,7 +1226,7 @@ async function init() {
 
   api.onWorkspaceChanged?.((detail) => {
     scheduleRightSidebarRefresh(detail);
-    window.YanUnderstandAnything?.handleWorkspaceChanged(detail);
+    window.ZUnderstandAnything?.handleWorkspaceChanged(detail);
   });
 
   api.onSkillsChanged?.(async () => {
@@ -1351,7 +1362,7 @@ function applyTheme(theme) {
   const effective = resolveEffectiveTheme(theme);
   document.documentElement.setAttribute('data-theme', effective);
   if ($('#app')?.classList.contains('wallpaper-enabled')) void applyWallpaperCompat();
-  globalThis.YanReviewEditor?.setTheme(effective);
+  globalThis.ZReviewEditor?.setTheme(effective);
   updateThemeToggleIcon(theme);
   updateThemeSegmented(theme);
   // The migrated review view is an isolated document, so it cannot inherit
@@ -1359,7 +1370,7 @@ function applyTheme(theme) {
   // Review tab is open; the generated page will receive the fresh Z tokens.
   if (typeof openRightSidebarTabs !== 'undefined'
       && openRightSidebarTabs.some(tab => tab.type === 'review')
-      && globalThis.YanDshReview) {
+      && globalThis.ZDshReview) {
     void renderRightSidebarReview({ force: true });
   }
 }
@@ -1429,7 +1440,7 @@ function applyLanguage(language) {
   document.documentElement.lang = value;
   document.documentElement.dataset.language = value;
   document.body?.setAttribute('data-language', value);
-  window.YanI18n?.apply(value, document);
+  window.ZI18n?.apply(value, document);
   updateLanguageSegmented(value);
   updateGreeting(value);
   return value;
@@ -1481,7 +1492,7 @@ async function refreshSessions() {
       state.composerDrafts.delete(String(session.id));
       state.queuedTurns.delete(String(session.id));
     });
-    await Promise.all(deletedBlanks.map(session => clearYanCoreQueuedIntentsForThread(
+    await Promise.all(deletedBlanks.map(session => clearZCoreQueuedIntentsForThread(
       session.id,
       'duplicate_blank_session_removed'
     )));
@@ -1493,7 +1504,7 @@ async function refreshSessions() {
 // Core IPC is optional during migrations and in lightweight renderer test
 // harnesses. Normalize missing methods and synchronous bridge failures into a
 // Promise so callers can safely attach error handling.
-function invokeYanCore(method, ...args) {
+function invokeZCore(method, ...args) {
   const fn = api?.[method];
   if (typeof fn !== 'function') return Promise.resolve(null);
   try {
@@ -1503,29 +1514,29 @@ function invokeYanCore(method, ...args) {
   }
 }
 
-async function clearYanCoreQueuedIntentsForThread(threadId, reason = 'session_removed') {
+async function clearZCoreQueuedIntentsForThread(threadId, reason = 'session_removed') {
   const targetThreadId = String(threadId || '');
   if (!targetThreadId) return;
   try {
-    const snapshot = await invokeYanCore('yanCoreGetState', { threadId: targetThreadId });
+    const snapshot = await invokeZCore('zCoreGetState', { threadId: targetThreadId });
     const intents = snapshot?.intents && typeof snapshot.intents === 'object'
       ? Object.values(snapshot.intents)
       : [];
     const queued = intents.filter(intent => intent?.status === 'queued');
-    await Promise.all(queued.map(intent => invokeYanCore(
-      'yanCoreDeleteIntent',
+    await Promise.all(queued.map(intent => invokeZCore(
+      'zCoreDeleteIntent',
       String(intent.id || ''),
       reason
     )));
   } catch (error) {
-    console.warn('[yan-core] queued intent cleanup failed:', error);
+    console.warn('[z-core] queued intent cleanup failed:', error);
   }
 }
 
 async function hydrateQueuedTurns() {
-  if (typeof api?.yanCoreGetState !== 'function') return;
+  if (typeof api?.zCoreGetState !== 'function') return;
   try {
-    const snapshot = await api.yanCoreGetState({});
+    const snapshot = await api.zCoreGetState({});
     const intents = snapshot?.intents && typeof snapshot.intents === 'object'
       ? Object.values(snapshot.intents)
       : [];
@@ -1550,17 +1561,17 @@ async function hydrateQueuedTurns() {
       });
     }
   } catch (error) {
-    console.warn('[yan-core] queued intent hydration failed:', error);
+    console.warn('[z-core] queued intent hydration failed:', error);
   }
 }
 
-async function listRecoveredYanCoreTurns() {
+async function listRecoveredZCoreTurns() {
   try {
-    const snapshot = await invokeYanCore('yanCoreGetState', {});
+    const snapshot = await invokeZCore('zCoreGetState', {});
     return Object.values(snapshot?.turns && typeof snapshot.turns === 'object' ? snapshot.turns : {})
       .filter(turn => turn?.status === 'recovering');
   } catch (error) {
-    console.warn('[yan-core] recovery state read failed:', error);
+    console.warn('[z-core] recovery state read failed:', error);
     return [];
   }
 }
@@ -1578,7 +1589,7 @@ async function applyExternalSessionChange(detail = {}) {
   if (!currentId || detail.id !== currentId) return;
   const summary = allSessionSummaries.find(session => session.id === currentId);
   if (!summary) {
-    await clearYanCoreQueuedIntentsForThread(currentId, 'session_removed_externally');
+    await clearZCoreQueuedIntentsForThread(currentId, 'session_removed_externally');
     state.composerDrafts.delete(String(currentId));
     state.queuedTurns.delete(String(currentId));
     state.currentSession = null;
@@ -2013,7 +2024,7 @@ async function performSessionDeletionFromSidebar(id) {
     toast(result.error || '删除失败');
     return;
   }
-  await clearYanCoreQueuedIntentsForThread(id, 'session_removed');
+  await clearZCoreQueuedIntentsForThread(id, 'session_removed');
   state.composerDrafts.delete(String(id));
   state.queuedTurns.delete(String(id));
   settleAgentInteractionsForSession(id);
@@ -2332,7 +2343,7 @@ async function confirmDeadWorkspaceCleanup(summary) {
     try {
       const result = await api.deleteSession(session.id, true);
       if (result?.ok !== false) {
-        await clearYanCoreQueuedIntentsForThread(session.id, 'dead_workspace_session_removed');
+        await clearZCoreQueuedIntentsForThread(session.id, 'dead_workspace_session_removed');
         state.composerDrafts.delete(String(session.id));
         state.queuedTurns.delete(String(session.id));
       }
@@ -3559,8 +3570,8 @@ let currentWindowView = 'main';
 let mainSidebarWasOpen = true;
 let activeRightSidebarTab = null;
 const openRightSidebarTabs = [];
-const SUBAGENT_UI_NAMES = window.YanSubagentWorkflow?.NAMES || {};
-const subagentPanel = window.YanSubagentPanel?.create?.({
+const SUBAGENT_UI_NAMES = window.ZSubagentWorkflow?.NAMES || {};
+const subagentPanel = window.ZSubagentPanel?.create?.({
   getSessionId: () => String(state.currentSession?.id || ''),
   getRuns: () => {
     const session = state.currentSession;
@@ -3606,7 +3617,7 @@ function updateSubagentWorkflow(runCtx, event, deferEffects) {
   if (!run) return false;
   run.runId ||= runCtx.runId;
   const previousTimelineLength = run.timeline?.length || 0;
-  const update = window.YanSubagentWorkflow?.consume?.(run, event);
+  const update = window.ZSubagentWorkflow?.consume?.(run, event);
   if (!update?.handled) return false;
   // Child-session activity (token deltas, tool churn) belongs to the subagent
   // panel; it must not invalidate the parent message projection. Only a real
@@ -3782,7 +3793,7 @@ function showMainPage(page) {
   if (page !== 'chat') closeTaskActionsMenu();
   // Returning to chat must not close another tool, including the Observer.
   if (getActiveRightSidebarTab()?.type === 'browser') closeBrowserPanel();
-  if (page !== 'chat') window.YanUnderstandAnything?.close?.({ silent: true });
+  if (page !== 'chat') window.ZUnderstandAnything?.close?.({ silent: true });
 
   if (page !== 'chat') closeRightSidebar();
 
@@ -4101,12 +4112,12 @@ async function showWindowView(view) {
     syncSidebarAccessibility();
     setLeftSidebarOpen(false);
     showMainPage('chat');
-    await window.YanUnderstandAnything?.open?.(workspace);
+    await window.ZUnderstandAnything?.open?.(workspace);
     if (currentWindowView !== 'project-map') {
-      window.YanUnderstandAnything?.close?.({ silent: true });
+      window.ZUnderstandAnything?.close?.({ silent: true });
       return;
     }
-    if (!window.YanUnderstandAnything?.isOpen?.()) {
+    if (!window.ZUnderstandAnything?.isOpen?.()) {
       currentWindowView = 'main';
       showMainPage('chat');
       setLeftSidebarOpen(mainSidebarWasOpen);
@@ -4117,7 +4128,7 @@ async function showWindowView(view) {
 
   if (currentWindowView === 'main') mainSidebarWasOpen = !$('#app').classList.contains('sidebar-hidden');
   currentWindowView = next;
-  window.YanUnderstandAnything?.close?.({ silent: true });
+  window.ZUnderstandAnything?.close?.({ silent: true });
   currentWindowView = 'main';
   showMainPage('chat');
   setLeftSidebarOpen(mainSidebarWasOpen);
@@ -4209,7 +4220,7 @@ function skillMarketChildren(skillId) {
 }
 
 function isManagedSkill(skill) {
-  return ['builtin', 'bundled', 'Yan Agent'].includes(String(skill?.source || ''));
+  return ['builtin', 'bundled', 'Z Agent'].includes(String(skill?.source || ''));
 }
 
 function setSkillActionButtonState(button, state, detail = '') {
@@ -6321,7 +6332,7 @@ input.addEventListener('pointerup', () => {
 // a pasted essay grows the composer to a readable size and then scrolls.
 // Dragging the top grip pins an explicit height (persisted); double-clicking
 // the grip returns to pure auto-grow.
-const COMPOSER_HEIGHT_KEY = 'yan.composer.height';
+const COMPOSER_HEIGHT_KEY = 'z.composer.height';
 const COMPOSER_MAX_HEIGHT_RATIO = 0.45;
 const COMPOSER_ABS_MAX_HEIGHT = 480;
 const COMPOSER_ABS_MIN_CEILING = 220;
@@ -6492,7 +6503,7 @@ composerResizeHandle?.addEventListener('keydown', event => {
 window.addEventListener('resize', scheduleComposerGrow);
 
 try {
-  const storedComposerHeight = Number(window.localStorage.getItem(COMPOSER_HEIGHT_KEY));
+  const storedComposerHeight = Number(storedPreference(COMPOSER_HEIGHT_KEY, LEGACY_STORAGE.composerHeightKey));
   if (Number.isFinite(storedComposerHeight) && storedComposerHeight > 0) {
     composerManualHeight = storedComposerHeight;
   }
@@ -6597,7 +6608,7 @@ async function optimizeComposerPrompt() {
   setPromptOptimizationUi(operation, true);
 
   try {
-    const skill = await api.readSkill?.('yan-prompt-optimizer', '');
+    const skill = await api.readSkill?.('z-prompt-optimizer', '');
     if (!skill?.ok || !String(skill.prompt || '').trim()) {
       throw new Error(skill?.error || 'Z Prompt Optimizer 未正确安装');
     }
@@ -6617,7 +6628,7 @@ async function optimizeComposerPrompt() {
         role: 'user',
         content: optimizerPrompt,
         skillCalls: [{
-          id: String(skill.id || 'yan-prompt-optimizer'),
+          id: String(skill.id || 'z-prompt-optimizer'),
           name: String(skill.name || 'Z Prompt Optimizer'),
           prompt: String(skill.prompt)
         }]
@@ -6828,7 +6839,7 @@ function refreshLiveGuidanceStatus(session, message) {
 }
 
 function applyLiveGuidanceStatus(runCtx, event) {
-  if (event?.type !== 'yan.guidance.status') return false;
+  if (event?.type !== 'z.guidance.status') return false;
   const session = runCtx.sessionRef || state.activeRuns.get(runCtx.sessionId)?.sessionRef;
   const data = event.data || {};
   const message = session?.messages?.find(item => item.liveGuidance?.requestId === data.requestId
@@ -6880,7 +6891,7 @@ async function steerCurrentComposerTurn() {
     if (state.activeRuns.get(sessionId)?.runCtx !== runCtx || runCtx.shouldAbort) {
       throw new Error('当前任务已停止或结束，指令已保留');
     }
-    const result = await api.openCodeSteerRun({ runId, yanSessionId: sessionId, requestId, text });
+    const result = await api.openCodeSteerRun({ runId, zSessionId: sessionId, requestId, text });
     if (!result?.ok || result.accepted !== true) throw new Error(result?.error || '当前任务未确认接收，请重试或排队发送');
     // A late queue acknowledgement must never overwrite a provider receipt or
     // a terminal event that arrived while this IPC call was still pending.
@@ -6930,7 +6941,7 @@ function queueCurrentComposerTurn() {
     queuedAt: Date.now()
   };
   state.queuedTurns.set(sessionId, queuedTurn);
-  void invokeYanCore('yanCoreEnqueueIntent', {
+  void invokeZCore('zCoreEnqueueIntent', {
     threadId: sessionId,
     intentId: queuedId,
     conversationRevision: queuedTurn.conversationRevision,
@@ -6949,8 +6960,8 @@ function queueCurrentComposerTurn() {
       state.queuedTurns.delete(sessionId);
       if (state.currentSession?.id === sessionId) { syncQueuedTurnUi(); updateSendState(); }
     }
-    if (!result?.ok) console.warn('[yan-core] queued intent persistence failed:', result?.error || 'unknown error');
-  }).catch(error => console.warn('[yan-core] queued intent persistence failed:', error));
+    if (!result?.ok) console.warn('[z-core] queued intent persistence failed:', result?.error || 'unknown error');
+  }).catch(error => console.warn('[z-core] queued intent persistence failed:', error));
   clearComposerPayload();
   syncQueuedTurnUi();
   updateSendState();
@@ -6961,7 +6972,7 @@ function editCurrentQueuedTurn() {
   const sessionId = String(state.currentSession?.id || '');
   const queued = state.queuedTurns.get(sessionId);
   if (!queued) return;
-  void invokeYanCore('yanCoreDeleteIntent', queued.id, 'user_edited').catch(() => {});
+  void invokeZCore('zCoreDeleteIntent', queued.id, 'user_edited').catch(() => {});
   state.queuedTurns.delete(sessionId);
   setComposerText(queued.text || '', { preserveSkills: false });
   setComposerSkills(queued.skillCalls || []);
@@ -6981,7 +6992,7 @@ function removeCurrentQueuedTurn() {
   const sessionId = String(state.currentSession?.id || '');
   const queued = sessionId ? state.queuedTurns.get(sessionId) : null;
   if (!sessionId || !state.queuedTurns.delete(sessionId)) return;
-  void invokeYanCore('yanCoreDeleteIntent', queued?.id, 'user_removed').catch(() => {});
+  void invokeZCore('zCoreDeleteIntent', queued?.id, 'user_removed').catch(() => {});
   syncQueuedTurnUi();
   updateSendState();
 }
@@ -7000,9 +7011,9 @@ function abortTask() {
 // deadline is the final backstop.
 function dispatchRunCancel(runCtx, attempt = 1) {
   const runId = runCtx?.runId;
-  if (!runId || typeof window.yan.openCodeCancelRun !== 'function') return;
+  if (!runId || typeof window.z.openCodeCancelRun !== 'function') return;
   const sessionId = String(runCtx.sessionId || '');
-  Promise.resolve(window.yan.openCodeCancelRun(runId))
+  Promise.resolve(window.z.openCodeCancelRun(runId))
     .then(result => {
       if (runCtx.shouldAbort !== true || result?.settled === true) return;
       if (attempt < 4) {
@@ -7061,7 +7072,7 @@ function watchCoreTerminalTurn(event) {
   coreTerminalReconcileTimers.set(runId, timer);
 }
 
-function applyYanCoreEvent(event = {}) {
+function applyZCoreEvent(event = {}) {
   const type = String(event.type || '');
   watchCoreTerminalTurn(event);
   const turnId = String(event.turnId || '');
@@ -7111,7 +7122,7 @@ function reconcileRunFromCoreTerminal(runId, event) {
   runCtx.detachOpenCodeListeners?.();
   settleAgentInteractionForRun(runCtx);
   const reconciledError = new Error('Core 已完成任务对账，忽略迟到的 OpenCode 收尾结果。');
-  reconciledError.code = 'YAN_CORE_RECONCILED';
+  reconciledError.code = 'Z_CORE_RECONCILED';
   const rejectCompletion = runCtx.rejectCompletion;
   runCtx.rejectCompletion = null;
   const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
@@ -7163,18 +7174,18 @@ function abortSessionById(sessionId) {
   const queuedTurn = state.queuedTurns.get(queuedSessionId);
   if (queuedTurn) {
     state.queuedTurns.delete(queuedSessionId);
-    void invokeYanCore('yanCoreDeleteIntent', queuedTurn.id, 'run_aborted').catch(() => {});
+    void invokeZCore('zCoreDeleteIntent', queuedTurn.id, 'run_aborted').catch(() => {});
     if (state.currentSession?.id === sessionId) {
       syncQueuedTurnUi();
       updateSendState();
     }
   }
   for (const context of contexts) settleAgentInteractionForRun(context, { permissionDecision: 'deny' });
-  if (runCtx.runId && window.yan.cancelImageGeneration) {
-    window.yan.cancelImageGeneration(runCtx.runId).catch(() => {});
+  if (runCtx.runId && window.z.cancelImageGeneration) {
+    window.z.cancelImageGeneration(runCtx.runId).catch(() => {});
   }
-  if (runCtx.runId && window.yan.cancelVideoGeneration) {
-    window.yan.cancelVideoGeneration(runCtx.runId).catch(() => {});
+  if (runCtx.runId && window.z.cancelVideoGeneration) {
+    window.z.cancelVideoGeneration(runCtx.runId).catch(() => {});
   }
   dispatchRunCancel(runCtx);
   applyAbortRunUi(sessionId);
@@ -7194,7 +7205,7 @@ function applyAbortRunUi(sessionId) {
   if (!entry) return;
   const { assistantEl, runCtx } = entry;
   runCtx.abortedUiApplied = true;
-  if (runCtx.activeAgentRun) window.YanSubagentWorkflow.finalize(runCtx.activeAgentRun, 'interrupted');
+  if (runCtx.activeAgentRun) window.ZSubagentWorkflow.finalize(runCtx.activeAgentRun, 'interrupted');
   if (runCtx.agentState) runCtx.agentState.status = 'interrupted';
 
   if (state.currentSession?.id === sessionId) {
@@ -7258,17 +7269,17 @@ const COMPOSER_SKILL_SLOTS = Object.freeze([
   { ids: ['codebase-design'], group: '代码辅助', search: ['代码库设计', '模块设计', '接口设计'] },
   { ids: ['ponytail-review'], group: '代码辅助', search: ['过度设计审阅', '删除复杂度', '精简审阅'] },
   { ids: ['ponytail-audit'], group: '代码辅助', search: ['代码库精简审计', '仓库瘦身', '复杂度审计'] },
-  { ids: ['yan-serena'], group: '代码辅助', search: ['Serena', '符号定位', '语义代码编辑', 'LSP'] },
-  { ids: ['yan-codegraph'], group: '代码辅助', search: ['CodeGraph', '代码图', '调用链', '影响分析'] },
-  { ids: ['yan-understand-anything'], group: '代码辅助', search: ['Understand Anything', '项目理解', '代码地图'] },
+  { ids: ['z-serena'], group: '代码辅助', search: ['Serena', '符号定位', '语义代码编辑', 'LSP'] },
+  { ids: ['z-codegraph'], group: '代码辅助', search: ['CodeGraph', '代码图', '调用链', '影响分析'] },
+  { ids: ['z-understand-anything'], group: '代码辅助', search: ['Understand Anything', '项目理解', '代码地图'] },
   { ids: ['greensock-gsap'], group: 'UI美化', search: ['GreenSock', 'GSAP', '网页动效', 'ScrollTrigger'] },
   { ids: ['ui-ux-pro-max'], group: 'UI美化', search: ['UI UX Pro Max', 'uipro', '设计系统', 'UI设计', 'UX设计'] },
   { ids: ['emil-motion'], group: 'UI美化', search: ['Emil Kowalski', '界面动效', 'Apple 交互', '动画审阅'] },
-  { ids: ['yan-react-bits'], group: 'UI美化', search: ['React Bits', '界面动效', '动画组件'] },
+  { ids: ['z-react-bits'], group: 'UI美化', search: ['React Bits', '界面动效', '动画组件'] },
   { ids: ['awesome-design-md'], group: '网页设计', search: ['DESIGN.md', '品牌设计参考', '设计语言'] },
-  { ids: ['yan-uiverse'], group: '网页设计', search: ['Uiverse', '网页组件', '静态网页'] },
+  { ids: ['z-uiverse'], group: '网页设计', search: ['Uiverse', '网页组件', '静态网页'] },
   { ids: ['writing-for-agents'], group: 'Agent规则', search: ['Agent 文档', 'Skill 编写', 'AGENTS.md'] },
-  { ids: ['yan-prompt-optimizer'], group: 'Agent规则', search: ['Prompt Optimizer', '提示词优化', 'Prompt'] },
+  { ids: ['z-prompt-optimizer'], group: 'Agent规则', search: ['Prompt Optimizer', '提示词优化', 'Prompt'] },
   { ids: ['market-anysearch', 'anysearch'], group: 'Agent规则', search: ['AnySearch', '搜索', '联网'] },
   { ids: ['officecli'], group: '办公辅助', search: ['OfficeCLI', 'Office', '文档', '表格', '演示文稿'] },
   { ids: ['hyperframes'], group: '办公辅助', search: ['HyperFrames', '视频', '动画', 'HTML 视频', '字幕'] },
@@ -8144,7 +8155,7 @@ function renderSubagentCallList() {
   }
   list.innerHTML = items.map(role => {
     const selected = state.selectedSubagents.some(item => item.id === role.id);
-    const icon = window.YanSubagentPanel?.iconFor?.(role.id) || '';
+    const icon = window.ZSubagentPanel?.iconFor?.(role.id) || '';
     return `<button type="button" class="skill-call-item ${selected ? 'is-selected' : ''}" data-composer-subagent-choice="${escapeAttr(role.id)}" role="option" aria-selected="${selected}">
       <span class="skill-call-icon subagent-call-icon" data-agent-role="${escapeAttr(role.id)}">${icon}</span>
       <span class="skill-call-text"><span class="skill-call-name">${escapeHtml(role.name)}</span><span class="skill-call-desc">${escapeHtml(role.desc)}</span></span>
@@ -8177,7 +8188,7 @@ function createComposerSubagentToken(role) {
   const logo = document.createElement('span');
   logo.className = 'composer-subagent-logo';
   logo.dataset.agentRole = normalized.id;
-  logo.innerHTML = window.YanSubagentPanel?.iconFor?.(normalized.id) || '';
+  logo.innerHTML = window.ZSubagentPanel?.iconFor?.(normalized.id) || '';
   const name = document.createElement('span');
   name.className = 'composer-skill-name';
   name.textContent = normalized.name;
@@ -8623,7 +8634,7 @@ async function attachAgentRunChangeSummary(agentRun, session) {
   if (!workspace) return agentRun;
   try {
     // Recover through the OpenCode session (works for interrupted/error runs
-    // too); the legacy .yanagent snapshot path is only kept for rollback.
+    // too); the legacy .zagent snapshot path is only kept for rollback.
     const summary = await api.openCodeSessionChanges(session.id, agentRun.runId);
     agentRun.changeCount = Number(summary?.count) || 0;
     if (agentRun.changeCount > 0) {
@@ -8660,11 +8671,11 @@ async function syncBackgroundSessionUi(session, running) {
 
 // ============================================================
 // OpenCode event adapter. OpenCode owns the model/tool loop; this code only
-// projects its native session events into Yan's existing UI state.
+// projects its native session events into Z's existing UI state.
 // ============================================================
 function createRendererRunId(sessionId) {
   const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-  return `yan-${String(sessionId || 'session')}-${random}`;
+  return `z-${String(sessionId || 'session')}-${random}`;
 }
 
 function stringifyOpenCodeValue(value) {
@@ -8677,19 +8688,19 @@ function stringifyOpenCodeValue(value) {
 }
 
 function containsDsmlProtocolMarkup(value) {
-  return window.YanProtocolText.containsDsmlMarkup(value);
+  return window.ZProtocolText.containsDsmlMarkup(value);
 }
 
 function splitTaggedThinkingText(value) {
-  const parser = globalThis.YanThinkingText?.splitTaggedThinkingText;
+  const parser = globalThis.ZThinkingText?.splitTaggedThinkingText;
   if (typeof parser === 'function') return parser(value);
   return { text: String(value || ''), thinking: '', incomplete: false };
 }
 
 const DELIVERY_AGREEMENT_NAME = 'Z-Delivery-Agreement';
-const DELIVERY_AGREEMENT_OPEN_TAG = '<yan-delivery-contract>';
-const DELIVERY_AGREEMENT_CLOSE_TAG = '</yan-delivery-contract>';
-const DELIVERY_AGREEMENT_FIELDS = window.YanDeliveryContract.FIELDS;
+const DELIVERY_AGREEMENT_OPEN_TAG = '<z-delivery-contract>';
+const DELIVERY_AGREEMENT_CLOSE_TAG = '</z-delivery-contract>';
+const DELIVERY_AGREEMENT_FIELDS = window.ZDeliveryContract.FIELDS;
 const DELIVERY_AGREEMENT_STATUS = Object.freeze({
   recorded: '已完成交付协议认证',
   checking: '交付协议认证中',
@@ -8717,7 +8728,7 @@ const REASONING_SIDEPATH_STATE_TEXT = Object.freeze({
 });
 
 function parseDeliveryAgreementFields(value) {
-  return window.YanDeliveryContract.parseFields(value);
+  return window.ZDeliveryContract.parseFields(value);
 }
 
 function joinDeliveryAgreementVisibleText(before, after) {
@@ -8740,7 +8751,7 @@ function deliveryAgreementOpenPrefixIndex(value) {
 }
 
 function extractDeliveryAgreement(value) {
-  const text = window.YanDeliveryContract.stripReviews(value);
+  const text = window.ZDeliveryContract.stripReviews(value);
   const lower = text.toLowerCase();
   const openTag = DELIVERY_AGREEMENT_OPEN_TAG.toLowerCase();
   const closeTag = DELIVERY_AGREEMENT_CLOSE_TAG.toLowerCase();
@@ -8780,7 +8791,7 @@ function extractDeliveryAgreement(value) {
 }
 
 function normalizedDeliveryAgreement(contract = {}) {
-  const normalized = window.YanDeliveryContract.normalize(contract);
+  const normalized = window.ZDeliveryContract.normalize(contract);
   return Object.fromEntries(DELIVERY_AGREEMENT_FIELDS.map(field => [
     field,
     String(normalized[field] || '')
@@ -8913,8 +8924,8 @@ function normalizeDeliveryAgreementTimeline(sourceTimeline = []) {
     if (sourceItem.type === 'text') {
       const extracted = extractDeliveryAgreement(sourceItem.content);
       if (extracted.contract) ensureDeliveryAgreementTimelineItem(timeline, extracted.contract, timeline.length);
-      const withoutProtocols = typeof window.YanDeliveryContract?.stripProtocolBlocks === 'function'
-        ? window.YanDeliveryContract.stripProtocolBlocks(extracted.text)
+      const withoutProtocols = typeof window.ZDeliveryContract?.stripProtocolBlocks === 'function'
+        ? window.ZDeliveryContract.stripProtocolBlocks(extracted.text)
         : extracted.text;
       const content = splitTaggedThinkingText(withoutProtocols).text;
       if (hasVisibleOpenCodeText(content)) timeline.push({ ...sourceItem, content });
@@ -9000,8 +9011,8 @@ function upsertOpenCodeTextWithTaggedThinking(runCtx, key, value, streaming = tr
   if (agreement.contract) upsertOpenCodeDeliveryAgreement(runCtx, agreement.contract);
   // Other protocol blocks (reasoning side-path, reviews) must never surface as
   // chat text; the card carries their content instead.
-  const cleaned = typeof window.YanDeliveryContract?.stripProtocolBlocks === 'function'
-    ? window.YanDeliveryContract.stripProtocolBlocks(agreement.text)
+  const cleaned = typeof window.ZDeliveryContract?.stripProtocolBlocks === 'function'
+    ? window.ZDeliveryContract.stripProtocolBlocks(agreement.text)
     : agreement.text;
   const parsed = splitTaggedThinkingText(cleaned);
   const textKey = `text:${String(key || '')}`;
@@ -9140,7 +9151,7 @@ function upsertOpenCodeTimeline(runCtx, key, item) {
     : rebuildOpenCodeTimelineIndex(runCtx);
   const index = Number.isInteger(indexMap.get(normalizedKey)) ? indexMap.get(normalizedKey) : -1;
   const previous = index >= 0 ? timeline[index] : null;
-  window.YanSubagentWorkflow.noteParentWork(runCtx.activeAgentRun, previous, { ...previous, ...item, openCodeKey: normalizedKey });
+  window.ZSubagentWorkflow.noteParentWork(runCtx.activeAgentRun, previous, { ...previous, ...item, openCodeKey: normalizedKey });
   const next = {
     ...item,
     stage: item.stage
@@ -9694,60 +9705,60 @@ function mapOpenCodeEventToPet(event, runCtx) {
 
   const data = event.data || event.properties || {};
   const part = data.part;
-  if (event.type === 'yan.opencode.started') return { type: 'phase', message: '回包中' };
-  if (event.type === 'yan.model.request.started') {
+  if (event.type === 'z.opencode.started') return { type: 'phase', message: '回包中' };
+  if (event.type === 'z.model.request.started') {
     return { type: 'phase', message: Number(data.requestIndex) > 1 ? '起飞中' : '回包中' };
   }
-  if (event.type === 'yan.model.truncated') {
+  if (event.type === 'z.model.truncated') {
     return { type: 'phase', message: '输出被截断，正在续写' };
   }
-  if (event.type === 'yan.model.empty-output') {
+  if (event.type === 'z.model.empty-output') {
     return { type: 'phase', message: '空回复，正在续写' };
   }
-  if (event.type === 'yan.opencode.reconnecting') {
+  if (event.type === 'z.opencode.reconnecting') {
     const attempt = Math.max(1, Number(data.attempt) || 1);
     const maxAttempts = Math.max(attempt, Number(data.maxAttempts) || 5);
     return { type: 'phase', message: `正在重新连接 ${attempt}/${maxAttempts}` };
   }
-  if (event.type === 'yan.opencode.reconnected') return { type: 'phase', message: '思考推理' };
-  if (event.type === 'yan.context.compression.started') return { type: 'phase', message: '正在压缩上下文' };
-  if (event.type === 'yan.context.compression.completed') return { type: 'phase', message: '上下文压缩已完成' };
-  if (event.type === 'yan.goal.acceptance.started') return { type: 'phase', message: '正在验收目标' };
-  if (event.type === 'yan.goal.acceptance.repaired') return { type: 'phase', message: '已修复问题，准备再次验收' };
-  if (event.type === 'yan.goal.acceptance.passed') return { type: 'phase', message: '验收通过，正在完成回复' };
-  if (event.type === 'yan.goal.acceptance.failed') return { type: 'phase', message: '验收未通过' };
-  if (event.type === 'yan.policy.acceptance.started') return { type: 'phase', message: '正在验收策略落实情况' };
-  if (event.type === 'yan.policy.acceptance.passed') return { type: 'phase', message: '策略验收通过，正在完成回复' };
-  if (event.type === 'yan.policy.acceptance.failed') return { type: 'phase', message: '策略验收发现未落实项' };
-  if (event.type === 'yan.delivery.acceptance.started') return { type: 'phase', message: '正在核对交付结果' };
-  if (event.type === 'yan.delivery.acceptance.repaired') return { type: 'phase', message: '已修缮问题，正在再次核对' };
-  if (event.type === 'yan.delivery.acceptance.passed') return { type: 'phase', message: '交付核对通过，正在完成回复' };
-  if (event.type === 'yan.delivery.acceptance.failed') return { type: 'phase', message: '交付核对未完成' };
-  if (event.type === 'yan.delivery.summary.started') return { type: 'phase', message: '交付核对完成，正在生成正文总结' };
-  if (event.type === 'yan.vision.relay.started') {
+  if (event.type === 'z.opencode.reconnected') return { type: 'phase', message: '思考推理' };
+  if (event.type === 'z.context.compression.started') return { type: 'phase', message: '正在压缩上下文' };
+  if (event.type === 'z.context.compression.completed') return { type: 'phase', message: '上下文压缩已完成' };
+  if (event.type === 'z.goal.acceptance.started') return { type: 'phase', message: '正在验收目标' };
+  if (event.type === 'z.goal.acceptance.repaired') return { type: 'phase', message: '已修复问题，准备再次验收' };
+  if (event.type === 'z.goal.acceptance.passed') return { type: 'phase', message: '验收通过，正在完成回复' };
+  if (event.type === 'z.goal.acceptance.failed') return { type: 'phase', message: '验收未通过' };
+  if (event.type === 'z.policy.acceptance.started') return { type: 'phase', message: '正在验收策略落实情况' };
+  if (event.type === 'z.policy.acceptance.passed') return { type: 'phase', message: '策略验收通过，正在完成回复' };
+  if (event.type === 'z.policy.acceptance.failed') return { type: 'phase', message: '策略验收发现未落实项' };
+  if (event.type === 'z.delivery.acceptance.started') return { type: 'phase', message: '正在核对交付结果' };
+  if (event.type === 'z.delivery.acceptance.repaired') return { type: 'phase', message: '已修缮问题，正在再次核对' };
+  if (event.type === 'z.delivery.acceptance.passed') return { type: 'phase', message: '交付核对通过，正在完成回复' };
+  if (event.type === 'z.delivery.acceptance.failed') return { type: 'phase', message: '交付核对未完成' };
+  if (event.type === 'z.delivery.summary.started') return { type: 'phase', message: '交付核对完成，正在生成正文总结' };
+  if (event.type === 'z.vision.relay.started') {
     const model = String(data.modelName || data.modelId || 'Agnes').trim() || 'Agnes';
     return { type: 'phase', message: `视觉中继正使用模型${model}读取你上传的图像` };
   }
-  if (event.type === 'yan.vision.relay.fallback') {
+  if (event.type === 'z.vision.relay.fallback') {
     return { type: 'phase', message: '视觉中继正在切换备用读图模型' };
   }
-  if (event.type === 'yan.vision.relay.completed') {
+  if (event.type === 'z.vision.relay.completed') {
     const model = String(data.modelName || data.modelId || 'Agnes').trim() || 'Agnes';
     return { type: 'phase', message: `视觉中继已使用模型${model}完成图像读取，正转交主模型中` };
   }
-  if (event.type === 'yan.dsml.recovery.started') return { type: 'phase', message: '正在恢复模型工具调用' };
-  if (event.type === 'yan.dsml.recovery.completed') return { type: 'phase', message: '思考推理' };
-  if (event.type === 'yan.subagent.permission') {
+  if (event.type === 'z.dsml.recovery.started') return { type: 'phase', message: '正在恢复模型工具调用' };
+  if (event.type === 'z.dsml.recovery.completed') return { type: 'phase', message: '思考推理' };
+  if (event.type === 'z.subagent.permission') {
     const role = subagentRoleLabel(event.data?.subagentType);
     if (!event.data?.granted && String(event.data?.subagentType || '').toLowerCase() === 'builder') {
       return { type: 'phase', message: 'Sub Build Agent 当前 3 个槽位均已占用' };
     }
     return { type: 'phase', message: event.data?.granted ? `${role}已开始工作` : '子代理数量已达上限' };
   }
-  if (event.type === 'yan.subagent.capacity') {
+  if (event.type === 'z.subagent.capacity') {
     return { type: 'phase', message: `Sub Build Agent ${Number(event.data?.activeSlots) || 0}/${Number(event.data?.maxSlots) || 3}` };
   }
-  if (event.type === 'yan.subagent.progress') {
+  if (event.type === 'z.subagent.progress') {
     if (event.data?.kind === 'tool') return { type: 'phase', message: `子代理正在执行 ${event.data.tool}` };
     if (event.data?.kind === 'text' && !event.data.terminal) return { type: 'phase', message: '子代理正在生成回复' };
     if (event.data?.kind === 'reasoning') return { type: 'phase', message: '子代理正在思考' };
@@ -9756,10 +9767,10 @@ function mapOpenCodeEventToPet(event, runCtx) {
   if (event.type === 'session.error') {
     return { type: 'error', message: data.error?.data?.message || data.error?.message || '任务出现异常' };
   }
-  if (event.type === 'yan.opencode.event-error') {
+  if (event.type === 'z.opencode.event-error') {
     return { type: 'error', message: data.message || '内核事件流出现异常' };
   }
-  if (event.type === 'yan.finalization.started' || event.type === 'yan.finalization.progress') {
+  if (event.type === 'z.finalization.started' || event.type === 'z.finalization.progress') {
     return { type: 'phase', message: data.message || '正在收尾' };
   }
   if (event.type === 'permission.v2.asked' || event.type === 'permission.asked') return { type: 'phase', message: '等待操作权限' };
@@ -9866,10 +9877,10 @@ function normalizeAgentTodos(value) {
 function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
   if (!event?.type) return;
   runCtx.openCodeLastEventAt = Date.now();
-  if (event.type === 'yan.guidance.status' && applyLiveGuidanceStatus(runCtx, event)) return;
+  if (event.type === 'z.guidance.status' && applyLiveGuidanceStatus(runCtx, event)) return;
   if (updateSubagentWorkflow(runCtx, event, deferEffects)) return;
   const data = event.data || event.properties || {};
-  if (event.type === 'yan.thrash.watchdog.status' || event.type === 'yan.thrash.watchdog') {
+  if (event.type === 'z.thrash.watchdog.status' || event.type === 'z.thrash.watchdog') {
     if (runCtx.activeAgentRun && window.ZWdMonitor) {
       runCtx.activeAgentRun.watchdog = window.ZWdMonitor.reduce(runCtx.activeAgentRun.watchdog, event);
       if (state.currentSession?.id === runCtx.sessionId) renderWdMonitor();
@@ -9895,15 +9906,15 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
   ) {
     markOpenCodeResponseStarted(runCtx);
   }
-  if (event.type === 'yan.opencode.started') {
+  if (event.type === 'z.opencode.started') {
     runCtx.openCodePhase = 'work';
     runCtx.openCodeSessionId = String(data.sessionID || '');
     showOpenCodeModelWait(runCtx);
-  } else if (event.type === 'yan.model.request.started') {
+  } else if (event.type === 'z.model.request.started') {
     showOpenCodeModelWait(runCtx);
-  } else if (event.type === 'yan.model.response.started') {
+  } else if (event.type === 'z.model.response.started') {
     markOpenCodeResponseStarted(runCtx);
-  } else if (event.type === 'yan.context.budget') {
+  } else if (event.type === 'z.context.budget') {
     const configuredBudget = configuredContextBudget();
     const budgetWindow = positiveContextTokens(data.contextWindow) || configuredBudget.contextWindow;
     const requestedSoftThreshold = positiveContextTokens(data.softThreshold)
@@ -9916,14 +9927,14 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       inputTokensPerSecond: Math.max(1, Number(data.inputTokensPerSecond) || 10_000)
     };
     updateContextInfo(runCtx.agentState, runCtx.sessionRef || state.currentSession);
-  } else if (event.type === 'yan.context.compression.started') {
+  } else if (event.type === 'z.context.compression.started') {
     upsertOpenCodeTimeline(runCtx, 'context-compression', {
       type: 'progress',
       variant: 'context-compression',
       compressionState: 'running',
       content: '正在压缩上下文……'
     });
-  } else if (event.type === 'yan.context.compression.completed') {
+  } else if (event.type === 'z.context.compression.completed') {
     runCtx.contextCompressionCount = (Number(runCtx.contextCompressionCount) || 0) + 1;
     runCtx.lastContextCompression = {
       beforeTokens: Math.max(0, Number(data.beforeTokens) || 0),
@@ -9945,7 +9956,7 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
     if (state.currentSession?.id === runCtx.sessionId) {
       updateContextInfo(runCtx.agentState, runCtx.sessionRef || state.currentSession);
     }
-  } else if (event.type === 'yan.context.compression.failed') {
+  } else if (event.type === 'z.context.compression.failed') {
     runCtx.contextCompressionError = String(data.message || '上下文压缩失败');
     upsertOpenCodeTimeline(runCtx, 'context-compression', {
       type: 'progress',
@@ -9953,16 +9964,16 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       compressionState: 'failed',
       content: '前置压缩未完成；若上下文接近窗口上限，本任务可能失败，可尝试开启新任务。'
     });
-  } else if (event.type === 'yan.interjection.processing') {
+  } else if (event.type === 'z.interjection.processing') {
     runCtx.openCodePhaseBeforeInterjection = runCtx.openCodePhase;
     runCtx.openCodePhase = 'interjection';
     upsertOpenCodeTimeline(runCtx, `interjection:${Number(data.count) || 1}`, {
       type: 'progress',
       content: data.requestFinish ? '正在按临时对话中的要求收尾' : '正在处理临时对话消息'
     });
-  } else if (event.type === 'yan.interjection.processed') {
+  } else if (event.type === 'z.interjection.processed') {
     runCtx.openCodePhase = runCtx.openCodePhaseBeforeInterjection || 'work';
-  } else if (event.type === 'yan.review.updated') {
+  } else if (event.type === 'z.review.updated') {
     const files = Array.isArray(data.files) ? data.files : [];
     const summary = {
       source: 'opencode',
@@ -9983,27 +9994,27 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
     }
     // History replay must not repaint the live review sidebar of another task.
     if (!runCtx.replayingHistory) scheduleRightSidebarReviewRefresh(300);
-  } else if (event.type === 'yan.review.invalidated') {
+  } else if (event.type === 'z.review.invalidated') {
     runCtx.reviewNeedsFetch = true;
     runCtx.reviewVersion = (runCtx.reviewVersion || 0) + 1;
     if (!runCtx.replayingHistory) scheduleRightSidebarReviewRefresh();
-  } else if (event.type === 'yan.dsml.recovery.started') {
+  } else if (event.type === 'z.dsml.recovery.started') {
     suppressOpenCodeProtocolPart(runCtx, '');
     upsertOpenCodeTimeline(runCtx, 'dsml-recovery', {
       type: 'progress',
       content: '正在恢复模型工具调用'
     });
-  } else if (event.type === 'yan.dsml.recovery.completed') {
+  } else if (event.type === 'z.dsml.recovery.completed') {
     upsertOpenCodeTimeline(runCtx, 'dsml-recovery', {
       type: 'progress',
       content: '模型工具调用已恢复'
     });
-  } else if (event.type === 'yan.dsml.recovery.failed') {
+  } else if (event.type === 'z.dsml.recovery.failed') {
     suppressOpenCodeProtocolPart(runCtx, '');
     runCtx.openCodeError = String(data.message || '模型工具调用恢复失败');
   } else if (event.type === 'message.updated') {
     updateOpenCodeContextUsage(runCtx, data.info || data.message || data);
-  } else if (event.type === 'yan.vision.relay.started') {
+  } else if (event.type === 'z.vision.relay.started') {
     const model = String(data.modelName || data.modelId || 'Agnes').trim() || 'Agnes';
     upsertOpenCodeTimeline(runCtx, 'vision-relay', {
       type: 'progress',
@@ -10012,14 +10023,14 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       modelName: model,
       content: `视觉中继正使用模型${model}读取你上传的图像`
     });
-  } else if (event.type === 'yan.vision.relay.fallback') {
+  } else if (event.type === 'z.vision.relay.fallback') {
     upsertOpenCodeTimeline(runCtx, 'vision-relay', {
       type: 'progress',
       variant: 'vision-relay',
       visionRelayState: 'running',
       content: String(data.message || '视觉中继正在切换备用读图模型')
     });
-  } else if (event.type === 'yan.vision.relay.completed') {
+  } else if (event.type === 'z.vision.relay.completed') {
     const model = String(data.modelName || data.modelId || 'Agnes').trim() || 'Agnes';
     upsertOpenCodeTimeline(runCtx, 'vision-relay', {
       type: 'progress',
@@ -10028,19 +10039,19 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       modelName: model,
       content: `视觉中继已使用模型${model}完成图像读取，正转交主模型中`
     });
-  } else if (event.type === 'yan.policy.acceptance.started') {
+  } else if (event.type === 'z.policy.acceptance.started') {
     runCtx.openCodePhase = 'policy';
     const callId = String(data.callID || `policy-acceptance:${runCtx.runId}`);
     upsertOpenCodeTimeline(runCtx, `tool-call:${callId}`, {
       type: 'tool_call',
       callId,
-      name: data.tool || 'yan_policy_acceptance',
+      name: data.tool || 'z_policy_acceptance',
       args: data.input || {}
     });
-  } else if (event.type === 'yan.policy.acceptance.passed' || event.type === 'yan.policy.acceptance.failed') {
+  } else if (event.type === 'z.policy.acceptance.passed' || event.type === 'z.policy.acceptance.failed') {
     runCtx.openCodePhase = event.type.endsWith('.passed') ? 'policy-passed' : 'policy-failed';
     const callId = String(data.callID || `policy-acceptance:${runCtx.runId}`);
-    const toolName = data.tool || 'yan_policy_acceptance';
+    const toolName = data.tool || 'z_policy_acceptance';
     upsertOpenCodeTimeline(runCtx, `tool-result:${callId}`, {
       type: 'tool_result',
       callId,
@@ -10048,14 +10059,14 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       output: stringifyOpenCodeValue(data.output ?? { ok: event.type.endsWith('.passed'), message: data.message || '' }),
       ok: event.type.endsWith('.passed')
     });
-  } else if (event.type === 'yan.goal.acceptance.started') {
+  } else if (event.type === 'z.goal.acceptance.started') {
     runCtx.openCodePhase = 'goal';
     const round = Math.max(1, Number(data.round) || 1);
     upsertOpenCodeTimeline(runCtx, 'goal-acceptance', {
       type: 'progress',
       content: `Goal 第 ${round} 轮：正在按原始要求验收。`
     });
-  } else if (event.type === 'yan.goal.acceptance.repaired') {
+  } else if (event.type === 'z.goal.acceptance.repaired') {
     runCtx.openCodePhase = 'goal';
     const round = Math.max(1, Number(data.round) || 1);
     upsertOpenCodeTimeline(runCtx, 'goal-acceptance', {
@@ -10064,39 +10075,39 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
         ? `Goal 第 ${round} 轮已应用临时对话引导，正在重新验收。`
         : `Goal 第 ${round} 轮发现并修复了实际问题，正在进入下一轮验收。`
     });
-  } else if (event.type === 'yan.goal.acceptance.passed') {
+  } else if (event.type === 'z.goal.acceptance.passed') {
     runCtx.openCodePhase = 'goal-passed';
     const round = Math.max(1, Number(data.round) || 1);
     upsertOpenCodeTimeline(runCtx, 'goal-acceptance', {
       type: 'progress',
       content: `Goal 已在第 ${round} 轮通过验收。`
     });
-  } else if (event.type === 'yan.goal.acceptance.failed') {
+  } else if (event.type === 'z.goal.acceptance.failed') {
     runCtx.openCodePhase = 'goal-failed';
     upsertOpenCodeTimeline(runCtx, 'goal-acceptance', {
       type: 'progress',
       content: String(data.message || 'Goal 验收未通过。')
     });
-  } else if (event.type === 'yan.delivery.contract.updated') {
+  } else if (event.type === 'z.delivery.contract.updated') {
     upsertOpenCodeDeliveryAgreement(runCtx, data.contract, { contractId: data.contractId, verification: 'recorded', review: null });
-  } else if (event.type === 'yan.sidepath.required') {
+  } else if (event.type === 'z.sidepath.required') {
     upsertReasoningSidepath(runCtx, { status: 'pending' });
-  } else if (event.type === 'yan.sidepath.brief') {
+  } else if (event.type === 'z.sidepath.brief') {
     const brief = data.brief || {};
     upsertReasoningSidepath(runCtx, { status: 'cleared' });
     upsertReasoningSidepathBrief(runCtx, brief);
-  } else if (event.type === 'yan.sidepath.blocked') {
+  } else if (event.type === 'z.sidepath.blocked') {
     const previous = openCodeTimelineItem(runCtx, 'reasoning-sidepath') || {};
     upsertReasoningSidepath(runCtx, {
       blockedCount: Math.max(Number(previous.blockedCount) || 0, Number(data.attempt) || 0),
       blockedPermission: String(data.permission || ''),
       status: previous.status === 'recorded' ? 'recorded' : 'blocked'
     });
-  } else if (event.type === 'yan.sidepath.degraded') {
+  } else if (event.type === 'z.sidepath.degraded') {
     upsertReasoningSidepath(runCtx, { degraded: true, status: 'degraded' });
-  } else if (event.type === 'yan.sidepath.bypassed') {
+  } else if (event.type === 'z.sidepath.bypassed') {
     upsertReasoningSidepath(runCtx, { bypassed: true, bypassFile: String(data.file || ''), status: 'bypassed' });
-  } else if (event.type === 'yan.delivery.acceptance.started') {
+  } else if (event.type === 'z.delivery.acceptance.started') {
     setDeliveryAgreementVerification(runCtx, 'checking', data);
     runCtx.openCodePhase = 'delivery';
     const round = Math.max(1, Number(data.round) || 1);
@@ -10105,7 +10116,7 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       type: 'progress',
       content: `交付核对第 ${round} 轮${artifact ? `（${artifact}）` : ''}：正在检查真实结果。`
     });
-  } else if (event.type === 'yan.delivery.acceptance.repaired') {
+  } else if (event.type === 'z.delivery.acceptance.repaired') {
     setDeliveryAgreementVerification(runCtx, 'checking', data);
     runCtx.openCodePhase = 'delivery';
     const round = Math.max(1, Number(data.round) || 1);
@@ -10117,7 +10128,7 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
           ? `交付核对第 ${round} 轮发现问题并完成最小修缮，正在再次检查。`
           : `交付核对第 ${round} 轮已处理引导，正在再次检查。`
     });
-  } else if (event.type === 'yan.delivery.acceptance.passed') {
+  } else if (event.type === 'z.delivery.acceptance.passed') {
     setDeliveryAgreementVerification(runCtx, 'verified', data);
     runCtx.openCodePhase = 'delivery-passed';
     const round = Math.max(1, Number(data.round) || 1);
@@ -10127,14 +10138,14 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
         ? '主轮已包含真实预览或验证，交付核对直接通过。'
         : `交付核对已在第 ${round} 轮通过。`
     });
-  } else if (event.type === 'yan.delivery.acceptance.failed') {
+  } else if (event.type === 'z.delivery.acceptance.failed') {
     setDeliveryAgreementVerification(runCtx, 'failed', data);
     runCtx.openCodePhase = 'delivery-failed';
     upsertOpenCodeTimeline(runCtx, 'delivery-acceptance', {
       type: 'progress',
       content: String(data.message || '交付核对未完成。')
     });
-  } else if (event.type === 'yan.delivery.summary.started') {
+  } else if (event.type === 'z.delivery.summary.started') {
     runCtx.openCodePhase = 'delivery-summary';
     upsertOpenCodeTimeline(runCtx, 'delivery-acceptance', {
       type: 'progress',
@@ -10142,20 +10153,20 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
         ? '交付核对通过，正在生成最终正文总结。'
         : '交付核对未完全通过，正在生成最终正文总结。'
     });
-  } else if (event.type === 'yan.delivery.summary.finished') {
+  } else if (event.type === 'z.delivery.summary.finished') {
     if (data.ok === false) {
       upsertOpenCodeTimeline(runCtx, 'delivery-acceptance', {
         type: 'progress',
         content: `正文总结生成失败：${String(data.message || '模型未返回内容')}，沿用核对结论作为收尾。`
       });
     }
-  } else if (event.type === 'yan.opencode.event-error') {
+  } else if (event.type === 'z.opencode.event-error') {
     runCtx.openCodeError = String(data.message || '内核事件流出现异常');
     upsertOpenCodeTimeline(runCtx, 'event-error', {
       type: 'progress',
       content: `内核事件流异常：${runCtx.openCodeError}。运行仍在继续，正在等待恢复。`
     });
-  } else if (event.type === 'yan.finalization.started' || event.type === 'yan.finalization.progress') {
+  } else if (event.type === 'z.finalization.started' || event.type === 'z.finalization.progress') {
     runCtx.openCodePhase = 'finalizing';
     upsertOpenCodeTimeline(runCtx, 'finalization', {
       type: 'progress',
@@ -10305,21 +10316,21 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
     upsertOpenCodeTimeline(runCtx, `retry:${data.attempt}`, {
       type: 'progress', content: `模型请求重试 ${data.attempt}：${stringifyOpenCodeValue(data.error)}`
     });
-  } else if (event.type === 'yan.model.retrying') {
+  } else if (event.type === 'z.model.retrying') {
     upsertOpenCodeTimeline(runCtx, `retry:${data.attempt}`, {
       type: 'progress', content: `上游流中断，正在自动重试（第 ${data.attempt} 次）：${stringifyOpenCodeValue(data.error)}`
     });
-  } else if (event.type === 'yan.model.truncated') {
+  } else if (event.type === 'z.model.truncated') {
     upsertOpenCodeTimeline(runCtx, `truncated:${data.attempt || 1}`, {
       type: 'progress',
       content: '模型输出在上限处被截断，正在自动续写最终回复'
     });
-  } else if (event.type === 'yan.model.empty-output') {
+  } else if (event.type === 'z.model.empty-output') {
     upsertOpenCodeTimeline(runCtx, `empty-output:${data.attempt || 1}`, {
       type: 'progress',
       content: '模型正常结束但可见正文为空，正在自动续写最终回复'
     });
-  } else if (event.type === 'yan.opencode.reconnecting') {
+  } else if (event.type === 'z.opencode.reconnecting') {
     const attempt = Math.max(1, Number(data.attempt) || 1);
     const maxAttempts = Math.max(attempt, Number(data.maxAttempts) || 5);
     removeOpenCodeTimeline(runCtx, 'event-stream-lost');
@@ -10333,11 +10344,11 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       content: `正在重新连接 ${attempt}/${maxAttempts}……`
     });
     runCtx.openCodeStreamLost = true;
-  } else if (event.type === 'yan.opencode.reconnected') {
+  } else if (event.type === 'z.opencode.reconnected') {
     removeOpenCodeTimeline(runCtx, 'stream-reconnect');
     removeOpenCodeTimeline(runCtx, 'event-stream-lost');
     runCtx.openCodeStreamLost = false;
-  } else if (event.type === 'yan.opencode.event-stream-lost') {
+  } else if (event.type === 'z.opencode.event-stream-lost') {
     const attempt = Math.max(1, Number(data.attempt) || 1);
     const maxAttempts = Math.max(attempt, Number(data.maxAttempts) || 5);
     if (data.exhausted || data.maxAttempts || data.attempt) {
@@ -10359,7 +10370,7 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
     runCtx.openCodeStreamLost = true;
   } else if (event.type === 'session.error') {
     runCtx.openCodeError = data.error?.data?.message || data.error?.message || stringifyOpenCodeValue(data.error);
-  } else if (event.type === 'yan.model.recovered') {
+  } else if (event.type === 'z.model.recovered') {
     // The provider stream failed, OpenCode retried, and a later assistant
     // response completed without error: drop the stale failure so a recovered
     // run never surfaces a task-failure banner or notification.
@@ -10435,7 +10446,7 @@ function applyOpenCodeEventBatch(runCtx, events) {
   const parentChanged = (Number(runCtx.openCodeTimelineRevision) || 0) !== parentRevision;
   if (hasToolLifecycleEvent) renderOpenCodeRunNow(runCtx);
   else if (parentChanged || hasTodoUpdate) {
-    scheduleOpenCodeRender(runCtx, events.length && events.every(event => event?.type?.startsWith('yan.subagent.')) ? 100 : 0);
+    scheduleOpenCodeRender(runCtx, events.length && events.every(event => event?.type?.startsWith('z.subagent.')) ? 100 : 0);
   }
   // Batches that only moved child-session work were fully applied to the
   // subagent panel above; scheduling a parent render for them re-reconciled
@@ -10448,7 +10459,7 @@ function openCodeResultToAgentRun(result, runCtx) {
   cancelOpenCodeStreamFlush(runCtx);
   runCtx.openCodeStreamAccumulators?.clear();
   removeOpenCodeTimeline(runCtx, 'model-wait');
-  const workflow = window.YanSubagentWorkflow;
+  const workflow = window.ZSubagentWorkflow;
   workflow.importRecords(runCtx.activeAgentRun, result.subagents);
   for (const tool of result.toolCalls || []) {
     if (tool.name === 'task') workflow.consume(runCtx.activeAgentRun, { type: 'message.part.updated', data: { part: { type: 'tool', tool: 'task', callID: tool.callId, state: { input: tool.args, output: tool.output, status: tool.ok === false ? 'error' : 'completed' } } } });
@@ -10806,7 +10817,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
       const requestMessageAnchor = hasResetHistory ? await messageForkAnchor(latestUserMessage) : '';
       const start = await api.openCodeStartRun({
         runId: openCodeRunId,
-        yanSessionId: session.id,
+        zSessionId: session.id,
         conversationRevision,
         openCodeSessionId: session.openCodeSessionId || '',
         title: session.title || latestUserMessage.content || 'Z task',
@@ -11015,7 +11026,7 @@ async function reconcileOpenCodeActiveRuns() {
   for (const descriptor of runs) {
     try {
       // 尾部窗口足够覆盖最近一次 run 的消息,不必整取会话
-      const session = await api.getSession(String(descriptor.yanSessionId || ''), { messageLimit: MESSAGE_LOAD_LIMIT });
+      const session = await api.getSession(String(readCompatibleField(descriptor, 'zSessionId') || ''), { messageLimit: MESSAGE_LOAD_LIMIT });
       if (!session) continue;
       markSessionLoadBaseline(session);
       if ((session.messages || []).some(message => message?.agentRun?.runId === descriptor.runId)) continue;
@@ -11062,14 +11073,14 @@ async function recoverInterruptedOpenCodeRuns(recoveredTurns) {
 
 async function settleRecoveredOpenCodeRun(runId, sessionId, text = '') {
   try {
-    await api.yanCoreSettleRecoveredRun?.({ runId, sessionId, text });
+    await api.zCoreSettleRecoveredRun?.({ runId, sessionId, text });
   } catch (error) {
     console.warn('[opencode-recovery] settle failed:', error);
   }
 }
 
 async function recoverInterruptedOpenCodeRun(descriptor = {}) {
-  const sessionId = String(descriptor.yanSessionId || '');
+  const sessionId = String(readCompatibleField(descriptor, 'zSessionId') || '');
   const runId = String(descriptor.runId || '');
   if (!sessionId || !runId) return false;
   const summary = state.sessions.find(session => String(session.id) === sessionId);
@@ -11210,11 +11221,11 @@ function findPersistedIntentSubmission(session, intentId) {
   return null;
 }
 
-async function getYanCoreIntentRecord(intentId) {
+async function getZCoreIntentRecord(intentId) {
   const targetIntentId = String(intentId || '').trim();
-  if (!targetIntentId || typeof api?.yanCoreGetState !== 'function') return null;
+  if (!targetIntentId || typeof api?.zCoreGetState !== 'function') return null;
   try {
-    const snapshot = await invokeYanCore('yanCoreGetState', {});
+    const snapshot = await invokeZCore('zCoreGetState', {});
     return snapshot?.intents?.[targetIntentId] || null;
   } catch {
     return null;
@@ -11247,12 +11258,12 @@ function scheduleQueuedTurnDispatch(session) {
         state.queuedTurns.delete(sessionId);
         return;
       }
-      const hasYanCoreIntentBridge = typeof api?.yanCoreConsumeIntent === 'function';
-      if (hasYanCoreIntentBridge) {
-        let consumed = await invokeYanCore('yanCoreConsumeIntent', queued.id);
+      const hasZCoreIntentBridge = typeof api?.zCoreConsumeIntent === 'function';
+      if (hasZCoreIntentBridge) {
+        let consumed = await invokeZCore('zCoreConsumeIntent', queued.id);
         if (discardStaleQueuedTurn(sessionId, queued, consumed)) return;
         if (consumed?.ok !== true) {
-          const record = await getYanCoreIntentRecord(queued.id);
+          const record = await getZCoreIntentRecord(queued.id);
           if (record?.status === 'consumed' || record?.status === 'dispatched') {
             // Another renderer already owns this Intent. Do not submit it a
             // second time; a consumed record remains recoverable by its owner.
@@ -11260,7 +11271,7 @@ function scheduleQueuedTurnDispatch(session) {
             if (record.status === 'dispatched' || persisted?.complete) {
               state.queuedTurns.delete(sessionId);
               if (persisted?.complete && record.status === 'consumed') {
-                await invokeYanCore('yanCoreAckIntent', queued.id).catch(() => {});
+                await invokeZCore('zCoreAckIntent', queued.id).catch(() => {});
               }
               return;
             }
@@ -11272,21 +11283,21 @@ function scheduleQueuedTurnDispatch(session) {
               queued.retryAfter = Date.now() + 1_000;
               return;
             }
-            const requeued = await invokeYanCore('yanCoreRequeueIntent', queued.id);
+            const requeued = await invokeZCore('zCoreRequeueIntent', queued.id);
             if (discardStaleQueuedTurn(sessionId, queued, requeued)) return;
             if (requeued?.ok !== true) {
               queued.retryAfter = Date.now() + 1_000;
-              console.warn('[yan-core] stale queued intent claim could not be recovered:', requeued?.error || queued.id);
+              console.warn('[z-core] stale queued intent claim could not be recovered:', requeued?.error || queued.id);
               return;
             }
-            consumed = await invokeYanCore('yanCoreConsumeIntent', queued.id);
+            consumed = await invokeZCore('zCoreConsumeIntent', queued.id);
             if (discardStaleQueuedTurn(sessionId, queued, consumed)) return;
             if (consumed?.ok !== true) {
               queued.retryAfter = Date.now() + 1_000;
               return;
             }
           } else {
-            console.warn('[yan-core] queued intent claim failed:', consumed?.error || queued.id);
+            console.warn('[z-core] queued intent claim failed:', consumed?.error || queued.id);
             return;
           }
         }
@@ -11298,7 +11309,7 @@ function scheduleQueuedTurnDispatch(session) {
       const persistedSubmission = findPersistedIntentSubmission(targetSession, queued.id);
       if (persistedSubmission?.complete) {
         state.queuedTurns.delete(sessionId);
-        await invokeYanCore('yanCoreAckIntent', queued.id).catch(() => {});
+        await invokeZCore('zCoreAckIntent', queued.id).catch(() => {});
         return;
       }
 
@@ -11320,17 +11331,17 @@ function scheduleQueuedTurnDispatch(session) {
         });
       const completedSubmission = findPersistedIntentSubmission(targetSession, queued.id);
       if (result?.ok === true || completedSubmission?.complete) {
-        await invokeYanCore('yanCoreAckIntent', queued.id).catch(() => {});
+        await invokeZCore('zCoreAckIntent', queued.id).catch(() => {});
       } else if (!state.queuedTurns.has(sessionId)) {
         state.queuedTurns.set(sessionId, queued);
-        const requeued = await invokeYanCore('yanCoreRequeueIntent', queued.id).catch(() => null);
+        const requeued = await invokeZCore('zCoreRequeueIntent', queued.id).catch(() => null);
         discardStaleQueuedTurn(sessionId, queued, requeued);
       }
     } catch (error) {
       console.error('[queued-turn] dispatch failed:', error);
       if (queued && !state.queuedTurns.has(sessionId)) {
         state.queuedTurns.set(sessionId, queued);
-        const requeued = await invokeYanCore('yanCoreRequeueIntent', queued.id).catch(() => null);
+        const requeued = await invokeZCore('zCoreRequeueIntent', queued.id).catch(() => null);
         discardStaleQueuedTurn(sessionId, queued, requeued);
       }
     } finally {
@@ -11501,7 +11512,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   } catch (err) {
     assistantEl = getActiveAssistantElement(runSession.id) || assistantEl;
     const ui = !!getActiveAssistantBody(runSession.id);
-    if (err?.code === 'YAN_CORE_RECONCILED' || runCtx.coreReconciled) {
+    if (err?.code === 'Z_CORE_RECONCILED' || runCtx.coreReconciled) {
       // Core has settled execution, so late provider completions are ignored.
       // Keep ownership until the observed work is saved and finally releases it.
       taskOk = false;
@@ -11714,7 +11725,7 @@ async function rollbackMessageRun(msg, el) {
   });
   if (!confirmed) return;
 
-  const res = await api.yanagentRollbackRun(sid, runId, ws);
+  const res = await api.zagentRollbackRun(sid, runId, ws);
   if (!res.ok) {
     toast('撤销失败: ' + (res.error || '未知错误'));
     return;
@@ -11846,7 +11857,7 @@ function finalizeAgentRun(content, status, activeRun, bodyEl, error, runCtx) {
   // 收尾读取 partialContent 前,必须把合帧缓冲里未应用的流式增量同步落定,
   // 否则最后一批(≤250ms)文本会从最终消息里丢失
   if (runCtx) flushOpenCodeStreamDeltas(runCtx);
-  if (activeRun) window.YanSubagentWorkflow.finalize(activeRun, status);
+  if (activeRun) window.ZSubagentWorkflow.finalize(activeRun, status);
   const extractedContent = extractDeliveryAgreement(content);
   const timeline = normalizeDeliveryAgreementTimeline(
     (activeRun?.timeline || collectTimelineFromDom(bodyEl))
@@ -14111,7 +14122,7 @@ function renderAgentRunBody(bodyEl, agentRun, fallbackContent = '', options = {}
     guidanceRunViews.set(bodyEl, view);
     if (!renderingHistoryMessages && renderGuidedAgentRun(bodyEl, agentRun, fallbackContent)) return;
   }
-  window.YanSubagentWorkflow.migrate(agentRun);
+  window.ZSubagentWorkflow.migrate(agentRun);
   if (bodyEl.dataset.agentOutputInitialized !== 'true') {
     bodyEl.replaceChildren();
     bodyEl.dataset.agentOutputInitialized = 'true';
@@ -14238,11 +14249,11 @@ function renderPlanDocumentPanel() {
   panel.dataset.state = 'ready';
   // Heal already-written files: strip protocol blocks and thinking blocks at
   // display time as well, so a dirty document never reaches the panel.
-  const withoutProtocols = typeof window.YanDeliveryContract?.stripProtocolBlocks === 'function'
-    ? window.YanDeliveryContract.stripProtocolBlocks(planDocumentState.content || '')
+  const withoutProtocols = typeof window.ZDeliveryContract?.stripProtocolBlocks === 'function'
+    ? window.ZDeliveryContract.stripProtocolBlocks(planDocumentState.content || '')
     : (planDocumentState.content || '');
-  const cleaned = typeof window.YanThinkingText?.stripTaggedThinkingBlocks === 'function'
-    ? window.YanThinkingText.stripTaggedThinkingBlocks(withoutProtocols)
+  const cleaned = typeof window.ZThinkingText?.stripTaggedThinkingBlocks === 'function'
+    ? window.ZThinkingText.stripTaggedThinkingBlocks(withoutProtocols)
     : withoutProtocols;
   bodyEl.innerHTML = `<article class="rs-plan-markdown msg-body">${renderMarkdown(cleaned)}</article>`;
 }
@@ -14451,7 +14462,7 @@ function projectAicssG2Globe(x, y, z, spin) {
 function resolveAgentPresentationMode(modelId, explicitMode = '') {
   const explicit = String(explicitMode || '').trim();
   if (explicit) return explicit;
-  const helper = globalThis.YanModelPresentation;
+  const helper = globalThis.ZModelPresentation;
   if (typeof helper?.presentationModeForModel === 'function') {
     return helper.presentationModeForModel(modelId);
   }
@@ -14594,7 +14605,7 @@ function buildGptThinkingElement(items = [], placeholder = '', showShine = true)
 }
 
 const TOOL_UI = {
-  yan_policy_acceptance: { label: '策略验收', icon: 'badge-check' },
+  z_policy_acceptance: { label: '策略验收', icon: 'badge-check' },
   read: { label: '读取文件', icon: 'file-text' },
   read_file: { label: '读取文件', icon: 'file-text' },
   read_file_range: { label: '读取片段', icon: 'file-text' },
@@ -14643,24 +14654,24 @@ const TOOL_UI = {
   create_handoff: { label: '创建工作区交接', icon: 'folder-arrow-left' },
   read_source_context: { label: '读取来源上下文', icon: 'folder-arrow-up' },
   change_workspace: { label: '切换工作区', icon: 'folder-arrow-left' },
-  open_builtin_browser: { category: 'yan-browser' },
-  browser_snapshot: { category: 'yan-browser' },
-  browser_read_page: { category: 'yan-browser' },
-  browser_click: { category: 'yan-browser' },
-  browser_type: { category: 'yan-browser' },
-  browser_press: { category: 'yan-browser' },
-  browser_scroll: { category: 'yan-browser' },
-  browser_wait: { category: 'yan-browser' },
-  browser_screenshot: { category: 'yan-browser' },
-  browser_history: { category: 'yan-browser' },
-  browser_status: { category: 'yan-browser' },
-  browser_inspect_page: { category: 'yan-browser' },
-  browser_apply_annotation: { category: 'yan-browser' },
-  browser_select: { category: 'yan-browser' },
-  browser_check: { category: 'yan-browser' },
-  browser_hover: { category: 'yan-browser' },
-  browser_focus: { category: 'yan-browser' },
-  browser_drag: { category: 'yan-browser' },
+  open_builtin_browser: { category: 'z-browser' },
+  browser_snapshot: { category: 'z-browser' },
+  browser_read_page: { category: 'z-browser' },
+  browser_click: { category: 'z-browser' },
+  browser_type: { category: 'z-browser' },
+  browser_press: { category: 'z-browser' },
+  browser_scroll: { category: 'z-browser' },
+  browser_wait: { category: 'z-browser' },
+  browser_screenshot: { category: 'z-browser' },
+  browser_history: { category: 'z-browser' },
+  browser_status: { category: 'z-browser' },
+  browser_inspect_page: { category: 'z-browser' },
+  browser_apply_annotation: { category: 'z-browser' },
+  browser_select: { category: 'z-browser' },
+  browser_check: { category: 'z-browser' },
+  browser_hover: { category: 'z-browser' },
+  browser_focus: { category: 'z-browser' },
+  browser_drag: { category: 'z-browser' },
   search_symbols: { category: 'serena' },
   get_file_outline: { category: 'serena' },
   get_file_imports: { category: 'serena' },
@@ -14718,7 +14729,7 @@ const TOOL_ICON_SVG = {
 };
 
 const TOOL_SERVER_UI = {
-  'yan-browser': { label: 'Z 内置浏览器', toolName: 'Z-builtin-browser-Control', icon: 'globe-cursor' },
+  'z-browser': { label: 'Z 内置浏览器', toolName: 'Z-builtin-browser-Control', icon: 'globe-cursor' },
   serena: { label: 'Z Serena', toolName: 'Z-Serena-MCP', icon: 'file-check' },
   codegraph: { label: 'Z CodeGraph', toolName: 'Z-CodeGraph-MCP', icon: 'folder-check' },
   playwright: { label: 'Z Playwright', toolName: 'Z-Playwright-MCP', icon: 'terminal-cursor' },
@@ -14820,13 +14831,13 @@ function parseToolIdentity(toolName) {
     'mcp_default_playwright',
     'mcp_default_codegraph',
     'mcp_default_serena',
-    'yan_continual_harness',
-    'yan_harness',
-    'yan_browser',
-    'yan_web',
-    'yan_session',
-    'yan_skills',
-    'yan_media'
+    'z_continual_harness',
+    'z_harness',
+    'z_browser',
+    'z_web',
+    'z_session',
+    'z_skills',
+    'z_media'
   ];
   const server = prefixes.find(prefix => normalized.startsWith(prefix + '_'));
   if (server) return { raw, server, action: normalized.slice(server.length + 1) };
@@ -14847,17 +14858,17 @@ function resolvedToolUi(label, iconKey, groupKey) {
 
 function toolServerCategory(server) {
   const key = String(server || '').replace(/-/g, '_').toLowerCase();
-  if (key.includes('yan_browser')) return 'yan-browser';
+  if (key.includes('z_browser')) return 'z-browser';
   if (key.includes('playwright')) return 'playwright';
   if (key.includes('serena')) return 'serena';
   if (key.includes('codegraph')) return 'codegraph';
-  if (key.includes('yan_harness') || key.includes('continual_harness')) return 'harness';
+  if (key.includes('z_harness') || key.includes('continual_harness')) return 'harness';
   return '';
 }
 
 function resolveServerToolUi(server, action) {
   const serverKey = String(server || '').replace(/-/g, '_').toLowerCase();
-  if (serverKey === 'yan_media' || serverKey === 'yan_skills' || serverKey === 'yan_web' || serverKey === 'yan_session') {
+  if (serverKey === 'z_media' || serverKey === 'z_skills' || serverKey === 'z_web' || serverKey === 'z_session') {
     const ui = TOOL_UI[action];
     if (ui?.label) return resolvedToolUi(ui.label, ui.icon, serverKey + ':' + action);
   }
@@ -14878,7 +14889,7 @@ function resolveToolUi(toolName, args = {}) {
     // returns a fallback glyph, so a bare truthiness check would swallow
     // role-less task calls (iconKey degraded to subagent:unknown).
     if (role) {
-      const roleIcon = window.YanSubagentPanel?.iconFor?.(role);
+      const roleIcon = window.ZSubagentPanel?.iconFor?.(role);
       if (roleIcon) {
         return { label: subagentRoleLabel(role), icon: roleIcon.replace('<svg ', '<svg aria-hidden="true" focusable="false" '), iconKey: `subagent:${String(role).toLowerCase()}`, groupKey: 'native:task' };
       }
@@ -14909,7 +14920,7 @@ function resolveToolUi(toolName, args = {}) {
 
 function getToolDisplayName(toolName) {
   const identity = parseToolIdentity(toolName);
-  if (identity.action === 'yan_policy_acceptance') return TOOL_UI.yan_policy_acceptance.label;
+  if (identity.action === 'z_policy_acceptance') return TOOL_UI.z_policy_acceptance.label;
   const nativeCategory = TOOL_UI[identity.action]?.category || '';
   const category = toolServerCategory(identity.server || nativeCategory);
   if (category) return TOOL_SERVER_UI[category].toolName;
@@ -16500,7 +16511,7 @@ function reviewFileLetter(status) {
 
 function reviewFileIconMarkup(file = {}) {
   const path = String(file.path || '');
-  const iconApi = globalThis.YanSimpleFileIcons;
+  const iconApi = globalThis.ZSimpleFileIcons;
   const slug = iconApi?.slugForFile?.(path) || '';
   const src = iconApi?.urlForSlug?.(slug) || '';
   if (src) {
@@ -17176,8 +17187,8 @@ async function fetchReviewDocument(file, summaryOverride = null) {
     }
     document = reviewDocumentFromSummary(recovered, file.path);
     documentError = (recovered?.files || []).find(item => item.path === file.path)?.documentError?.error || '';
-    if (!document && target?.session?.id && target?.runId && api.yanagentRunChanges) {
-      const snapshot = await api.yanagentRunChanges(
+    if (!document && target?.session?.id && target?.runId && api.zagentRunChanges) {
+      const snapshot = await api.zagentRunChanges(
         target.session.id,
         target.runId,
         target.session.workspace,
@@ -17249,8 +17260,8 @@ async function renderReviewDiff(summary = rsReviewState.summary) {
     }
     rowsRoot.innerHTML = '<div class="review-monaco-shell"><div class="review-monaco-host" aria-label="' + escapeAttr(selected.path + ' 文件差异') + '"></div>' + reviewMonacoAnnotationsMarkup(selected.path) + '</div>';
     const host = rowsRoot.querySelector('.review-monaco-host');
-    if (!host || !globalThis.YanReviewEditor) throw new Error('Monaco 审阅编辑器未加载。');
-    const controller = globalThis.YanReviewEditor.create(host);
+    if (!host || !globalThis.ZReviewEditor) throw new Error('Monaco 审阅编辑器未加载。');
+    const controller = globalThis.ZReviewEditor.create(host);
     rsReviewEditorController = controller;
     await controller.render({
       path: selected.path,
@@ -17458,7 +17469,7 @@ async function renderRightSidebarReviewLegacy({ force = false } = {}) {
         await api.saveSession(target.session);
       }
     } else if (!summary) {
-      summary = await api.yanagentRunChanges(target.session.id, target.runId, workspace, {
+      summary = await api.zagentRunChanges(target.session.id, target.runId, workspace, {
         includeDiff: true,
         allRuns: false
       });
@@ -17509,7 +17520,7 @@ function reviewWindowFileFromSummary(summary, path) {
 async function fetchAgentReviewManifest(target, { fresh = false } = {}) {
   if (!target) return null;
   if (!fresh && !target.running) {
-    const persisted = globalThis.YanReviewData.projectReviewSummary(target.summary);
+    const persisted = globalThis.ZReviewData.projectReviewSummary(target.summary);
     if (persisted) return persisted;
   }
   if (target.running && api.openCodeRunChanges) {
@@ -17522,8 +17533,8 @@ async function fetchAgentReviewManifest(target, { fresh = false } = {}) {
     if (recovered?.error) throw new Error(recovered.error);
     return recovered;
   }
-  if (api.yanagentRunChanges) {
-    return api.yanagentRunChanges(target.session.id, target.runId, target.session.workspace, { includeDiff: false, allRuns: false });
+  if (api.zagentRunChanges) {
+    return api.zagentRunChanges(target.session.id, target.runId, target.session.workspace, { includeDiff: false, allRuns: false });
   }
   return null;
 }
@@ -17536,8 +17547,8 @@ async function fetchAgentReviewWindowFile(target, filePath) {
     result = await api.openCodeRunChanges(target.runId, { includeDiff: true, paths: [filePath] });
   } else if (target.runId && api.openCodeSessionChanges) {
     result = await api.openCodeSessionChanges(target.session.id, target.runId, { includeDiff: true, paths: [filePath] });
-  } else if (api.yanagentRunChanges) {
-    result = await api.yanagentRunChanges(target.session.id, target.runId, target.session.workspace, {
+  } else if (api.zagentRunChanges) {
+    result = await api.zagentRunChanges(target.session.id, target.runId, target.session.workspace, {
       includeDiff: true,
       paths: [filePath],
       allRuns: false
@@ -17583,10 +17594,10 @@ async function loadReviewFileDiff(target, filePath, context = {}) {
   return hasRows(persisted) ? persisted : null;
 }
 
-function renderYanDshReviewSidebar(options = {}) {
+function renderZDshReviewSidebar(options = {}) {
   if (!openRightSidebarTabs.some(tab => tab.type === 'review')) return;
   const panel = $('#rs-review');
-  if (!panel || !globalThis.YanDshReview) return;
+  if (!panel || !globalThis.ZDshReview) return;
   const context = {
     source: rsReviewState.source,
     scope: rsReviewState.scope,
@@ -17600,20 +17611,20 @@ function renderYanDshReviewSidebar(options = {}) {
     context.target?.runId, context.target?.changeVersion, context.selectedPath]);
   if (rsReviewPendingRender?.key === key && rsReviewPendingRender.fresh === context.fresh) return rsReviewPendingRender.promise;
   if (!options.force && !context.fresh && key === rsReviewRenderedKey
-    && !$('#yanDshReviewPanel')?.classList.contains('hidden')) return;
+    && !$('#zDshReviewPanel')?.classList.contains('hidden')) return;
   const renderVersion = ++rsReviewRenderVersion;
   const pending = { key, fresh: context.fresh, promise: null };
   rsReviewPendingRender = pending;
   let timeout;
   pending.promise = Promise.race([
-    performYanDshReviewRender(context, renderVersion, key),
+    performZDshReviewRender(context, renderVersion, key),
     new Promise(resolve => {
       timeout = setTimeout(() => {
         if (renderVersion === rsReviewRenderVersion) {
           rsReviewRenderVersion += 1;
           panel.dataset.state = 'error';
           $('#reviewRefreshBtn')?.removeAttribute('aria-busy');
-          globalThis.YanDshReview.showError('读取审阅超时，请关闭后重新打开审阅。');
+          globalThis.ZDshReview.showError('读取审阅超时，请关闭后重新打开审阅。');
         }
         resolve();
       }, 45_000);
@@ -17625,7 +17636,7 @@ function renderYanDshReviewSidebar(options = {}) {
   return pending.promise;
 }
 
-async function performYanDshReviewRender(context, renderVersion, key) {
+async function performZDshReviewRender(context, renderVersion, key) {
   const panel = $('#rs-review');
   const current = () => renderVersion === rsReviewRenderVersion
     && state.currentSession?.id === context.sessionId
@@ -17639,13 +17650,13 @@ async function performYanDshReviewRender(context, renderVersion, key) {
   };
   const finish = async (summary, target, onRollback = null) => {
     if (!current()) return;
-    const next = globalThis.YanReviewData.projectReviewSummary(summary) || emptyReviewSummary();
+    const next = globalThis.ZReviewData.projectReviewSummary(summary) || emptyReviewSummary();
     rsReviewState.summary = next;
     rsReviewState.sessionId = String(target?.session?.id || state.currentSession?.id || '');
     rsReviewState.runId = String(target?.runId || '');
     rsReviewState.changeVersion = target?.changeVersion || '';
     panel.dataset.state = next.files?.length ? 'success' : 'idle';
-    const opened = await globalThis.YanDshReview.open({
+    const opened = await globalThis.ZDshReview.open({
       summary: next,
       selectedPath: rsReviewState.selectedPath,
       lazy: true,
@@ -17706,14 +17717,14 @@ async function performYanDshReviewRender(context, renderVersion, key) {
   } catch (error) {
     if (!current()) return;
     panel.dataset.state = 'error';
-    globalThis.YanDshReview?.showError?.(error?.message || '无法读取当前任务文件改动');
+    globalThis.ZDshReview?.showError?.(error?.message || '无法读取当前任务文件改动');
   } finally {
     if (renderVersion === rsReviewRenderVersion) $('#reviewRefreshBtn')?.removeAttribute('aria-busy');
   }
 }
 
 function renderRightSidebarReview(options = {}) {
-  if (globalThis.YanDshReview) return renderYanDshReviewSidebar(options);
+  if (globalThis.ZDshReview) return renderZDshReviewSidebar(options);
   return renderRightSidebarReviewLegacy(options);
 }
 
@@ -17886,7 +17897,7 @@ async function createTaskGitWorktree(trigger) {
     if (input) input.value = '';
     await refreshTaskGitWorktrees({ quiet: true });
     return result;
-  }, `已创建工作树 yan-task-${name.toLocaleLowerCase()}`);
+  }, `已创建工作树 z-task-${name.toLocaleLowerCase()}`);
 }
 
 async function mergeTaskGitWorktree(trigger, taskId) {
@@ -18836,7 +18847,7 @@ const RIGHT_SIDEBAR_TOOLS = Object.freeze({
   },
   subagents: {
     label: '子智能体',
-    icon: window.YanSubagentPanel.icon
+    icon: window.ZSubagentPanel.icon
   }
 });
 
@@ -19193,7 +19204,7 @@ function openRightSidebarTool(tool, { reuseBrowser = false } = {}) {
 
   if (tool === 'interjection') syncInterjectionUi();
   if (tool === 'browser') {
-    window.YanUnderstandAnything?.close();
+    window.ZUnderstandAnything?.close();
     syncBrowserViewport();
   }
   setRightSidebarOpen(true);
@@ -19222,7 +19233,7 @@ function closeRightSidebarTool(tool) {
     rsReviewRenderedKey = '';
     clearTimeout(rsReviewRefreshTimer);
     hideReviewQuickDiff();
-    globalThis.YanDshReview?.close?.();
+    globalThis.ZDshReview?.close?.();
   }
   if (closedTab.type === 'browser') destroyBrowserTabController(closedTab.id, { userInitiated: true });
   if (activeRightSidebarTab === tool) {
@@ -19402,9 +19413,9 @@ api.onBrowserNewTabRequest?.(detail => {
   openBrowserUrlInNewTab(detail?.url);
 });
 document.addEventListener('click', event => {
-  const agentLink = event.target.closest?.('a[data-yan-browser-link]');
+  const agentLink = event.target.closest?.('a[data-z-browser-link]');
   if (agentLink?.closest('.msg-body.agent-output')) {
-    const targetUrl = agentLink.dataset.yanBrowserLink || agentLink.getAttribute('href') || '';
+    const targetUrl = agentLink.dataset.zBrowserLink || agentLink.getAttribute('href') || '';
     // Workspace screenshots are local image files: they belong to the same
     // preview window as attachments and generated images, not the side panel.
     const imagePath = localImagePathFromUrl(targetUrl);
@@ -20671,8 +20682,8 @@ function syncVisionRelaySettings(status = {}) {
 }
 
 const VISION_RELAY_GUIDES = Object.freeze({
-  'release-notes': window.YanReleaseNotes,
-  'yan-guide': window.ZProductContent.guide,
+  'release-notes': window.ZReleaseNotes,
+  'z-guide': window.ZProductContent.guide,
   overview: {
     title: '视觉中继使用说明',
     pages: [
@@ -23506,13 +23517,13 @@ function updateTaskBar() {
     closeTaskGitBranchPopover();
     closeTaskGitPanel();
     renderTaskGitStatus({ available: true, workspace: '', isRepository: false });
-    window.YanUnderstandAnything?.bindWorkspace('');
+    window.ZUnderstandAnything?.bindWorkspace('');
     return;
   }
   bar.classList.remove('hidden');
   $('#taskBarTitle').textContent = displaySessionTitle(state.currentSession.title);
   const ws = String(state.currentSession.workspace || '').trim();
-  window.YanUnderstandAnything?.bindWorkspace(ws || '');
+  window.ZUnderstandAnything?.bindWorkspace(ws || '');
   const folderName = $('#taskBarFolderName');
   const folderButton = $('#taskBarFolder');
   const openBtn = $('#taskBarOpenFolder');
@@ -23527,7 +23538,7 @@ function updateTaskBar() {
     folderButton?.classList.remove('task-bar-folder-empty');
     openBtn.disabled = false;
     if (vsCodeBtn && !vsCodeBtn.classList.contains('is-launching')) vsCodeBtn.disabled = !vsCodeStatus.available;
-    api.yanagentEnsure?.(ws);
+    api.zagentEnsure?.(ws);
   } else {
     folderName.textContent = '自动任务文件夹';
     folderButton?.classList.remove('task-bar-folder-empty');
@@ -23855,7 +23866,7 @@ function trimAgentUrlCandidate(value) {
 function buildAgentUrlLink(label, url) {
   const target = normalizeAgentUrl(url);
   if (!target) return escapeHtml(label);
-  return `<a class="agent-output-link" href="${escapeAttr(target)}" data-yan-browser-link="${escapeAttr(target)}" rel="noreferrer">${escapeHtml(label)}</a>`;
+  return `<a class="agent-output-link" href="${escapeAttr(target)}" data-z-browser-link="${escapeAttr(target)}" rel="noreferrer">${escapeHtml(label)}</a>`;
 }
 
 function normalizeAgentImageUrl(value) {
@@ -24020,14 +24031,14 @@ function renderMarkdown(text) {
   t = t.replace(/\u0000AGENTIMAGE(\d+)\u0000/g, (_, i) => {
     const image = agentImages[Number(i)];
     if (!image) return '';
-    return `<figure class="agent-markdown-image"><a class="agent-markdown-image-link" href="${escapeAttr(image.url)}" data-yan-browser-link="${escapeAttr(image.url)}" rel="noreferrer" aria-label="打开图片预览" title="打开图片预览"><img src="${escapeAttr(image.url)}" alt="${escapeAttr(image.alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a></figure>`;
+    return `<figure class="agent-markdown-image"><a class="agent-markdown-image-link" href="${escapeAttr(image.url)}" data-z-browser-link="${escapeAttr(image.url)}" rel="noreferrer" aria-label="打开图片预览" title="打开图片预览"><img src="${escapeAttr(image.url)}" alt="${escapeAttr(image.alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a></figure>`;
   });
   return t;
 }
 
 function toast(msg) {
   const t = $('#toast');
-  t.textContent = window.YanI18n?.translate(msg) || msg;
+  t.textContent = window.ZI18n?.translate(msg) || msg;
   t.classList.remove('hidden');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.classList.add('hidden'), 2200);
@@ -25034,7 +25045,7 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
   if (!url) return { ok: false, error: '请提供 URL 或文件路径' };
 
   if (currentWindowView === 'main') {
-    window.YanUnderstandAnything?.close();
+    window.ZUnderstandAnything?.close();
     switchSidebarNav('tasks');
   }
 
@@ -25079,15 +25090,15 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
 async function executeBrowserAgentCommand(detail = {}) {
   const action = String(detail.action || '');
   const params = detail.params && typeof detail.params === 'object' ? detail.params : {};
-  const runId = String(params.yan_run_id || '');
+  const runId = String(params.z_run_id || '');
   const operationId = String(detail.operationId || detail.requestId || '');
   const runCtx = findRunCtxByRunId(runId);
   const scope = {
-    workspace: String(Object.prototype.hasOwnProperty.call(params, 'yan_workspace')
-      ? params.yan_workspace
+    workspace: String(Object.prototype.hasOwnProperty.call(params, 'z_workspace')
+      ? params.z_workspace
       : runCtx ? runCtx.workspace : state.currentSession ? state.currentSession.workspace : state.config?.workspace || ''),
-    sessionId: String(Object.prototype.hasOwnProperty.call(params, 'yan_session_id')
-      ? params.yan_session_id
+    sessionId: String(Object.prototype.hasOwnProperty.call(params, 'z_session_id')
+      ? params.z_session_id
       : runCtx ? runCtx.sessionId : state.currentSession?.id || '')
   };
   if (action === 'cancel') {
@@ -25182,7 +25193,7 @@ async function executeBrowserAgentCommand(detail = {}) {
   if (action === 'apply_annotation') {
     const note=runCtx?.browserAnnotation;
     if (!note || note.tabId!==controller.id) return {ok:false,error:'本任务没有用户选定的注释目标'};
-    return runAgentAction(()=>controller.webview.executeJavaScript('('+window.YanApplyAnnotation.toString()+')('+JSON.stringify({id:note.annotationId,url:note.url,text:params.text,styles:{...note.requestedStyles,...params.styles}})+')'));
+    return runAgentAction(()=>controller.webview.executeJavaScript('('+window.ZApplyAnnotation.toString()+')('+JSON.stringify({id:note.annotationId,url:note.url,text:params.text,styles:{...note.requestedStyles,...params.styles}})+')'));
   }
   if (action === 'status') {
     const url = controller.webview?.getURL?.() || controller.currentUrl || '';
@@ -25231,7 +25242,7 @@ api.onBrowserAgentCommand?.((detail = {}) => {
       if (!requestId) return;
       api.browserAgentCommandResult?.({
         requestId,
-        result: { ok: false, error: error?.message || String(error), code: 'YAN_BROWSER_RENDERER_FAILED' }
+        result: { ok: false, error: error?.message || String(error), code: 'Z_BROWSER_RENDERER_FAILED' }
       });
     });
 });
@@ -25268,6 +25279,7 @@ function createBrowserTabController(tab) {
   const agentControlLabel = fragment.querySelector('[data-browser-role="agent-control-label"]');
   const agentControlLabelButton = fragment.querySelector('.browser-agent-control-label-button');
   if (!root || !panel || !toolbar || !webview || !urlInput) return null;
+  webview.setAttribute('partition', api.getBrowserPartition());
 
   root.id = `rs-${tab.id}`;
   root.dataset.browserTabId = tab.id;
@@ -25276,7 +25288,7 @@ function createBrowserTabController(tab) {
   // from the guest UA so sites use their normal Chromium compatibility path.
   const chromiumUserAgent = String(navigator.userAgent || '')
     .replace(/\s*Electron\/[^\s]+/gi, '')
-    .replace(/\s*yan-agent\/[^\s]+/gi, '')
+    .replace(/\s*z-agent\/[^\s]+/gi, '')
     .trim();
   if (chromiumUserAgent) webview.setAttribute('useragent', chromiumUserAgent);
 
@@ -25329,7 +25341,7 @@ function createBrowserTabController(tab) {
     waitingForLoad: false
   };
   browserTabControllers.set(tab.id, controller);
-  controller.annotations = window.YanBrowserAnnotations?.init(controller, {
+  controller.annotations = window.ZBrowserAnnotations?.init(controller, {
     notify: message => toast(message),
     onAdd: async note => {
       if (isCurrentSessionExecutionActive() || !canStartRun()) return { ok: false, error: '当前任务正在执行，请结束后重试；注释已保留' };
@@ -25341,7 +25353,7 @@ function createBrowserTabController(tab) {
       return submitMessage(text, [], [], { modelSelection, browserAnnotation: {tabId:controller.id,...note} });
     }
   });
-  controller.agent = window.YanBrowserAgent?.init({
+  controller.agent = window.ZBrowserAgent?.init({
     webview,
     panel,
     status,

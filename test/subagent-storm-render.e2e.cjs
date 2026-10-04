@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-subagent-storm-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-subagent-storm-'));
 
 (async () => {
   let application;
@@ -16,7 +16,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-subagent-storm-')
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => typeof appendMessage === 'function' && typeof state === 'object');
@@ -65,7 +65,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-subagent-storm-')
 
       // Child-session storm: token deltas and running tool events. These belong
       // to the subagent panel and must not reconcile the parent message.
-      const childEvent = (event) => ({ type: 'yan.subagent.event', data: {
+      const childEvent = (event) => ({ type: 'z.subagent.event', data: {
         callId: 'task-1', childSessionID: 'child-session-1', subagentType: 'builder', event
       } });
       for (let batch = 0; batch < 6; batch++) {

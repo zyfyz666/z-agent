@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-menu-abort-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-composer-menu-abort-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'playwright');
 const menuScreenshotPath = path.join(outputDir, 'composer-add-menu-compact.png');
 const skillMenuScreenshotPath = path.join(outputDir, 'composer-skill-menu.png');
@@ -26,8 +26,8 @@ fs.mkdirSync(outputDir, { recursive: true });
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();

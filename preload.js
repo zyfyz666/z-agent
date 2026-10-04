@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('yan', {
+contextBridge.exposeInMainWorld('z', {
+  getBrowserPartition: () => ipcRenderer.sendSync('browser:partition'),
   // Config / API / models / skills
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (partial) => ipcRenderer.invoke('config:set', partial),
@@ -191,9 +192,9 @@ contextBridge.exposeInMainWorld('yan', {
     return () => ipcRenderer.removeListener('update:progress', handler);
   },
 
-  // .yanagent (memory/logs/snapshots in workspace)
-  yanagentEnsure: (workspace) => ipcRenderer.invoke('yanagent:ensure', workspace),
-  yanagentRunChanges: (sessionId, runId, workspace, options = {}) => ipcRenderer.invoke('yanagent:run-changes', {
+  // .zagent (memory/logs/snapshots in workspace)
+  zagentEnsure: (workspace) => ipcRenderer.invoke('zagent:ensure', workspace),
+  zagentRunChanges: (sessionId, runId, workspace, options = {}) => ipcRenderer.invoke('zagent:run-changes', {
     sessionId,
     runId,
     workspace,
@@ -202,7 +203,7 @@ contextBridge.exposeInMainWorld('yan', {
     allRuns: !!options.allRuns,
     paths: Array.isArray(options.paths) ? options.paths : null
   }),
-  yanagentRollbackRun: (sessionId, runId, workspace) => ipcRenderer.invoke('yanagent:rollback-run', { sessionId, runId, workspace }),
+  zagentRollbackRun: (sessionId, runId, workspace) => ipcRenderer.invoke('zagent:rollback-run', { sessionId, runId, workspace }),
 
   getVsCodeStatus: () => ipcRenderer.invoke('vscode:status'),
   launchVsCode: (workspace = '') => ipcRenderer.invoke('vscode:launch', { workspace }),
@@ -258,7 +259,7 @@ contextBridge.exposeInMainWorld('yan', {
   // OpenCode runtime
   openCodePrewarm: () => ipcRenderer.invoke('opencode:prewarm'),
   openCodeStartRun: (request) => ipcRenderer.invoke('opencode:start-run', request),
-  openCodeCompressSession: (yanSessionId) => ipcRenderer.invoke('opencode:compress-session', { yanSessionId }),
+  openCodeCompressSession: (zSessionId) => ipcRenderer.invoke('opencode:compress-session', { zSessionId }),
   openCodeRunChanges: (runId, options = {}) => ipcRenderer.invoke('opencode:run-changes', {
     runId,
     fresh: options.fresh === true,
@@ -266,8 +267,8 @@ contextBridge.exposeInMainWorld('yan', {
     documentPath: String(options.documentPath || ''),
     paths: Array.isArray(options.paths) ? options.paths : null
   }),
-  openCodeSessionChanges: (yanSessionId, runId, options = {}) => ipcRenderer.invoke('opencode:session-changes', {
-    yanSessionId,
+  openCodeSessionChanges: (zSessionId, runId, options = {}) => ipcRenderer.invoke('opencode:session-changes', {
+    zSessionId,
     runId,
     fresh: options.fresh === true,
     includeDiff: options.includeDiff !== false,
@@ -277,13 +278,13 @@ contextBridge.exposeInMainWorld('yan', {
   openCodeCancelRun: (runId) => ipcRenderer.invoke('opencode:cancel-run', runId),
   openCodeSyncActiveRuns: () => ipcRenderer.invoke('opencode:sync-active-runs'),
   openCodeRecoverRuns: (payload = {}) => ipcRenderer.invoke('opencode:recover-runs', payload || {}),
-  yanCoreGetState: (payload = {}) => ipcRenderer.invoke('yan:core-state', payload || {}),
-  yanCoreSettleRecoveredRun: (payload = {}) => ipcRenderer.invoke('yan:core-settle-recovered-run', payload || {}),
-  yanCoreEnqueueIntent: (payload = {}) => ipcRenderer.invoke('yan:core-enqueue-intent', payload || {}),
-  yanCoreConsumeIntent: (intentId) => ipcRenderer.invoke('yan:core-consume-intent', intentId),
-  yanCoreRequeueIntent: (intentId) => ipcRenderer.invoke('yan:core-requeue-intent', intentId),
-  yanCoreAckIntent: (intentId) => ipcRenderer.invoke('yan:core-ack-intent', intentId),
-  yanCoreDeleteIntent: (intentId, reason = 'user_removed') => ipcRenderer.invoke('yan:core-delete-intent', { intentId, reason }),
+  zCoreGetState: (payload = {}) => ipcRenderer.invoke('z:core-state', payload || {}),
+  zCoreSettleRecoveredRun: (payload = {}) => ipcRenderer.invoke('z:core-settle-recovered-run', payload || {}),
+  zCoreEnqueueIntent: (payload = {}) => ipcRenderer.invoke('z:core-enqueue-intent', payload || {}),
+  zCoreConsumeIntent: (intentId) => ipcRenderer.invoke('z:core-consume-intent', intentId),
+  zCoreRequeueIntent: (intentId) => ipcRenderer.invoke('z:core-requeue-intent', intentId),
+  zCoreAckIntent: (intentId) => ipcRenderer.invoke('z:core-ack-intent', intentId),
+  zCoreDeleteIntent: (intentId, reason = 'user_removed') => ipcRenderer.invoke('z:core-delete-intent', { intentId, reason }),
   openCodeInterject: (payload) => ipcRenderer.invoke('opencode:interject', payload),
   openCodeSteerRun: (payload) => ipcRenderer.invoke('opencode:steer-run', payload),
   openCodeCancelInterjection: (payload) => ipcRenderer.invoke('opencode:cancel-interjection', payload),
@@ -312,10 +313,10 @@ contextBridge.exposeInMainWorld('yan', {
     ipcRenderer.on('opencode:completed', handler);
     return () => ipcRenderer.removeListener('opencode:completed', handler);
   },
-  onYanCoreEvent: (cb) => {
+  onZCoreEvent: (cb) => {
     const handler = (_e, detail) => cb(detail);
-    ipcRenderer.on('yan:core-event', handler);
-    return () => ipcRenderer.removeListener('yan:core-event', handler);
+    ipcRenderer.on('z:core-event', handler);
+    return () => ipcRenderer.removeListener('z:core-event', handler);
   },
 });
 

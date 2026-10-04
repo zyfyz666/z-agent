@@ -9,7 +9,7 @@ const path = require('node:path');
 const { createUtilityLedger, utilityOutcomeFromVerification } = require('../lib/agi/utility');
 
 function withTempDir(run) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-utility-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-utility-'));
   try {
     return run(dir);
   } finally {

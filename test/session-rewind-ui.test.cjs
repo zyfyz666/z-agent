@@ -268,7 +268,7 @@ test('first-message rewind with a default title survives blank-chat cleanup whil
   const deleted = [];
   const context = vm.createContext({ state: { currentSession: blank, sessions: [], composerDrafts: new Map(), queuedTurns: new Map() },
     api: { listSessions: async () => [rewound, blank], deleteSession: async id => { deleted.push(id); return { ok: true }; } },
-    renderSessionList() {}, clearYanCoreQueuedIntentsForThread() {} });
+    renderSessionList() {}, clearZCoreQueuedIntentsForThread() {} });
   vm.runInContext(section('function isDefaultSessionTitle(', 'function syncCurrentSessionWorkspace('), context);
   vm.runInContext(section('function setSessionSummaries(', '// Core IPC is optional'), context);
   await context.refreshSessions();
@@ -317,7 +317,7 @@ test('queued requests freeze the current conversation revision in durable intent
     getComposerText: () => 'follow-up prompt', normalizeComposerSkill: value => value,
     normalizeModelSelectionSnapshot: value => value, getAgentModelSelection: () => ({ modelType: 'text' }),
     validateQueuedModelPayload: () => true, createQueuedTurnId: () => 'queued-id',
-    invokeYanCore: (_method, payload) => { payloads.push(payload); return response.promise; },
+    invokeZCore: (_method, payload) => { payloads.push(payload); return response.promise; },
     clearComposerPayload() {}, syncQueuedTurnUi() {}, updateSendState() {}, console: { warn() {} }
   });
   vm.runInContext(section('function queueCurrentComposerTurn(', 'function editCurrentQueuedTurn('), context);
@@ -335,13 +335,13 @@ test('queued requests freeze the current conversation revision in durable intent
 test('queue hydration retains matching revised intents and excludes discarded history revisions', async () => {
   const context = vm.createContext({
     state: { sessions: [{ id: 'fresh', conversationRevision: 2 }, { id: 'stale', conversationRevision: 2 }], queuedTurns: new Map() },
-    api: { yanCoreGetState: async () => ({ intents: {
+    api: { zCoreGetState: async () => ({ intents: {
       fresh: { id: 'fresh-intent', threadId: 'fresh', status: 'queued', intent: { prompt: 'new prompt', conversationRevision: 2 } },
       stale: { id: 'stale-intent', threadId: 'stale', status: 'queued', intent: { prompt: 'old prompt', conversationRevision: 1 } }
     } }) },
     getAgentModelSelection: () => ({ modelId: 'selected' }), console
   });
-  vm.runInContext(section('async function hydrateQueuedTurns(', 'async function listRecoveredYanCoreTurns('), context);
+  vm.runInContext(section('async function hydrateQueuedTurns(', 'async function listRecoveredZCoreTurns('), context);
   await context.hydrateQueuedTurns();
   assert.equal(context.state.queuedTurns.get('fresh').conversationRevision, 2);
   assert.equal(context.state.queuedTurns.has('stale'), false);

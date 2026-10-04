@@ -23,28 +23,28 @@ function makeServer(name, dataDir) {
     fs.writeFileSync(configPath, JSON.stringify({ customSkills: [] }), 'utf8');
     base.env = {
       ...base.env,
-      YAN_SKILLS_ROOT: root,
-      YAN_SKILLS_DATA_DIR: dataDir,
-      YAN_SKILLS_CONFIG_PATH: configPath,
-      YAN_SKILLS_APP_ROOT: appRoot,
-      YAN_SKILLS_CLI: path.join(appRoot, 'node_modules', 'skills', 'bin', 'cli.mjs'),
-      YAN_SKILLS_ALLOW_NETWORK: 'false',
-      YAN_INPUT_TOKENS_PER_SECOND: '10000'
+      Z_SKILLS_ROOT: root,
+      Z_SKILLS_DATA_DIR: dataDir,
+      Z_SKILLS_CONFIG_PATH: configPath,
+      Z_SKILLS_APP_ROOT: appRoot,
+      Z_SKILLS_CLI: path.join(appRoot, 'node_modules', 'skills', 'bin', 'cli.mjs'),
+      Z_SKILLS_ALLOW_NETWORK: 'false',
+      Z_INPUT_TOKENS_PER_SECOND: '10000'
     };
   } else if (name === 'media') {
     base.env = {
       ...base.env,
-      YAN_MEDIA_DATA_DIR: dataDir,
-      YAN_MEDIA_RUNTIME: Buffer.from(JSON.stringify({ access: { allowNetwork: false } }), 'utf8').toString('base64')
+      Z_MEDIA_DATA_DIR: dataDir,
+      Z_MEDIA_RUNTIME: Buffer.from(JSON.stringify({ access: { allowNetwork: false } }), 'utf8').toString('base64')
     };
   } else if (name === 'browser') {
-    base.env = { ...base.env, YAN_BROWSER_ALLOW_NETWORK: 'false' };
+    base.env = { ...base.env, Z_BROWSER_ALLOW_NETWORK: 'false' };
   } else if (name === 'session') {
     base.env = base.env;
   } else if (name === 'harness') {
-    base.env = { ...base.env, YAN_HARNESS_CONTEXT_DIR: path.join(dataDir, 'contexts') };
+    base.env = { ...base.env, Z_HARNESS_CONTEXT_DIR: path.join(dataDir, 'contexts') };
   }
-  return spawn(process.execPath, [path.join(appRoot, 'lib', `yan-${name}-mcp.js`)], base);
+  return spawn(process.execPath, [path.join(appRoot, 'lib', `z-${name}-mcp.js`)], base);
 }
 
 function rpc(child, method, params = {}, timeoutMs = 3_000) {
@@ -109,7 +109,7 @@ async function measureServer(name, dataDir) {
 }
 
 test('built-in MCP handshakes and steady JSON-RPC stay low-latency without network calls', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-mcp-latency-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-mcp-latency-'));
   try {
     const results = await Promise.all(['skills', 'media', 'browser', 'session', 'harness'].map(name => measureServer(name, dataDir)));
     console.table(results.map(result => ({

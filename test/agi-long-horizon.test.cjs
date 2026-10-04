@@ -21,7 +21,7 @@ const fixedNow = () => new Date(FIXED_ISO).getTime();
 const laterNow = () => new Date(LATER_ISO).getTime();
 
 function makeWorkspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-horizon-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-horizon-'));
 }
 
 function cleanup(dir) {
@@ -311,7 +311,7 @@ test('loadProtocol and readProtocol fail safely on corrupt or missing storage', 
 
   const ws = makeWorkspace();
   try {
-    const corruptDir = path.join(ws, '.yanagent', 'agi', 'long-horizon', 'lh-corrupt');
+    const corruptDir = path.join(ws, '.zagent', 'agi', 'long-horizon', 'lh-corrupt');
     fs.mkdirSync(corruptDir, { recursive: true });
     fs.writeFileSync(path.join(corruptDir, 'protocol.json'), '{broken json', 'utf8');
     assert.equal(loadProtocol({ workspace: ws }), null);

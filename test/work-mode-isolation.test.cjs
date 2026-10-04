@@ -20,7 +20,7 @@ test('normal/plan/goal never inject AGI even with stale request fields', () => {
     assert.equal(clean.reasoningSidepath, undefined);
     assert.equal(clean.escalation, undefined);
     const text = combineSystem(request) + combineTurnPrompt(request, request.prompt, false);
-    assert.doesNotMatch(text, /LONG_MARKER|EDGE_MARKER|HARNESS_MARKER|POLICY_MARKER|AGI reasoning side-path|Yan 系统词表/);
+    assert.doesNotMatch(text, /LONG_MARKER|EDGE_MARKER|HARNESS_MARKER|POLICY_MARKER|AGI reasoning side-path|Z 系统词表/);
     assert.equal(permissionForRun(request).write, workMode === 'plan' ? 'deny' : 'allow');
   }
 });
@@ -39,20 +39,20 @@ test('AGI retains its gate and context; evolution retains only Harness', () => {
   assert.equal(agiEnabled({ workMode: 'agi', skillOnly: true }), false);
 });
 test('mode changes and legacy sessions cannot reuse injected kernel history', () => {
-  const session = { metadata: { yanWorkMode: 'agi', yanModeIsolation: 1 } };
+  const session = { metadata: { zWorkMode: 'agi', zModeIsolation: 1 } };
   assert.equal(sessionModeMatches(session, { workMode: 'normal' }), false);
   assert.equal(sessionModeMatches(session, { workMode: 'agi' }), true);
-  assert.equal(sessionModeMatches({ metadata: { yanWorkMode: 'normal' } }, { workMode: 'normal' }), false);
+  assert.equal(sessionModeMatches({ metadata: { zWorkMode: 'normal' } }, { workMode: 'normal' }), false);
   const text = combineTurnPrompt({ workMode: 'normal', history: [
-    { role: 'assistant', content: 'Visible answer<yan-reasoning-sidepath>SECRET_BRIEF</yan-reasoning-sidepath>' },
-    { role: 'user', content: '<yan-turn-context>OLD_SYSTEM</yan-turn-context>Continue work' }
+    { role: 'assistant', content: 'Visible answer<z-reasoning-sidepath>SECRET_BRIEF</z-reasoning-sidepath>' },
+    { role: 'user', content: '<z-turn-context>OLD_SYSTEM</z-turn-context>Continue work' }
   ] }, 'Continue', true);
   assert.match(text, /Visible answer/);
   assert.match(text, /Continue work/);
   assert.doesNotMatch(text, /SECRET_BRIEF|OLD_SYSTEM/);
 });
 test('normal retrieval excludes AGI-derived memory without deleting regular memory', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-mode-memory-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-mode-memory-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = new LongTermMemoryStore({ globalPath: path.join(root, 'memory.json') });
   store.upsert({ key: 'user-language', type: 'preference', scope: 'global', content: '用户偏好中文报告。', confidence: 0.9 });

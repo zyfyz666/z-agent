@@ -11,7 +11,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-core-journal-recovery-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-core-journal-recovery-'));
 
 (async () => {
   let application;
@@ -21,7 +21,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-core-journal-reco
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -41,13 +41,13 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-core-journal-reco
 
       const descriptor = {
         runId: 'run-e2e-recovery',
-        yanSessionId: session.id,
+        zSessionId: session.id,
         workspace: session.workspace || '',
         startedAt: Date.now() - 60_000,
         lastEventAt: Date.now() - 1_000,
         configSnapshot: { providerId: 'e2e', modelId: 'e2e-model', modelName: 'E2E Model', workMode: 'normal' },
         events: [
-          { type: 'yan.opencode.started', data: { sessionID: 'ses_e2e' } },
+          { type: 'z.opencode.started', data: { sessionID: 'ses_e2e' } },
           { type: 'message.part.delta', data: { partID: 'p1', field: 'text', delta: '第一段' } },
           { type: 'message.part.updated', data: { part: { id: 'p1', type: 'text', text: '第一段恢复正文' } } },
           { type: 'session.next.tool.called', data: { callID: 'c1', tool: 'bash', input: { command: 'echo hi' } } },

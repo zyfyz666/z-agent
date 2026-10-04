@@ -30,8 +30,8 @@ fs.mkdirSync(outputDir, { recursive: true });
 for (const [relative, content] of Object.entries(sourceFiles)) fs.writeFileSync(path.join(sourceWorkspace, relative), content);
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true',
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true',
     CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DOWNLOAD: '1', DO_NOT_TRACK: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
@@ -48,7 +48,7 @@ async function launch() {
   await page.route('https://fonts.googleapis.com/**', route => route.abort());
   await page.route('https://fonts.gstatic.com/**', route => route.abort());
   await page.waitForFunction(() => typeof quickInputHandlerReady !== 'undefined' && quickInputHandlerReady
-    && state.currentSession && state.config && window.YanUnderstandAnything);
+    && state.currentSession && state.config && window.ZUnderstandAnything);
   assert.equal(path.resolve(await application.evaluate(({ app }) => app.getPath('userData'))), path.resolve(profile));
   await application.evaluate(({ app }) => {
     const localRequire = process.getBuiltinModule('module').createRequire(`${app.getAppPath()}/main.js`);
@@ -76,8 +76,8 @@ async function launch() {
     window.projectMapToasts = [];
     window.projectMapLifecycle = [];
     for (const operation of ['open', 'close', 'refresh', 'handleWorkspaceChanged']) {
-      const original = window.YanUnderstandAnything[operation];
-      window.YanUnderstandAnything[operation] = function (...args) {
+      const original = window.ZUnderstandAnything[operation];
+      window.ZUnderstandAnything[operation] = function (...args) {
         window.projectMapLifecycle.push({ operation, args, view: currentWindowView,
           workspace: state.currentSession?.workspace, stack: new Error().stack });
         return original.apply(this, args);
@@ -93,8 +93,8 @@ async function launch() {
 
 async function createWorkspaceSession(workspace, title) {
   return page.evaluate(async ({ workspace, title }) => {
-    const session = await yan.createSession(true, workspace);
-    await yan.renameSession(session.id, title);
+    const session = await z.createSession(true, workspace);
+    await z.renameSession(session.id, title);
     await refreshSessions();
     await loadSession(session.id);
     return { id: session.id, workspace: state.currentSession.workspace };
@@ -103,7 +103,7 @@ async function createWorkspaceSession(workspace, title) {
 
 async function openMap() {
   await page.locator('[data-window-view="project-map"]').click();
-  await page.waitForFunction(() => currentWindowView === 'project-map' && window.YanUnderstandAnything.isOpen());
+  await page.waitForFunction(() => currentWindowView === 'project-map' && window.ZUnderstandAnything.isOpen());
   await page.waitForFunction(() => {
     const status = document.querySelector('#understandAnythingStatus');
     const src = document.querySelector('#understandAnythingFrame').src;
@@ -135,7 +135,7 @@ async function viewerRecords() {
 
 async function returnToComposer(expectedDraft) {
   await page.locator('[data-window-view="main"]').click();
-  await page.waitForFunction(() => currentWindowView === 'main' && !window.YanUnderstandAnything.isOpen());
+  await page.waitForFunction(() => currentWindowView === 'main' && !window.ZUnderstandAnything.isOpen());
   assert.equal(await page.locator('#understandAnythingLayer').isVisible(), false);
   const composer = page.locator('#composerInput');
   assert.equal(await composer.isVisible(), true);
@@ -165,10 +165,10 @@ async function readViewerJson(frameUrl, endpoint, parameters = {}) {
     await openMap();
     await assertEmptyMap();
     assert.ok(fs.existsSync(path.join(emptyWorkspace, '.codegraph', 'codegraph.db')), 'real CLI created the empty index');
-    assert.equal(JSON.parse(fs.readFileSync(path.join(emptyWorkspace, '.yanagent', 'ua', 'knowledge-graph.json'), 'utf8')).nodes.length, 0);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(emptyWorkspace, '.zagent', 'ua', 'knowledge-graph.json'), 'utf8')).nodes.length, 0);
     assert.deepEqual(await viewerRecords(), [], 'empty projects do not launch a viewer process');
     await page.screenshot({ path: path.join(outputDir, 'empty-project.png') });
-    const emptyRefresh = await page.evaluate(() => window.YanUnderstandAnything.refresh());
+    const emptyRefresh = await page.evaluate(() => window.ZUnderstandAnything.refresh());
     assert.equal(emptyRefresh.ok, true);
     assert.equal(emptyRefresh.empty, true);
     await assertEmptyMap();
@@ -187,7 +187,7 @@ async function readViewerJson(frameUrl, endpoint, parameters = {}) {
     assert.ok(graph.nodes.some(node => node.filePath === 'src/math.js'));
     assert.ok(graph.nodes.some(node => node.filePath === 'src/main.js'));
     assert.ok(graph.nodes.some(node => node.name === 'add'), 'CodeGraph parsed actual source symbols');
-    const converted = JSON.parse(fs.readFileSync(path.join(sourceWorkspace, '.yanagent', 'ua', 'knowledge-graph.json'), 'utf8'));
+    const converted = JSON.parse(fs.readFileSync(path.join(sourceWorkspace, '.zagent', 'ua', 'knowledge-graph.json'), 'utf8'));
     assert.equal(graph.nodes.length, converted.nodes.length);
     assert.equal(fs.existsSync(path.join(sourceWorkspace, '.ua')), false);
     assert.equal(fs.existsSync(path.join(sourceWorkspace, '.understand-anything')), false);
@@ -200,7 +200,7 @@ async function readViewerJson(frameUrl, endpoint, parameters = {}) {
     const frame = await page.locator('#understandAnythingFrame').contentFrame();
     await frame.locator('.react-flow__node').first().waitFor({ timeout: 45_000 });
     assert.ok(await frame.locator('.react-flow__node').count() > 0, 'the embedded graph renders visible nodes');
-    await page.evaluate(workspace => window.YanUnderstandAnything.handleWorkspaceChanged({ workspace }), emptyWorkspace);
+    await page.evaluate(workspace => window.ZUnderstandAnything.handleWorkspaceChanged({ workspace }), emptyWorkspace);
     assert.equal(await page.locator('#understandAnythingFrame').getAttribute('src'), frameUrl,
       'a delayed event from the previous workspace must not replace the current project graph');
     assert.equal(await page.locator('#understandAnythingStatus').isVisible(), false);
@@ -212,7 +212,7 @@ async function readViewerJson(frameUrl, endpoint, parameters = {}) {
     report.graph = { nodeCount: graph.nodes.length, edgeCount: graph.edges.length, renderedNodes: await frame.locator('.react-flow__node').count() };
     await page.screenshot({ path: path.join(outputDir, 'source-project.png') });
     await returnToComposer(sourceDraft);
-    report.checks.push('real CLI symbols are converted into .yanagent/ua, served through authenticated viewer HTTP and rendered; source content matches, and stale workspace events cannot replace the current graph');
+    report.checks.push('real CLI symbols are converted into .zagent/ua, served through authenticated viewer HTTP and rendered; source content matches, and stale workspace events cannot replace the current graph');
 
     await openMap();
     for (const relative of Object.keys(sourceFiles)) {
@@ -220,7 +220,7 @@ async function readViewerJson(frameUrl, endpoint, parameters = {}) {
       assert.ok(target.startsWith(path.resolve(sourceWorkspace) + path.sep));
       fs.rmSync(target);
     }
-    const cleared = await page.evaluate(() => window.YanUnderstandAnything.refresh());
+    const cleared = await page.evaluate(() => window.ZUnderstandAnything.refresh());
     assert.equal(cleared.ok, true, cleared.error);
     assert.equal(cleared.empty, true, 'real incremental sync removes deleted source nodes');
     await assertEmptyMap();
@@ -232,7 +232,7 @@ async function readViewerJson(frameUrl, endpoint, parameters = {}) {
     console.log(JSON.stringify({ ok: true, checks: report.checks, graph: report.graph, viewerHttp: report.viewerHttp }));
   } catch (error) {
     report.error = error.stack;
-    const generated = path.join(sourceWorkspace, '.yanagent', 'ua', 'knowledge-graph.json');
+    const generated = path.join(sourceWorkspace, '.zagent', 'ua', 'knowledge-graph.json');
     report.sourceFixture = { files: Object.keys(sourceFiles).map(relative => ({ relative, exists: fs.existsSync(path.join(sourceWorkspace, relative)) })),
       graph: fs.existsSync(generated) ? JSON.parse(fs.readFileSync(generated, 'utf8')) : null };
     if (page && !page.isClosed()) {

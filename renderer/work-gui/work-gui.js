@@ -16,7 +16,7 @@
     studio: { x: 1186, y: 522 },
     lighthouse: { x: 1316, y: 372 }
   };
-  const stationName = zone => window.YanWorkGuiScene?.stationName(zone) || zone;
+  const stationName = zone => window.ZWorkGuiScene?.stationName(zone) || zone;
   const PALETTE = {
     main: '#e98238',
     helper: ['#57b6d6', '#8d6fbf', '#59c98a', '#d98ba6', '#d9c26a']
@@ -187,7 +187,7 @@
 
   function residentName(resident) {
     if (resident.id === 'main' || resident.kind === 'main') return 'Z';
-    return (resident.role && window.YanSubagentPanel?.nameFor?.(resident.role))
+    return (resident.role && window.ZSubagentPanel?.nameFor?.(resident.role))
       || resident.name || 'Sub Agent';
   }
 
@@ -602,12 +602,12 @@
 
   function initScene() {
     if (sceneHost.api || sceneHost.failed) return sceneHost.api;
-    if (!dom.canvas || typeof window.YanWorkGuiScene?.create !== 'function' || !window.THREE) {
+    if (!dom.canvas || typeof window.ZWorkGuiScene?.create !== 'function' || !window.THREE) {
       sceneHost.failed = true;
       showSceneFallback();
       return null;
     }
-    sceneHost.api = window.YanWorkGuiScene.create(dom.canvas, {
+    sceneHost.api = window.ZWorkGuiScene.create(dom.canvas, {
       onHover: onSceneHover,
       onClick: onSceneClick,
       onAvailability: available => {
@@ -814,7 +814,7 @@
   // the expensive part); it is released when the renderer is torn down.
   window.addEventListener('beforeunload', () => disposeScene());
 
-  window.YanWorkGui = {
+  window.ZWorkGui = {
     open,
     close,
     refresh,

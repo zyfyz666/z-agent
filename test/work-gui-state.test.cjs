@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, '../renderer/work-gui/work-g
 const panelSource = fs.readFileSync(path.join(__dirname, '../renderer/subagent-panel.js'), 'utf8');
 
 function world() {
-  const window = { addEventListener() {}, YanSubagentWorkflow: require('../lib/subagent/workflow-state') };
+  const window = { addEventListener() {}, ZSubagentWorkflow: require('../lib/subagent/workflow-state') };
   // Only the inline icon template is needed to load the renderer's reducer.
   const document = { createElement: () => ({
     content: { querySelector: () => ({ setAttribute() {}, outerHTML: '<svg></svg>' }) }
@@ -17,7 +17,7 @@ function world() {
   const context = vm.createContext({ window, document, console });
   vm.runInContext(panelSource, context);
   vm.runInContext(source, context);
-  return window.YanWorkGui;
+  return window.ZWorkGui;
 }
 
 test('resident identities use the same role names as the subagent panel', () => {

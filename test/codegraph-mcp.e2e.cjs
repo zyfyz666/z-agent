@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 
-const packagedAppDir = path.resolve(process.env.YAN_PACKAGED_APP_DIR || path.join(__dirname, '..', 'dist', 'win-unpacked'));
+const packagedAppDir = path.resolve(process.env.Z_PACKAGED_APP_DIR || path.join(__dirname, '..', 'dist', 'win-unpacked'));
 const runtimeRoot = path.join(packagedAppDir, 'resources', 'codegraph-runtime');
 const nodeCommand = path.join(runtimeRoot, 'node.exe');
 const entryPoint = path.join(runtimeRoot, 'lib', 'dist', 'bin', 'codegraph.js');
@@ -111,7 +111,7 @@ async function main() {
     const initialized = await request(server, 1, 'initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'Yan Agent', version: '1.4.0' }
+      clientInfo: { name: 'Z Agent', version: '1.4.0' }
     });
     assert.equal(initialized.serverInfo?.name, 'codegraph');
     const listed = await request(server, 2, 'tools/list', {});

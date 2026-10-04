@@ -11,7 +11,7 @@ const { buildCallIndex, queryCallTree } = require('../lib/analysis/calltree');
 const { createBm25Index, tokenize } = require('../lib/analysis/bm25');
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-analysis-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-analysis-'));
 }
 
 function write(filePath, content) {

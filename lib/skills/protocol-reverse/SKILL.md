@@ -24,7 +24,7 @@ A fixed hypothesis-validation workflow for unknown protocols. The core disciplin
 
 ## Lab discipline
 
-- All scripts and artifacts live in the assigned lab directory (create `.yanagent/reverser-lab/` under the workspace if none was assigned). Never modify project source files.
+- All scripts and artifacts live in the assigned lab directory (create `.zagent/reverser-lab/` under the workspace if none was assigned). Never modify project source files.
 - Offline only: never send network traffic to live endpoints. Samples are files.
 - Prefer stdlib-only parsers (no pip installs) so the replay harness runs anywhere.
 - Checksums/CRCs: if a trailing field breaks replay, test standard CRC-16/32 variants before inventing explanations.
@@ -35,10 +35,10 @@ Sample inventory → Field table (offset, size, type, meaning, confidence) → E
 
 ## Companion tools
 
-- `hex_dump` / `hex_stats` / `hex_diff` / `crc_probe` — native yan_analysis tools for steps 1-3 and 6.
+- `hex_dump` / `hex_stats` / `hex_diff` / `crc_probe` — native z_analysis tools for steps 1-3 and 6.
 - `pcap_overview` — tshark-based capture overview when samples are network captures (needs Wireshark installed).
 - `ghidra_status` / `ghidra_decompile` — when the protocol lives in a compiled binary and Ghidra is installed (GHIDRA_INSTALL_DIR).
 
 ## Delegation
 
-When native subagents are available, dispatch `subagent_type: "reverser"` (Sub Reverser Agent) with the sample paths and the assigned lab directory; it runs this same workflow with write access to the lab. Use `yan_analysis` tools (`repo_map`, `code_outline`, `code_symbol`) first when the "protocol" is implemented in workspace code rather than captured traffic.
+When native subagents are available, dispatch `subagent_type: "reverser"` (Sub Reverser Agent) with the sample paths and the assigned lab directory; it runs this same workflow with write access to the lab. Use `z_analysis` tools (`repo_map`, `code_outline`, `code_symbol`) first when the "protocol" is implemented in workspace code rather than captured traffic.

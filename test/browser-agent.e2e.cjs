@@ -11,22 +11,22 @@ const appRoot = path.resolve(__dirname, '..');
 const fixtureUrl = pathToFileURL(path.join(__dirname, 'fixtures', 'browser-agent.html')).href;
 const userUrl = `${fixtureUrl}?owner=user`;
 const agentUrl = `${fixtureUrl}?owner=agent`;
-const targetPath = String(process.env.YAN_E2E_TARGET_PATH || '').trim();
-const targetClickName = String(process.env.YAN_E2E_TARGET_CLICK_NAME || '').trim();
-const targetKey = String(process.env.YAN_E2E_TARGET_KEY || '').trim();
-const targetKeyDuration = Math.max(30, Math.min(5000, Number(process.env.YAN_E2E_TARGET_KEY_DURATION_MS) || 600));
-const targetKeyDelay = Math.max(0, Math.min(10000, Number(process.env.YAN_E2E_TARGET_KEY_DELAY_MS) || 0));
+const targetPath = String(process.env.Z_E2E_TARGET_PATH || '').trim();
+const targetClickName = String(process.env.Z_E2E_TARGET_CLICK_NAME || '').trim();
+const targetKey = String(process.env.Z_E2E_TARGET_KEY || '').trim();
+const targetKeyDuration = Math.max(30, Math.min(5000, Number(process.env.Z_E2E_TARGET_KEY_DURATION_MS) || 600));
+const targetKeyDelay = Math.max(0, Math.min(10000, Number(process.env.Z_E2E_TARGET_KEY_DELAY_MS) || 0));
 const targetUrl = targetPath ? pathToFileURL(path.resolve(targetPath)).href : '';
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-browser-e2e-'));
-const screenshotPath = path.join(os.tmpdir(), `yan-browser-agent-takeover-${Date.now()}.png`);
-const addMenuScreenshotPath = path.join(os.tmpdir(), `yan-composer-add-menu-${Date.now()}.png`);
-const targetScreenshotPath = path.join(os.tmpdir(), `yan-browser-agent-target-${Date.now()}.png`);
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-browser-e2e-'));
+const screenshotPath = path.join(os.tmpdir(), `z-browser-agent-takeover-${Date.now()}.png`);
+const addMenuScreenshotPath = path.join(os.tmpdir(), `z-composer-add-menu-${Date.now()}.png`);
+const targetScreenshotPath = path.join(os.tmpdir(), `z-browser-agent-target-${Date.now()}.png`);
 
 async function command(page, runId, action, params = {}) {
   return page.evaluate(({ runId: id, action: browserAction, params: input }) => (
     executeBrowserAgentCommand({
       action: browserAction,
-      params: { ...input, yan_run_id: id }
+      params: { ...input, z_run_id: id }
     })
   ), { runId, action, params });
 }
@@ -36,7 +36,7 @@ async function concurrentCommands(page, runId, commands) {
     browserCommands.map((entry, index) => executeBrowserAgentCommand({
       requestId: `${id}-concurrent-${index}`,
       action: entry.action,
-      params: { ...(entry.params || {}), yan_run_id: id }
+      params: { ...(entry.params || {}), z_run_id: id }
     }))
   ), { runId, commands });
 }
@@ -44,7 +44,7 @@ async function concurrentCommands(page, runId, commands) {
 async function releaseCommand(page, runId) {
   return page.evaluate(id => executeBrowserAgentCommand({
     action: 'release',
-    params: { yan_run_id: id }
+    params: { z_run_id: id }
   }), runId);
 }
 
@@ -79,8 +79,8 @@ async function guestState(page, tabId) {
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
@@ -101,10 +101,10 @@ async function guestState(page, tabId) {
         }
       }, null, { timeout: 10_000 });
     } catch (error) {
-      throw new Error(`Yan Renderer did not finish browser initialization: ${rendererErrors.join('\n') || error.message}`);
+      throw new Error(`Z Renderer did not finish browser initialization: ${rendererErrors.join('\n') || error.message}`);
     }
-    const kernel = await page.evaluate(() => window.yan.getConfig().then(config => config.executionKernel));
-    assert.equal(kernel.id, 'yan-kernel');
+    const kernel = await page.evaluate(() => window.z.getConfig().then(config => config.executionKernel));
+    assert.equal(kernel.id, 'z-kernel');
     assert.equal(kernel.name, 'Z 内核');
     assert.equal(kernel.version, require('../package.json').version);
     assert.equal(kernel.engine, 'opencode');
@@ -112,10 +112,10 @@ async function guestState(page, tabId) {
 
     const computerControlIntegration = await page.evaluate(async () => {
       const [config, servers, installedSkills, marketSkills] = await Promise.all([
-        window.yan.getConfig(),
-        window.yan.mcpList(),
-        window.yan.listSkills(),
-        window.yan.getSkillMarket()
+        window.z.getConfig(),
+        window.z.mcpList(),
+        window.z.listSkills(),
+        window.z.getSkillMarket()
       ]);
       return {
         hasLegacyConfig: Object.hasOwn(config, 'computerUseV3'),
@@ -123,7 +123,7 @@ async function guestState(page, tabId) {
         hasLegacySettings: !!document.querySelector('#computerUseV3Enabled, #computerUseV3Actor')
       };
     });
-    if (process.env.YAN_BROWSER_E2E_SKIP_COMPUTER_CONTROL_CHECK !== '1') {
+    if (process.env.Z_BROWSER_E2E_SKIP_COMPUTER_CONTROL_CHECK !== '1') {
       assert.deepEqual(computerControlIntegration, {
         hasLegacyConfig: false,
         hasLegacyMcp: false,
@@ -131,7 +131,7 @@ async function guestState(page, tabId) {
       });
     }
 
-    if (process.env.YAN_BROWSER_E2E_SKIP_COMPUTER_CONTROL_CHECK !== '1') {
+    if (process.env.Z_BROWSER_E2E_SKIP_COMPUTER_CONTROL_CHECK !== '1') {
       await page.locator('#attachBtn').click();
       const addMenu = await page.evaluate(() => ({
         labels: [...document.querySelectorAll('#attachmentMenu .composer-add-action-name')]
@@ -147,17 +147,17 @@ async function guestState(page, tabId) {
     }
 
     const mcpReady = await page.evaluate(async () => {
-      const servers = await window.yan.mcpList();
-      const browser = servers.find(server => server.id === 'yan_browser');
+      const servers = await window.z.mcpList();
+      const browser = servers.find(server => server.id === 'z_browser');
       if (!browser?.available || !browser?.enabled) return { ok: false, browser };
-      return window.yan.mcpStart('yan_browser');
+      return window.z.mcpStart('z_browser');
     });
     assert.equal(mcpReady.ok, true);
     assert.ok(mcpReady.tools.some(tool => tool.name === 'browser_inspect_page'));
     assert.equal(mcpReady.tools.some(tool => tool.name === 'computer_use'), false);
     const pressTool = mcpReady.tools.find(tool => tool.name === 'browser_press');
     assert.ok(pressTool?.inputSchema?.properties?.duration_ms);
-    assert.equal(Object.hasOwn(pressTool.inputSchema.properties, 'yan_run_id'), false);
+    assert.equal(Object.hasOwn(pressTool.inputSchema.properties, 'z_run_id'), false);
 
     const initialPointer = await application.evaluate(({ screen }) => screen.getCursorScreenPoint());
     assert.equal(await page.evaluate(url => openBrowserUrlInNewTab(url), userUrl), true);
@@ -245,8 +245,8 @@ async function guestState(page, tabId) {
     const freshRef = name => freshItemNamed(name)?.ref;
     const freshCanvasItem = freshSnapshot.items.find(item => item.name === 'Test canvas');
 
-    const typed = await command(page, runId, 'type', { ref: freshRef('Name'), text: 'Yan Agent' });
-    assert.equal(typed.pageState.target.value, 'Yan Agent');
+    const typed = await command(page, runId, 'type', { ref: freshRef('Name'), text: 'Z Agent' });
+    assert.equal(typed.pageState.target.value, 'Z Agent');
     assert.equal(typed.pageState.snapshotRequired, false);
     const passwordTyped = await command(page, runId, 'type', { ref: freshRef('Password'), text: 'new-secret' });
     assert.equal(passwordTyped.pageState.target.value, '[redacted]');
@@ -315,7 +315,7 @@ async function guestState(page, tabId) {
 
     const state = await guestState(page, agentTabId);
     assert.equal(state.action, 'action complete');
-    assert.equal(state.name, 'Yan Agent');
+    assert.equal(state.name, 'Z Agent');
     assert.equal(state.mode, 'advanced');
     assert.equal(state.checked, true);
     assert.equal(state.hover, 'hover complete');
@@ -342,7 +342,7 @@ async function guestState(page, tabId) {
       const pending = executeBrowserAgentCommand({
         requestId: operationId,
         action: 'wait',
-        params: { yan_run_id: id, timeout_ms: 5000 }
+        params: { z_run_id: id, timeout_ms: 5000 }
       });
       await new Promise(resolve => setTimeout(resolve, 80));
       const cancelled = controller.agent.cancelOperation(operationId);
@@ -366,7 +366,7 @@ async function guestState(page, tabId) {
     const screenshot = await command(page, runId, 'screenshot');
     assert.equal(screenshot.ok, true);
     assert.ok(screenshot.image.data.length > 1000);
-    assert.equal(screenshot.captureState.title, 'Yan Browser Agent Fixture');
+    assert.equal(screenshot.captureState.title, 'Z Browser Agent Fixture');
     assert.ok(screenshot.captureState.text.includes('action complete'));
     await page.screenshot({ path: screenshotPath });
 
@@ -420,15 +420,15 @@ async function guestState(page, tabId) {
       const first = executeBrowserAgentCommand({
         requestId: `${id}-release-first`,
         action: 'wait',
-        params: { yan_run_id: id, timeout_ms: 5000 }
+        params: { z_run_id: id, timeout_ms: 5000 }
       });
       const second = executeBrowserAgentCommand({
         requestId: `${id}-release-second`,
         action: 'wait',
-        params: { yan_run_id: id, timeout_ms: 5000 }
+        params: { z_run_id: id, timeout_ms: 5000 }
       });
       await new Promise(resolve => setTimeout(resolve, 80));
-      const released = await executeBrowserAgentCommand({ action: 'release', params: { yan_run_id: id } });
+      const released = await executeBrowserAgentCommand({ action: 'release', params: { z_run_id: id } });
       return { released, results: await Promise.all([first, second]) };
     }, releaseRunId);
     const released = releaseOutcome.released;
@@ -445,7 +445,7 @@ async function guestState(page, tabId) {
 
     let targetEvidence = null;
     if (targetUrl) {
-      assert.ok(targetClickName, 'YAN_E2E_TARGET_CLICK_NAME is required when YAN_E2E_TARGET_PATH is set');
+      assert.ok(targetClickName, 'Z_E2E_TARGET_CLICK_NAME is required when Z_E2E_TARGET_PATH is set');
       const targetRunId = 'browser-e2e-target';
       const targetOpened = await command(page, targetRunId, 'open', { target_type: 'url', url_or_path: targetUrl });
       assert.equal(targetOpened.ok, true);

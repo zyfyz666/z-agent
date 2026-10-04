@@ -11,7 +11,7 @@ const {
 } = require('../lib/long-term-memory');
 
 function createStore() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-memory-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-memory-'));
   const workspaceA = path.join(root, 'workspace-a');
   const workspaceB = path.join(root, 'workspace-b');
   fs.mkdirSync(workspaceA, { recursive: true });

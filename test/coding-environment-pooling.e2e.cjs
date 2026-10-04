@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { OpenCodeSidecar, buildOpenCodeConfig, stageCodingEnvironmentModule } = require('../lib/opencode-sidecar');
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-coding-pool-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-coding-pool-'));
 const workspaces = {
   a: path.join(root, 'workspace-a'),
   b: path.join(root, 'workspace-b')
@@ -102,7 +102,7 @@ const server = http.createServer((req, res) => {
     sidecar.close();
     await Promise.all(stopAll);
     await new Promise(resolve => server.close(resolve));
-    assert.ok(path.basename(root).startsWith('yan-coding-pool-'));
+    assert.ok(path.basename(root).startsWith('z-coding-pool-'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

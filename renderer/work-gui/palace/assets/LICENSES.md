@@ -2,7 +2,7 @@
 
 ## Three.js
 
-Local runtime copied from Yan Agent's bundled `renderer/vendor/three/three.global.js`.
+Local runtime copied from Z Agent's bundled `renderer/vendor/three/three.global.js`.
 Upstream: https://github.com/mrdoob/three.js
 
 MIT License

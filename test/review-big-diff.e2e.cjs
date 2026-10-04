@@ -12,8 +12,8 @@ const { execFileSync } = require('node:child_process');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-big-'));
-const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-review-repo-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-big-'));
+const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-review-repo-'));
 
 function runGit(args) {
   return execFileSync('git', ['-C', repoRoot, ...args], { encoding: 'utf8', windowsHide: true });
@@ -46,7 +46,7 @@ function seedHeavyWorkspace() {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -55,7 +55,7 @@ function seedHeavyWorkspace() {
       && !!state.currentSession
       && typeof openTaskGitChanges === 'function'
       && typeof refreshTaskGitStatus === 'function'
-      && !!globalThis.YanDshReview
+      && !!globalThis.ZDshReview
     ));
 
     const result = await page.evaluate(async ({ repoPath }) => {
@@ -70,7 +70,7 @@ function seedHeavyWorkspace() {
         }
         return false;
       };
-      const reviewDoc = () => document.querySelector('#yanDshReviewFrame')?.contentDocument || null;
+      const reviewDoc = () => document.querySelector('#zDshReviewFrame')?.contentDocument || null;
       const readFrame = () => {
         const doc = reviewDoc();
         if (!doc) return null;
@@ -79,8 +79,8 @@ function seedHeavyWorkspace() {
           files: files.length,
           totalRows: doc.querySelectorAll('.dsh-cr-grid .dsh-cr-row').length,
           perFileRows: files.map(file => file.querySelectorAll('.dsh-cr-row').length),
-          collapsed: files.map(file => file.classList.contains('yan-file-collapsed')),
-          states: files.map(file => file.getAttribute('data-yan-state') || ''),
+          collapsed: files.map(file => file.classList.contains('z-file-collapsed')),
+          states: files.map(file => file.getAttribute('data-z-state') || ''),
           stats: doc.querySelector('.stats')?.textContent || '',
           navPaths: [...doc.querySelectorAll('.navitem')].map(link => link.textContent.trim())
         };
@@ -125,16 +125,16 @@ function seedHeavyWorkspace() {
         targetIndex: targetIndex >= 0 ? targetIndex : 1,
         otherIndex: otherIndex >= 0 ? otherIndex : 0,
         panelVisible: (() => {
-          const panel = document.querySelector('#yanDshReviewPanel');
+          const panel = document.querySelector('#zDshReviewPanel');
           return !!panel && !panel.classList.contains('hidden');
         })(),
-        bigBarExists: !!document.querySelector('.yan-dsh-review-bigbar'),
+        bigBarExists: !!document.querySelector('.z-dsh-review-bigbar'),
         diagnostics: {
           source: rsReviewState.source,
           isRepo: !!taskGitState.status?.isRepository,
           panelState: document.querySelector('#rs-review')?.dataset.state || '',
-          dshError: document.querySelector('.yan-dsh-review-error')?.textContent || '',
-          frameSrc: String(document.querySelector('#yanDshReviewFrame')?.src || '').slice(0, 80),
+          dshError: document.querySelector('.z-dsh-review-error')?.textContent || '',
+          frameSrc: String(document.querySelector('#zDshReviewFrame')?.src || '').slice(0, 80),
           manifestFiles: rsReviewState.summary?.files?.length || 0
         }
       };

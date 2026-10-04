@@ -48,7 +48,7 @@ test('runSignals treats a dropped review block as an acceptance failure', () => 
 });
 
 test('escalation consume returns bestOfN so it can map to real compute', () => {
-  const dir = tempDir('yan-agi-chain-');
+  const dir = tempDir('z-agi-chain-');
   try {
     const file = path.join(dir, 'escalation.json');
     const memo = createEscalationMemo({ filePath: file });
@@ -82,7 +82,7 @@ test('verifiedRunsFromTrajectories keeps only pass-verdict runs of the workspace
 });
 
 test('experience edge context renders matched failure-repair edges as data', () => {
-  const dir = tempDir('yan-agi-chain-');
+  const dir = tempDir('z-agi-chain-');
   try {
     const graph = createExperienceGraph({ filePath: path.join(dir, 'graph.json') });
     graph.record({ runId: 'r1', action: '批量替换配置文件', failure: '替换后 JSON 解析失败' });
@@ -99,7 +99,7 @@ test('experience edge context renders matched failure-repair edges as data', () 
 });
 
 test('topology selection needs a passing evidence record and switches with roles', () => {
-  const dir = tempDir('yan-agi-chain-');
+  const dir = tempDir('z-agi-chain-');
   try {
     const historyFile = path.join(dir, 'topology-history.json');
     const evidenceFile = path.join(dir, 'eval-evidence.json');
@@ -209,7 +209,7 @@ test('evaluateSkillCandidate: static checks plus judge verdict form the evidence
 });
 
 function reviewText(criteria, contractId) {
-  return `<yan-delivery-review>${JSON.stringify({ contractId, criteria })}</yan-delivery-review>`;
+  return `<z-delivery-review>${JSON.stringify({ contractId, criteria })}</z-delivery-review>`;
 }
 
 test('deliveryReviewDiagnostics explains dropped review blocks instead of silence', () => {
@@ -218,7 +218,7 @@ test('deliveryReviewDiagnostics explains dropped review blocks instead of silenc
 
   // A truncated JSON block inside a closed tag (the pelican case) reports a
   // parse error instead of vanishing.
-  const truncated = [{ role: 'assistant', parts: [{ type: 'text', text: '<yan-delivery-review>{"contractId":"x","criteria":{"scope":{"status":"pass","evidence":"完成"},</yan-delivery-review>' } ] }];
+  const truncated = [{ role: 'assistant', parts: [{ type: 'text', text: '<z-delivery-review>{"contractId":"x","criteria":{"scope":{"status":"pass","evidence":"完成"},</z-delivery-review>' } ] }];
   const parseDiag = deliveryReviewDiagnostics(truncated, { contract });
   assert.equal(parseDiag.blockSeen, true);
   assert.ok(parseDiag.parseError);

@@ -10,7 +10,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-composer-height-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-composer-height-'));
 
 function lines(count, prefix = 'composer growth line') {
   return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`).join('\n');
@@ -24,7 +24,7 @@ function lines(count, prefix = 'composer growth line') {
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -82,13 +82,13 @@ function lines(count, prefix = 'composer growth line') {
       await settle();
       const dragged = height();
       const manualAfterDrag = composerManualHeight;
-      const storedAfterDrag = window.localStorage.getItem('yan.composer.height');
+      const storedAfterDrag = window.localStorage.getItem('z.composer.height');
 
       // Double-click resets to auto-grow and clears the stored height.
       handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       await settle();
       const afterReset = height();
-      const storedAfterReset = window.localStorage.getItem('yan.composer.height');
+      const storedAfterReset = window.localStorage.getItem('z.composer.height');
 
       // Keyboard: ArrowUp pins 8px above the previous applied height.
       const beforeKey = height();

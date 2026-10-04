@@ -1,4 +1,4 @@
-/* Yan Agent capability workbench tokens */
+/* Z Agent capability workbench tokens */
 :root {
   --color-paper: var(--bg);
   --color-paper-raised: var(--bg-elev);
@@ -47,7 +47,7 @@
   --radius-surface: var(--r-lg);
 }
 
-/* Yan Work GUI — scoped riverside world palette */
+/* Z Work GUI — scoped riverside world palette */
 .work-gui-page {
   --wgu-paper: oklch(98% 0.015 90);
   --wgu-paper-soft: oklch(95% 0.02 105);

@@ -9,7 +9,7 @@ const test = require('node:test');
 
 const VIEWER = path.resolve(__dirname, '../lib/understand-anything/viewer/bin/viewer.mjs');
 const TOKEN = 'project-map-viewer-test-token';
-const CURRENT_DIR = path.join('.yanagent', 'ua');
+const CURRENT_DIR = path.join('.zagent', 'ua');
 
 function createWorkspace(t) {
   const tempRoot = path.resolve(os.tmpdir());
@@ -88,7 +88,7 @@ async function withViewer(workspace, run) {
   }
 }
 
-test('viewer serves current .yanagent/ua graph and resolves source against the workspace', async t => {
+test('viewer serves current .zagent/ua graph and resolves source against the workspace', async t => {
   const workspace = createWorkspace(t);
   const sourcePath = path.join(workspace, 'src', 'app.js');
   const content = 'export const workspaceValue = 42;\n';
@@ -172,7 +172,7 @@ test('missing-graph diagnostics name the current and both legacy directories', t
   });
   assert.ifError(result.error);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /\.yanagent\/ua\/knowledge-graph\.json/);
+  assert.match(result.stderr, /\.zagent\/ua\/knowledge-graph\.json/);
   assert.match(result.stderr, /\.understand-anything\//);
   assert.match(result.stderr, /\.ua\//);
 });
@@ -184,5 +184,5 @@ test('viewer help explains graph directory precedence', t => {
   });
   assert.ifError(result.error);
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /\.yanagent\/ua\/[\s\S]*\.understand-anything\/[\s\S]*\.ua\//);
+  assert.match(result.stdout, /\.zagent\/ua\/[\s\S]*\.understand-anything\/[\s\S]*\.ua\//);
 });

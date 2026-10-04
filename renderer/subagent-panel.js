@@ -20,7 +20,7 @@
   };
   const iconFor = role => ICONS[roleFor(role)] || icon;
   const planIcon = ICONS.reviewer.replace('data-agent-icon="reviewer"', 'data-agent-icon="bug"');
-  const W = window.YanSubagentWorkflow;
+  const W = window.ZSubagentWorkflow;
   const nameFor = role => `${W.name(roleFor(role)) || 'Sub'} Agent`;
   function create({ getSessionId, getRuns, renderNative, renderActions, openSidebar, escapeHtml }) {
     const panel = document.querySelector('#rs-subagents');
@@ -73,7 +73,7 @@
       if (record.status === 'incomplete') return '待确认';
       return '工作中';
     }
-    // Delegation plan (yan-plan marker parsed by workflow-state): show the
+    // Delegation plan (z-plan marker parsed by workflow-state): show the
     // dependency graph once two or more tasks declare ids, so parallel
     // builder fan-out and its ordering stay legible.
     function planGraphHtml(all) {
@@ -192,5 +192,5 @@
     }
     return { render, schedule, open, openRoot };
   }
-  window.YanSubagentPanel = { icon, iconFor, nameFor, roleFor, create };
+  window.ZSubagentPanel = { icon, iconFor, nameFor, roleFor, create };
 })();

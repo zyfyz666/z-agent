@@ -18,7 +18,7 @@ let page;
 let sessions;
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile, YAN_E2E_PARENT_PID: String(process.pid),
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile, Z_E2E_PARENT_PID: String(process.pid),
     OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
@@ -52,10 +52,10 @@ async function createContexts() {
     window.interactionContexts = {};
     window.interactionResults = {};
     for (const label of ['A', 'B']) {
-      const session = await yan.createSession(true);
+      const session = await z.createSession(true);
       session.title = `Interaction ${label}`;
       session.messages = [{ role: 'user', content: `Keep isolated interaction ${label}`, ts: Date.now() }];
-      await yan.saveSession(session);
+      await z.saveSession(session);
       const runCtx = createRunCtx(session.id, false, session.workspace);
       runCtx.runId = `interaction-run-${label}`;
       runCtx.sessionRef = session;

@@ -7,8 +7,8 @@ test.before(async () => {
   qwen = (await import('../lib/qwen-request-shaping.mjs')).shapeQwenRequestBody;
   kimi = (await import('../lib/kimi-request-shaping.mjs')).shapeKimiRequestBody;
   families = [
-    ['qwen3.8-max', (await import('../lib/opencode-qwem-provider.bundle.mjs')).createYanQwemProvider],
-    ['kimi-k3', (await import('../lib/opencode-kiml-provider.bundle.mjs')).createYanKimlProvider]
+    ['qwen3.8-max', (await import('../lib/opencode-qwem-provider.bundle.mjs')).createZQwemProvider],
+    ['kimi-k3', (await import('../lib/opencode-kiml-provider.bundle.mjs')).createZKimlProvider]
   ];
 });
 

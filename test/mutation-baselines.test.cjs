@@ -10,7 +10,7 @@ const { captureWorkspaceBaselines } = require('../lib/run-change-summary');
 const sidecar = require('../lib/opencode-sidecar');
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-mutation-baselines-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-mutation-baselines-'));
 }
 
 function write(filePath, content) {
@@ -135,7 +135,7 @@ test('emitTrackedRunEvent restores failed multi-file patches and drops completed
   assert.equal(fs.readFileSync(a, 'utf8'), 'a original\n');
   assert.equal(fs.readFileSync(b, 'utf8'), 'b original\n');
   assert.equal(run.repairedMutations, 2);
-  const invalidated = events.filter(event => event.type === 'yan.review.invalidated');
+  const invalidated = events.filter(event => event.type === 'z.review.invalidated');
   assert.equal(invalidated.length, 2);
 
   // A completed call leaves the workspace alone and drops its shadow.

@@ -2,17 +2,17 @@
 
 ## skills CLI
 
-Yan Agent bundles `skills@1.5.21`, the official CLI for the open Agent Skills
+Z Agent bundles `skills@1.5.21`, the official CLI for the open Agent Skills
 ecosystem, copyright Vercel and contributors, licensed under the MIT License.
 
 Source: https://github.com/vercel-labs/skills
 
 The package's complete license and third-party notice files are distributed
-with `node_modules/skills` in Yan's application bundle.
+with `node_modules/skills` in Z's application bundle.
 
 ## CodeGraph
 
-Yan Agent bundles `@colbymchenry/codegraph` and its Windows x64 runtime,
+Z Agent bundles `@colbymchenry/codegraph` and its Windows x64 runtime,
 copyright Colby McHenry and contributors, licensed under the MIT License.
 
 Source: https://github.com/colbymchenry/codegraph
@@ -37,7 +37,7 @@ SOFTWARE.
 
 ## prompt-enhancer
 
-Yan Prompt Optimizer includes ideas adapted from `sammcj/agentic-coding`,
+Z Prompt Optimizer includes ideas adapted from `sammcj/agentic-coding`,
 copyright Sam McLeod and contributors, licensed under the Apache License 2.0.
 
 Source: https://github.com/sammcj/agentic-coding/tree/main/Skills/prompt-enhancer
@@ -71,33 +71,33 @@ Source: https://github.com/wshobson/agents/tree/main/plugins/llm-application-dev
 
 ## OfficeCLI
 
-Yan Agent bundles the `@officecli/officecli` runtime and its OfficeCLI Skill,
+Z Agent bundles the `@officecli/officecli` runtime and its OfficeCLI Skill,
 copyright iOfficeAI and contributors, licensed under the Apache License 2.0.
 
 Source: https://github.com/iOfficeAI/OfficeCLI
 
 ## HyperFrames
 
-Yan Agent bundles the HyperFrames, HyperFrames CLI, GSAP, registry, and
+Z Agent bundles the HyperFrames, HyperFrames CLI, GSAP, registry, and
 website-to-video Agent Skills published by HeyGen, version 0.1.2, licensed
 under the Apache License 2.0.
 
 Source: https://github.com/heygen-com/hyperframes
 
 The bundled Skill package retains its original files and is resolved only
-inside Yan Agent's SkillStore. Yan-specific runtime guidance is injected at
+inside Z Agent's SkillStore. Z-specific runtime guidance is injected at
 read time and does not modify the upstream Skill documents.
 
 ## Remotion Agent Skills
 
-Yan Agent bundles Remotion's official best-practices Skill package, version
+Z Agent bundles Remotion's official best-practices Skill package, version
 1.0.3, including all referenced rule files, licensed under the MIT License.
 
 Source: https://github.com/remotion-dev/skills
 
 ## OpenCode
 
-Yan Agent's Agent output UI adapts the stable message-part structure,
+Z Agent's Agent output UI adapts the stable message-part structure,
 incremental rendering behavior, and tool presentation from OpenCode,
 copyright (c) 2025 opencode, licensed under the MIT License.
 
@@ -123,7 +123,7 @@ SOFTWARE.
 
 ## Matt Pocock Agent Skills
 
-Yan Agent bundles `diagnosing-bugs`, `codebase-design`, and
+Z Agent bundles `diagnosing-bugs`, `codebase-design`, and
 `writing-for-agents` from `mattpocock/skills`, copyright (c) 2026 Matt
 Pocock, licensed under the MIT License.
 
@@ -133,9 +133,9 @@ Bundled revision: `6acc160e4e0cd062dbbbd7a1b26ae92855edf07e`
 
 ## Ponytail
 
-Yan Agent bundles the opt-in `ponytail-review` and `ponytail-audit` Skills
+Z Agent bundles the opt-in `ponytail-review` and `ponytail-audit` Skills
 from `DietrichGebert/ponytail`, copyright (c) 2026 DietrichGebert, licensed
-under the MIT License. Yan does not bundle or enable the always-on Ponytail
+under the MIT License. Z does not bundle or enable the always-on Ponytail
 Skill.
 
 Source: https://github.com/DietrichGebert/ponytail
@@ -144,7 +144,7 @@ Bundled revision: `16f29800fd2681bdf24f3eb4ccffe38be3baec6b`
 
 ## GreenSock GSAP Skills
 
-Yan Agent bundles the official GSAP Agent Skill suite from
+Z Agent bundles the official GSAP Agent Skill suite from
 `greensock/gsap-skills`, copyright (c) 2026 GreenSock, licensed under the MIT
 License.
 
@@ -154,7 +154,7 @@ Bundled revision: `aed9cfd3277740755f6bfc1155c7aa645403b760`
 
 ## UI/UX Pro Max
 
-Yan Agent bundles the complete UI/UX Pro Max Skill from
+Z Agent bundles the complete UI/UX Pro Max Skill from
 `nextlevelbuilder/ui-ux-pro-max-skill`, copyright Next Level Builder, licensed
 under the MIT License. The bundle includes its local design databases, Python
 search and design-system scripts, reference documents, and upstream tests.
@@ -169,7 +169,7 @@ The complete upstream license is distributed at
 
 ## Emil Kowalski Agent Skills
 
-Yan Agent bundles `animate`, `review-animations`,
+Z Agent bundles `animate`, `review-animations`,
 `find-animation-opportunities`, and `apple-design` from
 `emilkowalski/skills`, copyright (c) 2026 Emil Kowalski, licensed under the
 MIT License.
@@ -180,7 +180,7 @@ Bundled revision: `de33dbed000212b54400a33767d1e4d03654db2a`
 
 ## Awesome DESIGN.md
 
-Yan Agent bundles the Awesome DESIGN.md reference library from
+Z Agent bundles the Awesome DESIGN.md reference library from
 `VoltAgent/awesome-design-md`, copyright (c) 2026 VoltAgent, licensed under
 the MIT License. Its complete license is distributed at
 `lib/skills/awesome-design-md/LICENSE`.
@@ -191,7 +191,7 @@ Bundled revision: `8147538b4226ae41e2487a9179e3bcc1f68e8554`
 
 ## TasteSkill
 
-Yan Agent bundles the TasteSkill frontend design suite from `tasteskill/tasteskill`,
+Z Agent bundles the TasteSkill frontend design suite from `tasteskill/tasteskill`,
 copyright the TasteSkill contributors, licensed under the MIT License.
 
 Source: https://github.com/tasteskill/tasteskill
@@ -200,8 +200,8 @@ Bundled revision: `37c8c376b92ebc02456f7c70776b514fddda88e1`
 
 ## Liquid Glass React
 
-Yan Agent bundles the reference source for `rdev/liquid-glass-react`, copyright
-Max Rovensky and contributors, licensed under the MIT License. Yan bundles the
+Z Agent bundles the reference source for `rdev/liquid-glass-react`, copyright
+Max Rovensky and contributors, licensed under the MIT License. Z bundles the
 component source for read-only implementation reference and does not install
 the npm package or its dependencies automatically.
 
@@ -209,7 +209,7 @@ Source: https://github.com/rdev/liquid-glass-react
 
 ## Andrej Karpathy Guidelines
 
-Yan Agent bundles the `karpathy-guidelines` Skill from
+Z Agent bundles the `karpathy-guidelines` Skill from
 `multica-ai/andrej-karpathy-skills`, derived from Andrej Karpathy's public
 coding-agent observations. The upstream README identifies the material as MIT;
 the upstream repository does not include a separate LICENSE file.

@@ -28,7 +28,7 @@ function section(start, end) {
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-task-workspace-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const dataDir = path.join(root, 'profile', 'YanData');
+  const dataDir = path.join(root, 'profile', 'ZData');
   const sessionsDir = path.join(dataDir, 'sessions');
   fs.mkdirSync(sessionsDir, { recursive: true });
   const defaultTasksRoot = taskWorkspaceRoot({ userDataDirectory: path.join(root, 'profile'), isolated: true });
@@ -52,7 +52,7 @@ function fixture(t) {
     pruneSessionRuntimeBookkeeping: value => value,
     selectTailMessages(messages, limit) { return { tail: messages.slice(-limit), messagesStart: Math.max(0, messages.length - limit) }; },
     activateWorkspace(value) { activations.push(value); },
-    migrateMemoryToWorkspace() {}, ensureYanagent() {},
+    migrateMemoryToWorkspace() {}, ensureZagent() {},
     notifyDesktopSessionUpdate(detail) { events.push(detail); },
     ipcMain: { handle(channel, handler) { handlers.set(channel, handler); } }
   });
@@ -167,10 +167,10 @@ test('start-run uses the persisted task folder even when the renderer sends blan
   f.context.applySessionModelToRunConfig = () => ({ providerId: 'fixture', supplierId: 'official', modelId: 'fixture' });
   const session = await f.create();
   for (const supplied of ['', path.join(f.root, 'wrong-project')]) {
-    f.context.request = { yanSessionId: session.id, workspace: supplied };
+    f.context.request = { zSessionId: session.id, workspace: supplied };
     f.context.admittedRunId = 'run-check';
     f.context.cfg = { workspace: path.join(f.root, 'global-project') };
-    const block = section('    const authoritativeSession = request.yanSessionId ?', '    const prompt = String(request.prompt');
+    const block = section('    const authoritativeSession = request.zSessionId ?', '    const prompt = String(request.prompt');
     const result = await vm.runInContext(`(async () => { ${block}; return { workspace, workspaceKind }; })()`, f.context);
     assert.equal(result.workspace, session.workspace);
     assert.equal(result.workspaceKind, 'default');

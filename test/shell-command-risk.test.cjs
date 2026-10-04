@@ -17,7 +17,7 @@ test('safe everyday git commands stay normal', () => {
   assert.equal(level('git stash push -m wip'), 'normal');
   assert.equal(level('git stash pop'), 'normal');
   assert.equal(level('git worktree add ../wt main'), 'normal');
-  assert.equal(level('git worktree remove .yanagent/worktrees/stale'), 'normal');
+  assert.equal(level('git worktree remove .zagent/worktrees/stale'), 'normal');
 });
 
 test('history- and work-destroying git commands require approval', () => {
@@ -31,7 +31,7 @@ test('history- and work-destroying git commands require approval', () => {
   assert.equal(level('git checkout -f'), 'high');
   assert.equal(level('git stash drop'), 'high');
   assert.equal(level('git stash clear'), 'high');
-  assert.equal(level('git worktree remove --force .yanagent/worktrees/temp'), 'high');
+  assert.equal(level('git worktree remove --force .zagent/worktrees/temp'), 'high');
   assert.equal(level('git filter-branch --env-filter "x"'), 'high');
   assert.equal(level('git filter-repo --path src'), 'high');
 });

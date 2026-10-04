@@ -1,7 +1,7 @@
 'use strict';
 
 // Read-only surface of the Harness MCP: list_entries / get_entry. In
-// production the module runs as a stdio server; YAN_HARNESS_TEST_EXPORTS keeps
+// production the module runs as a stdio server; Z_HARNESS_TEST_EXPORTS keeps
 // the stdin loop off and exposes the pure functions for tests.
 
 const test = require('node:test');
@@ -10,17 +10,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-delete process.env.YAN_HARNESS_CONTEXT_DIR;
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-harness-read-'));
-process.env.YAN_HARNESS_GLOBAL_STATE_PATH = path.join(root, 'global-harness.json');
-process.env.YAN_HARNESS_TEST_EXPORTS = '1';
-const mcp = require('../lib/yan-harness-mcp');
+delete process.env.Z_HARNESS_CONTEXT_DIR;
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-harness-read-'));
+process.env.Z_HARNESS_GLOBAL_STATE_PATH = path.join(root, 'global-harness.json');
+process.env.Z_HARNESS_TEST_EXPORTS = '1';
+const mcp = require('../lib/z-harness-mcp');
 const { ContinualHarnessStore } = require('../lib/continual-harness');
 
 const context = { runId: 'run-read', sessionId: 'sess-read', workspace: '' };
 
 test('list_entries filters by status, kind, and query with usage counters', async () => {
-  const store = new ContinualHarnessStore({ globalPath: process.env.YAN_HARNESS_GLOBAL_STATE_PATH });
+  const store = new ContinualHarnessStore({ globalPath: process.env.Z_HARNESS_GLOBAL_STATE_PATH });
   await store.apply({ edits: [
     {
       action: 'create', kind: 'memory', id: 'read-tool-memory', title: '读工具记忆',

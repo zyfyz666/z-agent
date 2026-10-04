@@ -23,7 +23,7 @@ function failedRunHandler() {
     OPENCODE_VERSION: 'test',
     coreTurnStarted: true,
     flushOpenCodeRendererEvents: runId => calls.flushed.push(runId),
-    yanCore: { completeTurn: (runId, result) => calls.core.push({ runId, result }) },
+    zCore: { completeTurn: (runId, result) => calls.core.push({ runId, result }) },
     completeOpenCodeReconcileRun: (runId, result) => calls.reconciled.push({ runId, result }),
     mainRendererReady: true,
     mainWindow: {

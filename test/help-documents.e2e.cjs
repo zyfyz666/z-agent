@@ -13,7 +13,7 @@ fs.mkdirSync(output, { recursive: true });
   let checked = 0;
   try {
     app = await electron.launch({ executablePath: require('electron'), args: [root], cwd: root,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'yan-help-documents-')) } });
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'z-help-documents-')) } });
     const page = await app.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await page.waitForFunction(() => typeof state === 'object' && state.config && typeof openSettings === 'function');
@@ -28,8 +28,8 @@ fs.mkdirSync(output, { recursive: true });
       await page.locator('#connPrev').click();
       await page.locator('#connectionDialogClose').click();
       let settingsOpen = true;
-      for (const key of ['yan-guide', 'glm', 'sensenova', 'agnes', 'siliconflow', 'overview', 'errors', 'release-notes']) {
-        if (key === 'yan-guide') {
+      for (const key of ['z-guide', 'glm', 'sensenova', 'agnes', 'siliconflow', 'overview', 'errors', 'release-notes']) {
+        if (key === 'z-guide') {
           if (settingsOpen) {
             await page.locator('#closeSettings').click();
             settingsOpen = false;
@@ -55,7 +55,7 @@ fs.mkdirSync(output, { recursive: true });
           assert.ok((await copy.innerText()).trim(), `${key} page ${index + 1} must contain text`);
           assert.equal(await page.locator(`#${prefix}StepLabel`).innerText(), `${index + 1} / ${total}`);
           checked++;
-          if (index === 0 && ['glm', 'errors', 'yan-guide'].includes(key)) {
+          if (index === 0 && ['glm', 'errors', 'z-guide'].includes(key)) {
             await page.screenshot({ path: path.join(output, `documents-${key}${round ? '-light' : ''}.png`) });
           }
           if (index + 1 < total) await page.locator(`#${prefix}Next`).click();

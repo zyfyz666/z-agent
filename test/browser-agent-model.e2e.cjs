@@ -8,24 +8,24 @@ const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
 const sourceConfigPath = path.resolve(String(
-  process.env.YAN_E2E_CONFIG_PATH
-    || path.join(process.env.APPDATA || '', 'yan-agent', 'YanData', 'config.json')
+  process.env.Z_E2E_CONFIG_PATH
+    || path.join(process.env.APPDATA || '', 'z-agent', 'ZData', 'config.json')
 ));
 const targetPath = path.resolve(String(
-  process.env.YAN_E2E_TARGET_PATH
+  process.env.Z_E2E_TARGET_PATH
     || path.join(process.env.USERPROFILE || '', 'Desktop', 'bicycle-race-3d.html')
 ));
-const timeoutMs = Math.max(30_000, Math.min(600_000, Number(process.env.YAN_E2E_MODEL_TIMEOUT_MS) || 300_000));
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-browser-model-e2e-'));
-const screenshotPath = path.join(os.tmpdir(), `yan-browser-model-${Date.now()}.png`);
+const timeoutMs = Math.max(30_000, Math.min(600_000, Number(process.env.Z_E2E_MODEL_TIMEOUT_MS) || 300_000));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-browser-model-e2e-'));
+const screenshotPath = path.join(os.tmpdir(), `z-browser-model-${Date.now()}.png`);
 
 function prepareIsolatedConfig() {
-  assert.ok(fs.existsSync(sourceConfigPath), `Yan config is missing: ${sourceConfigPath}`);
+  assert.ok(fs.existsSync(sourceConfigPath), `Z config is missing: ${sourceConfigPath}`);
   assert.ok(fs.existsSync(targetPath), `Browser test page is missing: ${targetPath}`);
   const config = JSON.parse(fs.readFileSync(sourceConfigPath, 'utf8'));
   config.workspace = '';
   config.agent = { ...(config.agent || {}), accessMode: 'full', workMode: 'normal' };
-  const targetDir = path.join(userDataDir, 'YanData');
+  const targetDir = path.join(userDataDir, 'ZData');
   fs.mkdirSync(targetDir, { recursive: true });
   fs.writeFileSync(path.join(targetDir, 'config.json'), JSON.stringify(config, null, 2), 'utf8');
   return {
@@ -62,18 +62,18 @@ async function captureTargetPage(page) {
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir
       }
     });
     const page = await application.firstWindow();
     await page.waitForFunction(() => (
       typeof executeBrowserAgentCommand === 'function'
-      && typeof window.yan?.openCodeStartRun === 'function'
+      && typeof window.z?.openCodeStartRun === 'function'
     ));
 
     const prompt = [
-      `只使用 Yan 内置浏览器打开本地网页 ${targetPath}。`,
+      `只使用 Z 内置浏览器打开本地网页 ${targetPath}。`,
       '点击“开始比赛”，等待 4000ms，只持续按住一次上方向键 1800ms。',
       '随后调用一次内置浏览器截图，再读取一次页面；依据截图工具返回的视觉报告以及页面速度和时间判断赛车是否真的前进，然后立即结束。',
       '不要继续加速、不要跑完整圈、不要修改任何文件、不要使用外部浏览器，也不要把事件到达或 Canvas 颜色变化单独当成测试成功。'
@@ -91,23 +91,23 @@ async function captureTargetPage(page) {
           removeCompleted?.();
           resolve({ ...value, eventTypes });
         };
-        const removeEvent = window.yan.onOpenCodeEvent(detail => {
+        const removeEvent = window.z.onOpenCodeEvent(detail => {
           if (detail?.runId !== id) return;
           const type = String(detail.event?.type || '');
           if (type && eventTypes.length < 500) eventTypes.push(type);
         });
-        const removeCompleted = window.yan.onOpenCodeCompleted(detail => {
+        const removeCompleted = window.z.onOpenCodeCompleted(detail => {
           if (detail?.runId !== id) return;
           finish({ start: { ok: true, runId: id }, result: detail.result || {} });
         });
         const timer = setTimeout(async () => {
-          try { await window.yan.openCodeCancelRun(id); } catch {}
+          try { await window.z.openCodeCancelRun(id); } catch {}
           reject(new Error(`Real model browser test timed out after ${timeout}ms`));
         }, timeout);
         try {
-          const start = await window.yan.openCodeStartRun({
+          const start = await window.z.openCodeStartRun({
             runId: id,
-            yanSessionId: id,
+            zSessionId: id,
             title: 'Real DeepSeek built-in browser test',
             prompt: taskPrompt,
             attachments: [],
@@ -127,7 +127,7 @@ async function captureTargetPage(page) {
     assert.ok(outcome.result, 'OpenCode run returned no result');
     const capturedScreenshotPath = await captureTargetPage(page);
     const completedVisualScreenshot = (outcome.result.toolCalls || []).find(call => {
-      if (String(call.name || '') !== 'yan_browser_browser_screenshot' || !call.ok) return false;
+      if (String(call.name || '') !== 'z_browser_browser_screenshot' || !call.ok) return false;
       try {
         const parsed = JSON.parse(String(call.output || ''));
         return parsed.visualEvidence?.available === true;
@@ -143,7 +143,7 @@ async function captureTargetPage(page) {
       args: call.args || {},
       output: (() => {
         const raw = String(call.output || '');
-        if (String(call.name || '') !== 'yan_browser_browser_screenshot') return raw.slice(0, 900);
+        if (String(call.name || '') !== 'z_browser_browser_screenshot') return raw.slice(0, 900);
         try {
           const parsed = JSON.parse(raw);
           return JSON.stringify({

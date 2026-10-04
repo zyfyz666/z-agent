@@ -10,6 +10,6 @@
   // Called synchronously inside the door click to satisfy browser autoplay policy.
   window.TiangongEntryAudio={playOnce(){if(playedEntry)return;playedEntry=true;void play();}};
   function stop(){attempt++;audio.pause();button.classList.remove('playing');button.removeAttribute('aria-busy');}
-  window.addEventListener('message',e=>{if(e.source===window.parent&&e.data?.source==='yan-palace-host'&&e.data.kind==='pause')stop();});
+  window.addEventListener('message',e=>{if(e.source===window.parent&&e.data?.source==='z-palace-host'&&e.data.kind==='pause')stop();});
   window.addEventListener('pagehide',()=>{stop();audio.removeAttribute('src');audio.load();});
 })();

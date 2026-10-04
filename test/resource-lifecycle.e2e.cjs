@@ -8,7 +8,7 @@ const { execFileSync } = require('node:child_process');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-resource-lifecycle-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-resource-lifecycle-'));
 
 function windowsProcesses() {
   const output = execFileSync('powershell.exe', [
@@ -46,14 +46,14 @@ async function waitFor(check, timeoutMs = 10_000) {
 }
 
 function skillWriteTimes() {
-  const root = path.join(userDataDir, 'YanData', 'skills');
+  const root = path.join(userDataDir, 'ZData', 'skills');
   if (!fs.existsSync(root)) return [];
   const files = [];
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(target);
-      else if (entry.name === 'SKILL.md' || entry.name === '.yan-skill.json') {
+      else if (entry.name === 'SKILL.md' || entry.name === '.z-skill.json') {
         files.push([path.relative(root, target), fs.statSync(target).mtimeMs]);
       }
     }
@@ -71,9 +71,9 @@ function skillWriteTimes() {
       cwd: appRoot,
       env: {
         ...process.env,
-        YAN_E2E_MODE: '1',
-        YAN_E2E_USER_DATA_DIR: userDataDir,
-        YAN_OPENCODE_IDLE_RELEASE_MS: '1500'
+        Z_E2E_MODE: '1',
+        Z_E2E_USER_DATA_DIR: userDataDir,
+        Z_OPENCODE_IDLE_RELEASE_MS: '1500'
       }
     });
     const rootPid = application.process().pid;
@@ -92,7 +92,7 @@ function skillWriteTimes() {
     const coldEndProcesses = descendantsOf(rootPid);
     const coldEndProcess = coldEndProcesses.find(process => Number(process.ProcessId) === Number(rootPid));
     assert.deepEqual(skillWriteTimes(), firstTimes, 'idle Skill manifests changed after startup');
-    const persistedConfig = JSON.parse(fs.readFileSync(path.join(userDataDir, 'YanData', 'config.json'), 'utf8'));
+    const persistedConfig = JSON.parse(fs.readFileSync(path.join(userDataDir, 'ZData', 'config.json'), 'utf8'));
     assert.equal((persistedConfig.skills || []).some(skill => Object.hasOwn(skill, 'prompt')), false);
     assert.equal((persistedConfig.customSkills || []).some(skill => Object.hasOwn(skill, 'prompt')), false);
 
@@ -102,7 +102,7 @@ function skillWriteTimes() {
     const warmProcesses = descendantsOf(rootPid);
     const warmRuntimeProcesses = warmProcesses.filter(process => (
       String(process.Name).toLowerCase() === 'opencode.exe'
-      || /yan-(?:skills|media|browser|session|harness)-mcp|codegraph|playwright/i.test(String(process.CommandLine || ''))
+      || /z-(?:skills|media|browser|session|harness)-mcp|codegraph|playwright/i.test(String(process.CommandLine || ''))
     ));
     assert.ok(warmRuntimeProcesses.some(process => String(process.Name).toLowerCase() === 'opencode.exe'));
     assert.equal(await waitFor(() => !descendantsOf(rootPid)

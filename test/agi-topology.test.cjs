@@ -16,7 +16,7 @@ const {
 const { SUBAGENT_ROLE_IDS } = require('../lib/subagent');
 
 function tempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yan-agi-topology-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'z-agi-topology-'));
 }
 
 function runsFor(variantId, okCount, total, cost = 1) {

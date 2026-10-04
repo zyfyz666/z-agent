@@ -65,9 +65,9 @@ assert.equal(deepseekFlashCapabilities.imageInput, true, 'deepseek-flash must be
 
 const relayOffSystem = combineSystem({
   visionRelayEnabled: false,
-  availableMcpServers: [{ id: 'yan_media', name: 'Yan Media' }]
+  availableMcpServers: [{ id: 'z_media', name: 'Z Media' }]
 });
-assert.equal(relayOffSystem.includes('yan_media_read_image'), false, 'relay-off system prompt must not advertise read_image');
+assert.equal(relayOffSystem.includes('z_media_read_image'), false, 'relay-off system prompt must not advertise read_image');
 
 // --- legacy relay key migration ---------------------------------------------
 // The old build wrote `visionRelayDisabled` (true = off); upgrading must keep

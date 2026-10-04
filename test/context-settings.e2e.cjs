@@ -7,8 +7,8 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-context-settings-e2e-'));
-const screenshotDir = String(process.env.YAN_CONTEXT_SETTINGS_SCREENSHOT_DIR || '').trim();
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-context-settings-e2e-'));
+const screenshotDir = String(process.env.Z_CONTEXT_SETTINGS_SCREENSHOT_DIR || '').trim();
 
 async function launch() {
   return electron.launch({
@@ -17,8 +17,8 @@ async function launch() {
     cwd: appRoot,
     env: {
       ...process.env,
-      YAN_E2E_MODE: '1',
-      YAN_E2E_USER_DATA_DIR: userDataDir
+      Z_E2E_MODE: '1',
+      Z_E2E_USER_DATA_DIR: userDataDir
     }
   });
 }
@@ -37,7 +37,7 @@ async function openContextSettings(page) {
   try {
     application = await launch();
     let page = await application.firstWindow();
-    await page.waitForFunction(() => typeof window.yan !== 'undefined');
+    await page.waitForFunction(() => typeof window.z !== 'undefined');
     await openContextSettings(page);
 
     const sectionOrder = await page.locator('#tab-general .general-settings-section').evaluateAll(sections => (
@@ -70,7 +70,7 @@ async function openContextSettings(page) {
     await page.locator('#contextConfigNext').click();
     await page.locator('#contextConfigDialog').waitFor({ state: 'hidden' });
     await page.waitForFunction(async () => {
-      const config = await window.yan.getConfig();
+      const config = await window.z.getConfig();
       return config.context?.maxTokens === 2_048_500
         && config.context?.compactionThreshold === 1_536_250;
     });
@@ -78,12 +78,12 @@ async function openContextSettings(page) {
     await application.close();
     application = await launch();
     page = await application.firstWindow();
-    await page.waitForFunction(() => typeof window.yan !== 'undefined');
+    await page.waitForFunction(() => typeof window.z !== 'undefined');
     await openContextSettings(page);
     assert.equal(await page.locator('#contextMaxInput').inputValue(), '2048.5');
     assert.equal(await page.locator('#contextThresholdInput').inputValue(), '1536.25');
     await page.evaluate(async () => {
-      const config = await window.yan.setConfig({ language: 'en' });
+      const config = await window.z.setConfig({ language: 'en' });
       applyLanguage(config.language);
     });
     await page.waitForFunction(() => document.querySelector('#generalContextTitle')?.textContent === 'Context');
@@ -96,7 +96,7 @@ async function openContextSettings(page) {
     assert.deepEqual(contextChinese, []);
     console.log(JSON.stringify({
       ok: true,
-      context: await page.evaluate(() => window.yan.getConfig().then(config => config.context))
+      context: await page.evaluate(() => window.z.getConfig().then(config => config.context))
     }));
   } finally {
     await application?.close().catch(() => {});

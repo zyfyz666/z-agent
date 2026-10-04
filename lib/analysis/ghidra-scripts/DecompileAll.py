@@ -2,7 +2,7 @@
 # Dumps decompiled C for every function (or the names passed as arguments)
 # into a text file. Invoked by lib/analysis/ghidra.js:
 #   analyzeHeadless <proj> <name> -import <bin> -postScript DecompileAll.py <out> [names]
-# @category: Yan.Reverser
+# @category: Z.Reverser
 
 from ghidra.app.decompiler import DecompInterface
 from ghidra.util.task import ConsoleTaskMonitor
@@ -18,7 +18,7 @@ interface.openProgram(program)
 monitor = ConsoleTaskMonitor()
 
 listing = program.getFunctionManager().getFunctions(True)
-lines = ['// decompiled by Yan Reverser via Ghidra headless', '// program: %s' % program.getName(), '']
+lines = ['// decompiled by Z Reverser via Ghidra headless', '// program: %s' % program.getName(), '']
 
 count = 0
 for function in listing:

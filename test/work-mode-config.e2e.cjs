@@ -5,8 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const root = path.resolve(__dirname, '..');
-const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-work-mode-config-'));
-const configPath = path.join(userData, 'YanData', 'config.json');
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'z-work-mode-config-'));
+const configPath = path.join(userData, 'ZData', 'config.json');
 fs.mkdirSync(path.dirname(configPath), { recursive: true });
 fs.writeFileSync(configPath, JSON.stringify({ agent: { workMode: 'absolute' } }));
 
@@ -14,7 +14,7 @@ fs.writeFileSync(configPath, JSON.stringify({ agent: { workMode: 'absolute' } })
   let app;
   try {
     app = await electron.launch({ executablePath: require('electron'), args: [root], cwd: root,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userData } });
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userData } });
     const page = await app.firstWindow();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

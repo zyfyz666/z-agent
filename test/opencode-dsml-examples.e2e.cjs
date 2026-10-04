@@ -10,7 +10,7 @@ const path = require('node:path');
 const { OpenCodeSidecar, buildOpenCodeConfig } = require('../lib/opencode-sidecar');
 
 const appRoot = path.resolve(__dirname, '..');
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-dsml-examples-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-dsml-examples-'));
 const file = path.join(directory, 'adapter.txt');
 fs.writeFileSync(file, 'DSML adapter reference for planning.\n');
 const marker = 'DSML_EXAMPLE_REGRESSION';
@@ -99,7 +99,7 @@ const server = http.createServer((request, response) => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(directory).startsWith('yan-dsml-examples-'));
+    assert.ok(path.basename(directory).startsWith('z-dsml-examples-'));
     fs.rmSync(directory, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -27,14 +27,14 @@ test('terminal SSE events finish even when a relay leaves HTTP open', { timeout:
 });
 
 test('GPTL Chat SDK settles and preserves usage without HTTP EOF', { timeout: 4000 }, async () => {
-  const { createYanGptlProvider } = await import(moduleUrl);
+  const { createZGptlProvider } = await import(moduleUrl);
   let cancelled = false;
   const chunks = [
     { id: 'c1', object: 'chat.completion.chunk', created: 1, model: 'gpt-6-astra', choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: null }] },
     { id: 'c1', object: 'chat.completion.chunk', created: 1, model: 'gpt-6-astra', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
     { id: 'c1', object: 'chat.completion.chunk', created: 1, model: 'gpt-6-astra', choices: [], usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 } }
   ];
-  const provider = createYanGptlProvider({ apiKey: 'test', baseURL: 'https://relay.test/v1', fetch: async () => new Response(new ReadableStream({
+  const provider = createZGptlProvider({ apiKey: 'test', baseURL: 'https://relay.test/v1', fetch: async () => new Response(new ReadableStream({
     start(controller) { controller.enqueue(new TextEncoder().encode(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n')); },
     cancel() { cancelled = true; }
   }), { headers: { 'content-type': 'text/event-stream' } }) });
@@ -75,7 +75,7 @@ test('sidecar keeps GPTL independent from the selected wire protocol', () => {
 });
 
 test('real HTTP requests use standard endpoints and parse successful replies', async () => {
-  const { createYanGptlProvider } = await import(moduleUrl);
+  const { createZGptlProvider } = await import(moduleUrl);
   const requests = [];
   const server = http.createServer(async (req, res) => {
     let raw = '';
@@ -106,7 +106,7 @@ test('real HTTP requests use standard endpoints and parse successful replies', a
       ['auto', `${base}/chat/response`, '/responses']
     ];
     for (const [apiFormat, baseURL, expected] of cases) {
-      const provider = createYanGptlProvider({ apiKey: 'local-test', baseURL, apiFormat });
+      const provider = createZGptlProvider({ apiKey: 'local-test', baseURL, apiFormat });
       const result = await provider('gpt-6-astra').doGenerate({
         abortSignal: AbortSignal.timeout(3000),
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],

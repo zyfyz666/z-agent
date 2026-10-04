@@ -79,8 +79,8 @@ const server = http.createServer((request, response) => {
 });
 
 async function launch() {
-  const env = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: profile,
-    YAN_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
+  const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile,
+    Z_E2E_PARENT_PID: String(process.pid), OPENCODE_DISABLE_MODELS_FETCH: 'true', OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true' };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
   const deadline = Date.now() + 20_000;
@@ -102,7 +102,7 @@ async function switchTo(id) {
   await page.waitForFunction(id => state.currentSession?.id === id && !observerPendingSessionId, id);
 }
 
-async function readSession(id) { return page.evaluate(id => yan.getSession(id), id); }
+async function readSession(id) { return page.evaluate(id => z.getSession(id), id); }
 
 async function composer() {
   return page.evaluate(() => ({ text: getComposerText(), attachments: state.attachments,
@@ -172,15 +172,15 @@ function unchanged() {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     await launch();
     ({ source, other, first } = await page.evaluate(async ({ port, modelId, markers }) => {
-      const connection = await yan.connectionsSave({ name: 'Editable rewind fixture', preset: 'openai', apiFormat: 'openai',
+      const connection = await z.connectionsSave({ name: 'Editable rewind fixture', preset: 'openai', apiFormat: 'openai',
         manualModelId: modelId, baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'local-fixture-only' });
       if (!connection.ok) throw new Error(connection.error);
-      await yan.setConfig({ agent: { accessMode: 'full', workMode: 'normal' },
+      await z.setConfig({ agent: { accessMode: 'full', workMode: 'normal' },
         permissions: { allowFileRead: true, allowFileWrite: true, allowNetwork: false } });
-      state.config = await yan.getConfig();
+      state.config = await z.getConfig();
       const selection = { providerId: connection.connection.providerId, supplierId: connection.connection.supplierId,
         modelId, modelType: 'text', name: modelId, capabilities: {} };
-      const source = await yan.createSession(true);
+      const source = await z.createSession(true);
       source.title = 'Editable rewind source';
       source.messages = [
         { role: 'user', content: markers.prefix, ts: 1_800_000_003_000 },
@@ -192,16 +192,16 @@ function unchanged() {
         { role: 'user', content: markers.future + ' later question', ts: 1_800_000_003_004 },
         { role: 'assistant', content: markers.future + ' later answer', ts: 1_800_000_003_005 }
       ];
-      await yan.saveSession(source); await yan.setSessionModel(source.id, selection);
-      const other = await yan.createSession(true);
+      await z.saveSession(source); await z.setSessionModel(source.id, selection);
+      const other = await z.createSession(true);
       other.messages = [{ role: 'user', content: 'An independent task', ts: 1_800_000_004_000 }];
-      await yan.saveSession(other);
-      const first = await yan.createSession(true);
+      await z.saveSession(other);
+      const first = await z.createSession(true);
       first.messages = [{ role: 'user', content: markers.firstOriginal, ts: 1_800_000_005_000, modelSelection: selection },
         { role: 'assistant', content: markers.future, ts: 1_800_000_005_001 }];
-      await yan.saveSession(first); await yan.setSessionModel(first.id, selection);
+      await z.saveSession(first); await z.setSessionModel(first.id, selection);
       await refreshSessions(); renderSessionList();
-      return { source: await yan.getSession(source.id), other, first };
+      return { source: await z.getSession(source.id), other, first };
     }, { port: server.address().port, modelId, markers }));
     assert.ok(path.resolve(source.workspace).startsWith(path.resolve(profile) + path.sep));
     markerFile = path.join(source.workspace, 'current-file-marker.txt');
@@ -295,7 +295,7 @@ function unchanged() {
     // normal blank-chat cleanup even while a different blank chat is active.
     assert.equal(first.workspaceKind, 'default');
     const blank = await page.evaluate(async () => {
-      const blank = await yan.createSession(true);
+      const blank = await z.createSession(true);
       await refreshSessions(); renderSessionList();
       return blank;
     });
@@ -340,8 +340,8 @@ function unchanged() {
     throw error;
   } finally {
     if (page && !page.isClosed()) await page.evaluate(async () => {
-      const active = await yan.openCodeSyncActiveRuns();
-      for (const run of active?.runs || []) await yan.openCodeCancelRun(run.runId).catch(() => {});
+      const active = await z.openCodeSyncActiveRuns();
+      for (const run of active?.runs || []) await z.openCodeCancelRun(run.runId).catch(() => {});
     }).catch(() => {});
     await application?.close().catch(() => {});
     server.closeAllConnections?.();

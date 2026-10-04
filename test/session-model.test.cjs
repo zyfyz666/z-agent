@@ -27,7 +27,7 @@ const selection = suffix => ({ providerId: `fixture-${suffix}`, supplierId: 'off
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-session-model-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const dataDir = path.join(root, 'profile', 'YanData');
+  const dataDir = path.join(root, 'profile', 'ZData');
   const sessionsDir = path.join(dataDir, 'sessions');
   fs.mkdirSync(sessionsDir, { recursive: true });
   const defaultTasksRoot = taskWorkspaceRoot({ userDataDirectory: path.join(root, 'profile'), isolated: true });
@@ -85,7 +85,7 @@ function fixture(t) {
     },
     sanitizeSessionReviewSummaries: value => value, pruneSessionRuntimeBookkeeping: value => value,
     selectTailMessages: (messages, limit) => ({ tail: messages.slice(-limit), messagesStart: Math.max(0, messages.length - limit) }),
-    activateWorkspace() {}, migrateMemoryToWorkspace() {}, ensureYanagent() {}, notifyDesktopSessionUpdate() {},
+    activateWorkspace() {}, migrateMemoryToWorkspace() {}, ensureZagent() {}, notifyDesktopSessionUpdate() {},
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     console: { info() {}, warn() {}, error() {} },
     isSessionRunActive: () => false,
@@ -129,7 +129,7 @@ function fixture(t) {
     rename: (id, title, options = {}) => handlers.get('session:rename')(null, { id, title, ...options }),
     workspace: (id, workspace) => handlers.get('session:set-workspace')(null, { id, workspace, activate: false }),
     start: request => handlers.get('opencode:start-run')(null, request),
-    compress: id => handlers.get('opencode:compress-session')(null, { yanSessionId: id }),
+    compress: id => handlers.get('opencode:compress-session')(null, { zSessionId: id }),
     pauseWrite() {
       let release, enter;
       const promise = new Promise(resolve => { release = resolve; });
@@ -179,7 +179,7 @@ test('old conversations migrate from history once without changing timestamps; u
   assert.equal(migrated.modelSelection.modelId, 'removed-model');
   assert.equal(f.disk(a.id).updatedAt, 42);
   assert.equal(f.disk(a.id).modelSelection.providerId, 'deleted-provider');
-  const run = await f.start({ yanSessionId: a.id });
+  const run = await f.start({ zSessionId: a.id });
   assert.equal(run.ok, false);
   assert.equal(run.code, 'SESSION_MODEL_UNAVAILABLE');
   assert.equal(f.disk(a.id).modelSelection.modelId, 'removed-model');
@@ -223,7 +223,7 @@ for (const tailOnly of [false, true]) {
     // Real IPC transfers independent objects. Do not accidentally share the
     // cached main-process object with this simulated long-running renderer.
     const staleRun = structuredClone(await f.read(background.id));
-    f.context.openCodeActiveRuns.set('background-run', { yanSessionId: background.id });
+    f.context.openCodeActiveRuns.set('background-run', { zSessionId: background.id });
     const visibleBefore = f.disk(visible.id);
     await f.rename(background.id, 'Renamed from sidebar');
     staleRun.messages.push({ role: 'assistant', content: 'Completed after rename' });
@@ -326,12 +326,12 @@ test('runs and compression resolve each session or explicit frozen model into th
   const b = await f.create();
   await f.set(b.id, selection('b'));
   const global = f.config();
-  const [runA, runB] = await Promise.all([f.start({ yanSessionId: a.id }), f.start({ yanSessionId: b.id })]);
+  const [runA, runB] = await Promise.all([f.start({ zSessionId: a.id }), f.start({ zSessionId: b.id })]);
   assert.equal(runA.runtime.modelId, 'model-a');
   assert.equal(runA.runtime.apiKey, 'fixture-key-a');
   assert.equal(runB.runtime.modelId, 'model-b');
   assert.equal(runB.runtime.apiKey, 'fixture-key-b');
-  const frozen = await f.start({ yanSessionId: a.id, modelSelection: selection('b') });
+  const frozen = await f.start({ zSessionId: a.id, modelSelection: selection('b') });
   assert.equal(frozen.runtime.baseUrl, 'http://127.0.0.1:9/b');
   assert.equal(f.disk(a.id).modelSelection.modelId, 'model-a');
   f.seed({ ...f.disk(b.id), openCodeSessionId: 'kernel-b' });
@@ -345,10 +345,10 @@ test('missing models/suppliers fail explicitly and synthetic utility sessions re
   const f = fixture(t);
   const a = await f.create();
   assert.equal((await f.set(a.id, { ...selection('a'), supplierId: 'removed' })).code, 'SESSION_MODEL_UNAVAILABLE');
-  assert.equal((await f.start({ yanSessionId: 'sess_deleted' })).code, 'session-not-found');
-  const utility = await f.start({ yanSessionId: 'prompt-optimizer:fixture', utility: true, modelSelection: selection('b') });
+  assert.equal((await f.start({ zSessionId: 'sess_deleted' })).code, 'session-not-found');
+  const utility = await f.start({ zSessionId: 'prompt-optimizer:fixture', utility: true, modelSelection: selection('b') });
   assert.equal(utility.runtime.modelId, 'model-b');
-  assert.equal((await f.start({ yanSessionId: 'prompt-optimizer:fixture', utility: true })).code, 'SESSION_MODEL_UNAVAILABLE');
+  assert.equal((await f.start({ zSessionId: 'prompt-optimizer:fixture', utility: true })).code, 'SESSION_MODEL_UNAVAILABLE');
   f.editConfig(cfg => { cfg.api.connections = cfg.api.connections.filter(item => item.providerId !== 'fixture-a'); });
-  assert.equal((await f.start({ yanSessionId: a.id })).code, 'SESSION_MODEL_UNAVAILABLE');
+  assert.equal((await f.start({ zSessionId: a.id })).code, 'SESSION_MODEL_UNAVAILABLE');
 });

@@ -11,7 +11,7 @@ const { WDMonitorState } = require('../lib/wd-monitor-state');
 const appRoot = path.resolve(__dirname, '..');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-observer-history-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'observer-history');
-const launchEnv = { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir };
+const launchEnv = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir };
 delete launchEnv.ELECTRON_RUN_AS_NODE;
 const report = { ok: false, checks: [], modelRequests: 0, pageErrors: [], screenshots: [] };
 const baseTime = Date.now() - 100_000;
@@ -267,7 +267,7 @@ function turn(label, checks, interventions = 1) {
     await select('C1');
     await expectRecord('C1', 1);
     await page.evaluate(async () => { await saveCurrentSession(); });
-    const longStored = JSON.parse(fs.readFileSync(path.join(userDataDir, 'YanData', 'sessions', `${fixtures.long}.json`), 'utf8'));
+    const longStored = JSON.parse(fs.readFileSync(path.join(userDataDir, 'ZData', 'sessions', `${fixtures.long}.json`), 'utf8'));
     assert.equal(longStored.messages.length, 50, 'saving the paged session must preserve every original message');
     assert.equal(longStored.messages[1].agentRun.watchdog.events[0].message, 'History marker C1');
     assert.equal(longStored.messages.at(-1).agentRun.watchdog.events[0].message, 'History marker C25');
@@ -313,7 +313,7 @@ function turn(label, checks, interventions = 1) {
         runCtx.activeAgentRun.timeline = [];
         runCtx.sessionRef = session;
         state.activeRuns.set(session.id, { sessionRef: session, runCtx, assistantEl: null });
-        applyOpenCodeEvent(runCtx, { type: 'yan.thrash.watchdog.status', data: { ...snapshot, runID: runId } });
+        applyOpenCodeEvent(runCtx, { type: 'z.thrash.watchdog.status', data: { ...snapshot, runID: runId } });
         return runCtx;
       };
       const runA = makeLive(state.currentSession, 'A3', liveA);
@@ -326,7 +326,7 @@ function turn(label, checks, interventions = 1) {
 
     await page.evaluate(() => {
       const { runB } = window.__observerHistoryLive;
-      applyOpenCodeEvent(runB, { type: 'yan.thrash.watchdog.status', data: {
+      applyOpenCodeEvent(runB, { type: 'z.thrash.watchdog.status', data: {
         ...runB.activeAgentRun.watchdog, updatedAt: Date.now(), checks: 14, observedSteps: 84, judgedSteps: 84
       } });
     });

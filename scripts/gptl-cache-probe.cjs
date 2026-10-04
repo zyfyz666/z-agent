@@ -25,11 +25,11 @@ const appRoot = path.resolve(__dirname, '..');
 const executable = path.join(appRoot, 'node_modules', `opencode-windows-${process.arch}`, 'bin', 'opencode.exe');
 const MODEL_ID = 'gpt-5.5-packaged';
 
-const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-cache-probe-'));
+const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'z-cache-probe-'));
 const workspace = path.join(runRoot, 'workspace');
 fs.mkdirSync(workspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, 'note.txt'), 'hello cache probe\n');
-fs.writeFileSync(path.join(workspace, 'AGENTS.md'), 'YAN_PROBE_AGENTS_MARKER: always mention the purple elephant.\n');
+fs.writeFileSync(path.join(workspace, 'AGENTS.md'), 'Z_PROBE_AGENTS_MARKER: always mention the purple elephant.\n');
 const { execFileSync } = require('node:child_process');
 try { execFileSync('git', ['init'], { cwd: workspace }); } catch { /* probe-only */ }
 
@@ -186,9 +186,9 @@ function diffPair(before, after, label) {
   const second = await runKernel(['run', '--continue', '--model', `conn-gptl/${MODEL_ID}`, 'Reply DONE2.']);
   if (second.code !== 0) console.log('run2 stderr:', second.err.slice(-1500));
 
-    console.log('marker:', requests.some(r => r.body.includes('YAN_PROBE_AGENTS_MARKER')), '| rules-frame:', requests.some(r => r.body.includes('YAN PROJECT RULES')), '| env-block:', requests.some(r => r.body.includes('YAN PROJECT ENVIRONMENT')));
+    console.log('marker:', requests.some(r => r.body.includes('Z_PROBE_AGENTS_MARKER')), '| rules-frame:', requests.some(r => r.body.includes('Z PROJECT RULES')), '| env-block:', requests.some(r => r.body.includes('Z PROJECT ENVIRONMENT')));
     for (const r of requests) {
-      const match = String(r.body).match(/YAN PROJECT ENVIRONMENT\\n([\s\S]{0,300})/);
+      const match = String(r.body).match(/Z PROJECT ENVIRONMENT\\n([\s\S]{0,300})/);
       if (match) {
         try { console.log('plugin env workspace:', JSON.parse(match[1].replace(/\\n/g, ' ')).workspace); } catch { console.log('env head:', match[1].slice(0, 200)); }
         break;

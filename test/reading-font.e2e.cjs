@@ -7,7 +7,7 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-reading-font-e2e-'));
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-reading-font-e2e-'));
 
 async function launch() {
   return electron.launch({
@@ -16,8 +16,8 @@ async function launch() {
     cwd: appRoot,
     env: {
       ...process.env,
-      YAN_E2E_MODE: '1',
-      YAN_E2E_USER_DATA_DIR: userDataDir
+      Z_E2E_MODE: '1',
+      Z_E2E_USER_DATA_DIR: userDataDir
     }
   });
 }
@@ -25,7 +25,7 @@ async function launch() {
 async function waitForRendererReady(page) {
   await page.waitForFunction(() => (
     document.readyState === 'complete'
-      && typeof yan !== 'undefined'
+      && typeof z !== 'undefined'
       && document.documentElement.dataset.readingFont
   ));
 }
@@ -42,11 +42,11 @@ const readBrandFont = page => page.evaluate(() => (
     await waitForRendererReady(page);
     assert.equal(await page.evaluate(() => document.documentElement.dataset.readingFont), 'serif');
     const serifStack = await readBrandFont(page);
-    assert.match(serifStack, /Yan Reading Serif/);
+    assert.match(serifStack, /Z Reading Serif/);
     const fonts = await page.evaluate(async () => {
       const report=[];
       for (const weight of [400,600,700]) {
-        const faces=await document.fonts.load(`${weight} 15px "Yan Reading Serif"`, '找到了：你的桌面被重定向缓存命中');
+        const faces=await document.fonts.load(`${weight} 15px "Z Reading Serif"`, '找到了：你的桌面被重定向缓存命中');
         report.push({weight,count:faces.length,status:faces[0]?.status});
       }
       const sample=document.createElement('div');sample.className='msg assistant';sample.id='reading-font-proof';
@@ -72,7 +72,7 @@ const readBrandFont = page => page.evaluate(() => (
     await page.waitForFunction(() => document.documentElement.dataset.readingFont === 'sans');
     const sansStack = await readBrandFont(page);
     assert.match(sansStack, /Segoe UI|Microsoft YaHei|system-ui/i, `sans option must swap to the UI stack, saw ${sansStack}`);
-    const saved = await page.evaluate(() => yan.getConfig());
+    const saved = await page.evaluate(() => z.getConfig());
     assert.equal(saved.readingFont, 'sans');
 
     await page.reload();

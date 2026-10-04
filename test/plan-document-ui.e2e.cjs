@@ -6,15 +6,15 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 
 const appRoot = path.resolve(__dirname, '..');
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-plan-ui-e2e-'));
-const plansDir = path.join(userDataDir, 'YanData', 'plans');
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-plan-ui-e2e-'));
+const plansDir = path.join(userDataDir, 'ZData', 'plans');
 const planPath = path.join(plansDir, '实现登录页计划.md');
 fs.mkdirSync(plansDir, { recursive: true });
 fs.writeFileSync(planPath, [
-  '<yan-delivery-contract>',
+  '<z-delivery-contract>',
   'intent: presentable',
   'scope: leak',
-  '</yan-delivery-contract>',
+  '</z-delivery-contract>',
   '<thinking>内部思考不应出现</thinking>',
   '# 实现登录页计划',
   '',
@@ -31,7 +31,7 @@ fs.writeFileSync(planPath, [
       executablePath: require('electron'),
       args: [appRoot],
       cwd: appRoot,
-      env: { ...process.env, YAN_E2E_MODE: '1', YAN_E2E_USER_DATA_DIR: userDataDir }
+      env: { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir }
     });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -118,7 +118,7 @@ fs.writeFileSync(planPath, [
     assert.equal(panel.fileName, '实现登录页计划.md', JSON.stringify(panel));
     assert.match(panel.content, /第一步：搭建页面结构。/u, JSON.stringify(panel));
     assert.match(panel.content, /第二步：接入登录接口。/u, JSON.stringify(panel));
-    assert.doesNotMatch(panel.content, /yan-delivery-contract|intent:|内部思考不应出现/u, JSON.stringify(panel));
+    assert.doesNotMatch(panel.content, /z-delivery-contract|intent:|内部思考不应出现/u, JSON.stringify(panel));
     assert.ok(panel.download, 'download button exists');
     assert.equal(panel.download.disabled, false, JSON.stringify(panel));
     assert.equal(panel.download.width, panel.download.height, JSON.stringify(panel));
