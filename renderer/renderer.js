@@ -6758,7 +6758,7 @@ function renderLiveGuidanceStatus(element, guidance) {
   status.dataset.status = guidance.status;
   status.textContent = guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response' ? '已经引导'
     : guidance.status === 'delivered' ? '引导记录（送达未确认）'
-    : guidance.status === 'failed' ? `未送达：${guidance.error || '请重试或排队发送'}`
+    : guidance.status === 'failed' ? `送达未确认：${guidance.error || '本轮没有收到模型接口回执'}`
       : '等待引导';
   status.title = guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response'
     ? '已确认包含此引导的请求到达模型接口；不代表模型一定会遵循。'
