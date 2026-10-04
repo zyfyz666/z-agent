@@ -285,6 +285,7 @@
     '点击左侧边栏': 'Click', '查看引导': 'in the left sidebar to open the guide',
     '观察者': 'Observer', '观察者运行情况': 'Observer activity', '观察者 / 运行状态': 'Observer / Activity',
     'Z 正在操作浏览器': 'Z is using the browser', '项目地图需要当前任务工作区。': 'Project map requires a workspace for the current task.',
+    '当前任务文件夹中没有可显示的代码。请选择包含源码的项目文件夹后再打开项目地图。': 'This task folder has no code to display. Select a project folder containing source files, then open Project map again.',
     'Z 媒体': 'Z Media', 'Z 技能': 'Z Skills', 'Z 内置浏览器': 'Z Browser', 'Z 网页读取': 'Z Web Fetch',
     'Z 会话': 'Z Sessions', 'Z 持续改进': 'Z Continuous Improvement', 'Z 项目分析': 'Z Project Analysis',
     'Z 工作区': 'Z Workspace', 'Z 内核': 'Z Kernel', '打开 Z': 'Open Z', '退出 Z': 'Quit Z',

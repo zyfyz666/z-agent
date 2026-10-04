@@ -67,6 +67,11 @@
       setStatus('');
       return { ok: false, cancelled: true };
     }
+    if (result?.ok && result.empty) {
+      clearFrame();
+      setStatus(result.message || '当前任务文件夹中没有可显示的代码。请选择包含源码的项目文件夹后再打开项目地图。');
+      return result;
+    }
     if (!result?.ok || !result.url) {
       const error = result?.error || '无法打开项目地图';
       setStatus(error, true);
@@ -96,6 +101,11 @@
       setStatus('');
       return { ok: false, cancelled: true };
     }
+    if (result?.ok && result.empty) {
+      clearFrame();
+      setStatus(result.message || '当前任务文件夹中没有可显示的代码。请选择包含源码的项目文件夹后再打开项目地图。');
+      return result;
+    }
     if (!result?.ok || !result.url) {
       const error = result?.error || '刷新项目地图失败';
       setStatus(error, true);
@@ -121,8 +131,11 @@
 
   function handleWorkspaceChanged(detail = {}) {
     if (!open) return;
-    const next = detail.workspace || '';
-    if (next && next !== workspace) openViewer(next).catch(() => {});
+    const next = String(detail.workspace || '').trim();
+    const selected = String(hooks.getWorkspace?.() || '').trim();
+    // A previous task's debounced file-watch event can arrive after a task
+    // switch. It must not redirect the map back to that old task folder.
+    if (next && next === selected && next !== workspace) openViewer(next).catch(() => {});
   }
 
   function init(options = {}) {
