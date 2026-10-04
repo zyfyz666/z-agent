@@ -1,8 +1,6 @@
-# YAgent 技术参考
+# Z 技术参考
 
-[返回项目首页](https://github.com/ViaTumLab/YAgent)
-
-[ViaTum Lab 公司网站](https://viatumlab.inkmindspace.com) · [YAgent 产品介绍](https://viatumlab.inkmindspace.com/product-intro.html)
+[返回项目首页](https://github.com/zyfyz666/z-agent)
 
 面向真实工作区的跨平台桌面 Agent。连接你选择的模型，让它读取项目、定位代码、使用工具、协作修改、操作内置浏览器，并把执行过程与文件变化交付给你审阅。
 
@@ -12,9 +10,9 @@
 ![Electron](https://img.shields.io/badge/Electron-31-47848f)
 ![License](https://img.shields.io/badge/license-MIT-16a34a)
 
-**模型负责推理与生成，Yan 负责提供可用的工程环境。** 项目理解、精确编辑、状态持久化、权限、上下文、MCP、子代理与审阅是产品的一部分，不需要用户把每项能力重新拼装成独立工具。
+**模型负责推理与生成，Z 负责提供可用的工程环境。** 项目理解、精确编辑、状态持久化、权限、上下文、MCP、子代理与审阅是产品的一部分，不需要用户把每项能力重新拼装成独立工具。
 
-本文对应 `package.json` 的 **1.6.1**。1.6.0 的核心变化是专用模型适配、工程分析工具、长任务恢复、结构化子代理协作、审阅性能、网页注释，以及云顶天宫 Work GUI；1.6.1 更新 macOS 品牌、图标、欢迎页、启动页和等待状态。产品介绍见 [YAgent 产品页](https://viatumlab.inkmindspace.com/product-intro.html)。
+本文对应 `package.json` 的 **1.6.1**，重点说明工程实现与运行边界。当前功能、界面操作和观察者设置以 [README](../README.md) 为准。文中保留源码使用的内部模块名、协议和兼容数据目录名，便于对照实现。
 
 > 当前源码版本为 v1.6.1。本文解释已经存在的代码及其边界，不把实验模块、工具可用性或测试文件数量等同于任务成功率。模型服务的可用性、价格、额度和参数支持以实际供应商为准。
 
@@ -27,13 +25,13 @@
 - [大型项目理解与精确代码操作](#coding)
 - [八类子代理与委派计划](#subagents)
 - [长任务、流式输出与恢复](#recovery)
+- [观察者与长程任务](#observer)
 - [上下文预算与压缩](#context)
 - [Git、worktree 与 PR](#git)
 - [审阅系统](#review)
 - [内置浏览器与网页注释](#browser)
 - [工作模式、自进化与 AGI](#modes)
 - [Skills、MCP 与多模态](#extensions)
-- [云顶天宫 Work GUI](#palace)
 - [桌面交互与阅读体验](#desktop)
 - [权限、数据与凭据](#data)
 - [开发、构建与测试](#development)
@@ -45,12 +43,12 @@
 
 ### 安装与首次配置
 
-当前支持 Windows x64 与 macOS Apple Silicon（arm64）。Windows 安装包从 [Releases](https://github.com/ViaTumLab/YAgent/releases) 获取；macOS DMG 可从 [macOS build](https://github.com/ViaTumLab/YAgent/actions/workflows/macos-build.yml) 的构建产物获取或从源码生成。README 的开发版本号不代表对应发布资产一定已经上传。
+当前支持 Windows x64 与 macOS Apple Silicon（arm64）。可在 [Releases](https://github.com/zyfyz666/z-agent/releases) 查看已发布的安装包；macOS 构建定义见 [macOS build](https://github.com/zyfyz666/z-agent/actions/workflows/macos-build.yml)，也可从源码生成 DMG。源码版本号不代表对应发布资产一定已经上传。
 
 1. 打开 API 配置，创建一个连接，填写名称、Base URL 和 API Key。
 2. 选择兼容预设和服务端实际支持的格式，测试连接；模型可从返回列表选择，也可以手填模型 ID。
-3. 选择主文本模型。图片理解、图片生成、视频生成等按需单独配置。
-4. 编码任务先选择项目工作区；普通问答、网页阅读等可以从 Blank 任务开始。
+3. 点击输入框右下角的模型按钮，在同一菜单选择供应商和主文本模型。每个对话独立保存模型；图片理解、图片生成、视频生成等按需单独配置。
+4. 无需先选择工作区即可开始任务。每个对话默认使用系统文档目录下的 `Z Agent/Tasks/<会话 ID>` 持久文件夹；处理已有项目时可选择项目工作区。
 5. 根据任务选择常规、计划、目标、自进化或 AGI；选择相应访问权限后发送请求。
 6. 工作过程中查看工具和子代理状态；涉及文件修改时，在审阅面板检查差异。
 
@@ -65,7 +63,7 @@
 | API 格式 | Chat Completions、Messages 或 Responses | 不等于供应商名称 |
 | 模型 ID | 服务端接收的具体模型标识 | 目录中的名字不是可用性证明 |
 | 推理强度 | 按模型能力映射请求参数 | 不保证所有模型都接受相同档位 |
-| 上下文设置 | Yan 使用的预算与压缩触发点 | 不会扩大服务端真实上下文上限 |
+| 上下文设置 | Z 使用的预算与压缩触发点 | 不会扩大服务端真实上下文上限 |
 | 工作区 | 项目定位、文件与工程工具的作用域 | 不自动授予所有磁盘路径权限 |
 
 <a id="architecture"></a>
@@ -73,11 +71,11 @@
 
 ### 四层分工
 
-Yan 使用 Electron 提供桌面壳，基于 OpenCode `1.18.11` 构建执行链，并在其外部增加自己的任务状态、权限、工程工具和产品交互。Yan Core 与 OpenCode 不是两个同时竞争执行的 Agent 循环。
+Z 使用 Electron 提供桌面壳，基于 OpenCode `1.18.11` 构建执行链，并在其外部增加自己的任务状态、权限、工程工具、观察者和产品交互。内部状态模块 Yan Core 与 OpenCode 不是两个同时竞争执行的 Agent 循环。
 
 ```mermaid
 flowchart TD
-  UI[Electron 渲染层：任务 / 审阅 / 浏览器 / Work GUI]
+  UI[Electron 渲染层：任务 / 审阅 / 浏览器 / 观察者]
   IPC[preload：受控 IPC 接口]
   MAIN[主进程：配置 / 工作区 / 权限 / 服务管理]
   CORE[Yan Core：线程 / 回合 / 意图 / 状态 / 日志]
@@ -125,16 +123,16 @@ flowchart TD
 
 “兼容 Chat Completions”通常只意味着基础请求形状相近。思考字段、工具名限制、历史思考回传、推理强度、缓存统计以及流结束信号可能不同。
 
-Yan 把这类差异放在 provider 和请求整形层，避免污染文件工具和 UI。核心流程是：
+Z 把这类差异放在 provider 和请求整形层，避免污染文件工具和 UI。核心流程是：
 
 ```text
-Yan 模型配置
+Z 模型配置
   → 选择适配器与实际协议
   → 将能力和推理档位映射到请求参数
   → 规范工具名称并保留反向映射
   → 发送真实端点
   → 解析文字、思考、工具调用与 usage
-  → 恢复 Yan 内部工具名，返回内核
+  → 恢复内部工具名，返回内核
 ```
 
 | 路线 | 主要作用 | 核心源码 |
@@ -182,7 +180,7 @@ KIML 不把所有 Kimi 都当成同一种思考模型。请求整形区分支持
 
 ### 性能与统计的边界
 
-首字延迟、输入速度、生成速度、缓存命中属于不同指标。供应商少报 usage、网关删掉缓存字段、SSE 缓冲、工具执行慢和 UI 阻塞，可能呈现相似的“慢”，但需要检查不同层。Yan 会记录可获得的数据；没有字段不等于缓存命中为零，也不代表可以推算出真实账单。
+首字延迟、输入速度、生成速度、缓存命中属于不同指标。供应商少报 usage、网关删掉缓存字段、SSE 缓冲、工具执行慢和 UI 阻塞，可能呈现相似的“慢”，但需要检查不同层。Z 会记录可获得的数据；没有字段不等于缓存命中为零，也不代表可以推算出真实账单。
 
 <a id="coding"></a>
 ## 大型项目理解与精确代码操作
@@ -216,7 +214,7 @@ Yan Analysis 提供的是可重复计算的工程信息，模型负责根据它�
 
 ### Serena 与原生 LSP
 
-Serena 提供另一层基于 LSP 的符号与引用能力。Yan 固定暴露 11 个工具：
+Serena 提供另一层基于 LSP 的符号与引用能力。Z 固定暴露 11 个工具：
 
 ```text
 get_symbols_overview   find_symbol              find_declaration
@@ -270,7 +268,7 @@ Yan Analysis 还包含十六进制查看/统计/比较、CRC 探测、协议字�
 | Tracer | 追踪调用链和数据流 |
 | Reverser | 协议或逆向分析 |
 
-子代理通过 OpenCode 原生 Task 工具形成子会话，Yan 在外层绑定角色、权限、工作区、并发与状态。主代理仍持有最终交付责任；角色数不等于可以无限并行。
+子代理通过 OpenCode 原生 Task 工具形成子会话，Z 在外层绑定角色、权限、工作区、并发与状态。主代理仍持有最终交付责任；角色数不等于可以无限并行。
 
 ### 可解析的委派计划
 
@@ -332,6 +330,21 @@ provider 请求不简单用一个总时长上限截断所有长生成，仍设�
 
 这些优化减少首屏载荷和重复 DOM 工作，不表示任意长度历史都可以零成本渲染。
 
+<a id="observer"></a>
+## 观察者与长程任务
+
+观察者把近期工具动作、验证记录和原始任务目标放在一起检查，帮助主 Agent 在长程任务中保持全局视野，识别重复操作、策略停滞、目标偏移和验证过期等信号。
+
+默认使用确定性规则，无需调用模型；也可以在输入框下方的观察者设置中单独选择供应商和模型。模型观察只接收目标与近期行动摘要，不执行工具；推理强度独立设置，默认「最高」，实际请求按所选模型支持的参数映射。
+
+**模型观察默认不介入。** 只有明确确认主 Agent 已经进入误区，并能提供可追溯的行动证据时，才发送纠偏提醒。正常探索、单次失败、耗时较长或偏好不同都不足以触发提醒。启用模型观察后，规则信号只作为核验线索，不会绕过模型确认直接插话。
+
+细节模式可设置每新增 **1–100 个工具动作**观察一次，默认 **6**；确定性规则首次判断至少需要 6 个动作。设置从下一轮任务生效，模型观察会使用所选服务的 API。
+
+观察者面板默认展开，记录随对话和所选运行轮次恢复。模型判断无需介入时，也保存「判断为不介入」、时间与理由，不增加介入次数、不发送引导。每轮持久保存检查计数、最近的模型判断和最近 30 条观察记录；重启后仍可查看。当前使用说明见 [README](../README.md)。
+
+实现入口为 `lib/observer-model.js`、`lib/wd-monitor-state.js` 和 `renderer/wd-monitor.js`，运行调度由 `lib/opencode-sidecar.js` 协调。
+
 <a id="context"></a>
 ## 上下文预算与压缩
 
@@ -364,7 +377,7 @@ Git 状态查询把分支、远端、身份等低频数据缓存，常规刷新�
 
 ### GitHub PR
 
-`lib/gh-service.js` 接入本机 GitHub CLI，支持探测、列出 PR、查看详情/差异、创建 PR。需要本机 `gh` 可用且完成认证；Yan 不内置另一套 GitHub 登录凭据。发布或远端写操作仍需遵守任务授权。
+`lib/gh-service.js` 接入本机 GitHub CLI，支持探测、列出 PR、查看详情/差异、创建 PR。需要本机 `gh` 可用且完成认证；Z 不内置另一套 GitHub 登录凭据。发布或远端写操作仍需遵守任务授权。
 
 <a id="review"></a>
 ## 审阅系统
@@ -437,7 +450,7 @@ Goal 不是另一款更强模型。它提供目标约束、自动 Serena 环境�
 
 ### 常规不自动补一轮“复验报告”
 
-`lib/delivery-policy.js` 的普通交付策略设置 `maxRepairRounds: 0`、`eligibleForAcceptance: false`。模型应在正常工作中完成必要检查，Yan 不在正文完成后自动追加一轮来替换最终交付。
+`lib/delivery-policy.js` 的普通交付策略设置 `maxRepairRounds: 0`、`eligibleForAcceptance: false`。模型应在正常工作中完成必要检查，Z 不在正文完成后自动追加一轮来替换最终交付。
 
 交付约定和验证记录仍可描述目标与证据。它们与“额外发起模型回合”是两回事。
 
@@ -478,7 +491,7 @@ Continual Harness 保存策略、记忆、技能/角色相关条目和改进历�
 
 Skill 是使用方法与任务知识，MCP 提供实际工具接口。一个 Skill 可以指导模型使用某组 MCP，但安装 Skill 不会自动让缺失的程序或 API 变成可用。
 
-Yan 支持技能查找、安装、读取、资源分块和移除等路径。显式选择的 Skill 作为本轮指令注入；技能读取预算与输入吞吐配置配合，避免低吞吐模型一次收到过大文档。
+Z 支持技能查找、安装、读取、资源分块和移除等路径。显式选择的 Skill 作为本轮指令注入；技能读取预算与输入吞吐配置配合，避免低吞吐模型一次收到过大文档。
 
 ### 本地与远程 MCP
 
@@ -487,6 +500,8 @@ Yan 支持技能查找、安装、读取、资源分块和移除等路径。显�
 管理侧的 `lib/mcp-remote.js` 使用 Streamable HTTP 执行真实探测：`initialize → notifications/initialized → tools/list`，携带服务返回的 `Mcp-Session-Id` 和协议版本，接受 JSON 或 SSE 响应，并限制超时和响应大小。测试成功说明握手与工具发现成功，不保证每个工具执行都成功。
 
 ### 内置工程与资源服务
+
+下表使用源码中的内部服务名。
 
 | 服务 | 职责 |
 | --- | --- |
@@ -507,38 +522,12 @@ Yan Web 默认文本读取上限 2 MiB、下载上限 64 MiB，允许的参数�
 
 浏览器截图也可以进入中继路径。图像/视频生成通过对应模型和工具完成，资产由本地查看与保存链处理。没有配置、服务不支持或网络失败时，不会因界面存在按钮就拥有生成能力。
 
-<a id="palace"></a>
-## 云顶天宫 Work GUI
-
-Work GUI 是真实任务系统的另一种展示与操作入口。当前宿主加载本地宫殿页面，使用 Three.js/WebGL 场景和 CSS 覆盖面板；不会为宫殿再启动一个独立 Agent 内核。
-
-### 进入与场景
-
-进入时先看到双扇大门，交互后打开宫殿场景。建筑、浮岛、云雾、荷花水池与观星视角共同组成空间界面；入场音频播放及音符重播由独立音频模块管理。当前交付不包含人形主代理/子代理角色系统。
-
-| 入口 | 对应功能 |
-| --- | --- |
-| 南天门 | 模型、工作区选择与任务提交 |
-| 天工殿 | 主任务及运行状态 |
-| 协作东阙 | 子代理委派与进展 |
-| 藏经阁 | Skills、MCP 列表及 MCP 启停 |
-| 归卷台 | 成果与文件改动摘要 |
-| 观星交互 | 朝向天际、观察星河的场景交互 |
-
-阁楼打开当前场景上方的半透明面板，不跳转到另一套业务页面。`palace-host.js` 把白名单业务操作接到已有 preload API，包括快照、模型、工作区、任务提交/取消、MCP 启停和变更查询。
-
-### 事件与性能
-
-`lib/work-gui/feed.js` 把真实任务事件整理成 UI 快照与活动信息，场景订阅变化，不通过“人物正在走动”推测任务是否成功。离开/恢复 Work GUI 时宿主发送暂停/继续消息。
-
-性能诊断统计帧间隔、p95、draw calls、三角形数量与 DPR；支持时用 WebGL timer query 获取 GPU 时间，不支持则明确显示不可用，不能把 CPU 提交时间当 GPU 时间。按 `P` 可切换诊断显示，具体帧率取决于显卡、分辨率和系统负载。
-
 <a id="desktop"></a>
 ## 桌面交互与阅读体验
 
 ### 启动与字体
 
-启动页按平台呈现：macOS 使用简洁的 YAgent 图标、字标与低对比渐变背景；Windows 保留本地打包的 ReactBits Ghost Fibers 与 OGL 渲染。设计展示时长约 3 秒；实际冷启动仍受机器和初始化影响。源码和授权信息保留在 `renderer/splash/`。
+启动页按平台呈现：macOS 使用简洁的 Z 图标、字标与低对比渐变背景；Windows 保留本地打包的 ReactBits Ghost Fibers 与 OGL 渲染。设计展示时长约 3 秒；实际冷启动仍受机器和初始化影响。源码和授权信息保留在 `renderer/splash/`。
 
 阅读字体随包提供 Noto Serif SC 字体文件及 OFL 许可，降低中文内容依赖用户系统字体回退带来的差异。字体文件一致不代表不同 GPU、缩放比例和操作系统栅格化完全一致。
 
@@ -552,14 +541,14 @@ Work GUI 是真实任务系统的另一种展示与操作入口。当前宿主�
 
 右侧面板提供多标签与溢出菜单；工具 UI 区分运行中、成功、失败和中止，详情按需展开。壁纸分析为主题材质、色彩和对比提供依据；图片附件可以通过独立查看器检查。最高推理档的短暂额度提示用于说明成本倾向，不是具体计费承诺。
 
-运行中的临时对话可向主任务追加引导，相关版本与处理状态随运行协调；它不是随意并发改写正在执行的工具参数。
+运行中发送的引导会显示在实际发送时的输出位置，按已有回复、引导、后续回复依次排列；切换对话、重启或创建分支后仍保留这个顺序。引导在后续模型步骤中生效，不会直接改写正在执行的工具参数。
 
 <a id="data"></a>
 ## 权限、数据与凭据
 
 ### 工作区和访问策略
 
-工作区是文件与工程工具的基本作用域。Blank 可用于不需要项目文件写入的任务；文件生成/修改需要适当工作区，技能管理等应用自有目录操作使用独立边界。
+工作区是文件与工程工具的基本作用域。未选择项目时，Z 自动为当前对话创建持久任务文件夹，可直接生成文件和执行任务；已有项目也可作为工作区。跨目录操作遵循当前访问策略，无需仅为切换目录新建对话；技能管理等应用自有目录操作使用独立边界。
 
 请求批准、委托审批和完全访问决定不同操作如何通过权限链。完全访问也不能替代操作系统权限、供应商授权或工具自身路径检查。运行、工具请求和浏览器控制绑定任务身份，避免 UI 状态本身被当成授权。
 
@@ -570,11 +559,12 @@ Work GUI 是真实任务系统的另一种展示与操作入口。当前宿主�
 应用以 Electron `userData` 下的 `YanData` 为稳定数据根，常见路径为：
 
 ```text
-Windows: %APPDATA%\yan-agent\YanData
-macOS:   ~/Library/Application Support/yan-agent/YanData
+Windows 源码运行: %APPDATA%\wd-agent\YanData
+Windows 安装版:   %APPDATA%\WD Agent\YanData
+macOS:           ~/Library/Application Support/WD Agent/YanData
 ```
 
-真实位置以运行时 `userData` 配置为准。配置、会话、运行状态、记忆和辅助运行时位于应用数据目录；工作区内 `.yanagent` 还可能保存日志、快照、证据和 worktree。
+这些兼容目录沿用已有用户的数据位置；真实位置以运行时 `userData` 配置为准。配置、会话、运行状态、记忆和辅助运行时位于应用数据目录；工作区内 `.yanagent` 还可能保存日志、快照、证据和 worktree。
 
 备份时应同时考虑用户项目、应用数据与未合并 worktree。**不要把整个 `.yanagent` 视作可随意清空的缓存**：其中可能有未提交的子任务成果。
 
@@ -585,11 +575,11 @@ macOS:   ~/Library/Application Support/yan-agent/YanData
 
 ### 从源码运行
 
-当前构建目标为 Windows x64 与 macOS Apple Silicon（arm64）。需要可用的 Node.js/npm 和 Git；Node 版本应与锁文件及依赖的 engines 要求兼容。Serena、gh、tshark、Ghidra 等按所需功能另行准备。
+当前构建目标为 Windows x64 与 macOS Apple Silicon（arm64）。源码运行使用 Node.js 22、npm 和 Git。Serena、gh、tshark、Ghidra 等按所需功能另行准备。
 
 ```bash
-git clone https://github.com/ViaTumLab/YAgent.git
-cd YAgent
+git clone https://github.com/zyfyz666/z-agent.git
+cd z-agent
 npm ci
 npm start
 ```
@@ -605,6 +595,7 @@ npm start
 | provider 或编码环境插件 | `npm run bundle:opencode-provider` |
 | dsh 审阅组件 | `npm run bundle:dsh-review` |
 | TTS 打包依赖 | `npm run bundle:tts` |
+| 数学公式渲染资源 | `npm run bundle:math` |
 | 启动页 React/Ghost Fibers | `npm run bundle:splash` |
 
 ### 打包
@@ -615,9 +606,9 @@ npm run build:portable    # Windows 便携包
 npm run build:mac         # macOS Apple Silicon DMG（需在 macOS 上运行）
 ```
 
-构建脚本依次准备适配器、审阅、TTS 和启动页资源，再调用 electron-builder 生成平台产物。Windows 构建随后执行运行时、provider 和 CodeGraph 的打包校验。输出目录为 `dist/`，具体产物名以 `package.json` 为准。
+构建脚本依次准备适配器、审阅、TTS、数学公式和启动页资源，再调用 electron-builder 生成平台产物。Windows 构建随后执行运行时、provider 和 CodeGraph 的打包校验。输出目录为 `dist/`，具体产物名以 `package.json` 为准。
 
-macOS 输出为 `dist/YAgent-arm64-v1.6.1.dmg`（版本号以 `package.json` 为准），当前未签名、未公证，Intel Mac 安装包尚未配置。自动构建定义位于 `.github/workflows/macos-build.yml`。
+macOS 输出为 `dist/Z-arm64-v1.6.1.dmg`（版本号以 `package.json` 为准），当前未签名、未公证，Intel Mac 安装包尚未配置。自动构建定义位于 `.github/workflows/macos-build.yml`。
 
 `asarUnpack` 保留需要真实路径运行的 lib 与相关依赖，CodeGraph/officecli 等资源由 extraResources 处理。开发目录能运行不代表打包后路径一定正确，因此保留包后检查。
 
@@ -644,7 +635,7 @@ npm run verify:codegraph
 
 `npm test` 匹配 `test/*.test.cjs`，不等于自动运行全部 `.e2e.cjs`。Electron E2E 通常通过 `YAN_E2E_MODE` 和独立 `YAN_E2E_USER_DATA_DIR` 隔离数据；真实 API 测试需要其指定环境与凭据，可能产生调用费用。
 
-测试覆盖适配器请求/回放、任务恢复、上下文、分析工具、子代理依赖、Git/worktree、审阅大数据、浏览器注释、模式隔离、Work GUI 等。仓库存在测试文件不代表某次发布已经全部通过；发布说明应记录实际执行项与结果。
+测试覆盖适配器请求/回放、任务恢复、上下文、分析工具、子代理依赖、Git/worktree、审阅大数据、浏览器注释、模式隔离、观察者和对话历史等。仓库存在测试文件不代表某次发布已经全部通过；发布说明应记录实际执行项与结果。
 
 <a id="limits"></a>
 ## 边界、排查与版本迁移
@@ -659,7 +650,6 @@ npm run verify:codegraph
 | Serena 不可用 | 工作区、Skill/Goal 启用条件、Serena/uvx、语言服务器；可降级精读与补丁 |
 | 审阅卡顿 | 改动数量、单文件大小、二进制、懒加载与后台 worker 状态 |
 | 注释改完刷新消失 | 本地 DOM 预览的预期行为；永久修改需要源码 |
-| Work GUI 帧率低 | GPU、DPR、窗口分辨率、性能面板；GPU 时间不可用时不要自行推算 |
 | 更新后任务中断 | 查看恢复状态、实际工具结果与磁盘变化，确认后续操作，避免直接重复执行副作用 |
 
 ### 相对 1.5.0 的收缩项
@@ -679,6 +669,8 @@ Goal、Serena、基础子代理、内置浏览器、基础 Git、DSML 与基础�
 | [preload.js](../preload.js) | 桌面 UI 到主进程的接口 |
 | [lib/yan-core](../lib/yan-core) | 状态机、事件投影、持久化与 adapter |
 | [lib/opencode-sidecar.js](../lib/opencode-sidecar.js) | 内核生命周期、请求、工具、子代理与收尾 |
+| [lib/observer-model.js](../lib/observer-model.js) | 模型观察、确认误区与纠偏提醒 |
+| [lib/wd-monitor-state.js](../lib/wd-monitor-state.js) | 观察者记录、运行状态与持久化 |
 | [lib/opencode-runtime.js](../lib/opencode-runtime.js) | 内核副本准备与指纹校验 |
 | [lib/analysis](../lib/analysis) | 仓库地图、符号、调用链、数据流和检索 |
 | [lib/coding-environment-plugin.mjs](../lib/coding-environment-plugin.mjs) | 项目规则与验证上下文 |
@@ -689,12 +681,11 @@ Goal、Serena、基础子代理、内置浏览器、基础 Git、DSML 与基础�
 | [lib/agi](../lib/agi) | 实验性侧路、轨迹、经验与评估 |
 | [renderer/renderer.js](../renderer/renderer.js) | 任务 UI、流式显示与面板协调 |
 | [renderer/browser-annotations.js](../renderer/browser-annotations.js) | 注释交互与受限 DOM 修改 |
-| [renderer/work-gui/palace-host.js](../renderer/work-gui/palace-host.js) | 场景到真实后端的桥 |
-| [renderer/work-gui/palace](../renderer/work-gui/palace) | 云顶天宫场景与交互 |
+| [renderer/wd-monitor.js](../renderer/wd-monitor.js) | 观察者面板与历史轮次 |
 | [test](../test) | 模块测试、Electron E2E 与运行时验证 |
 
-Yan Agent 主项目采用 MIT 许可。OpenCode、Electron、模型 SDK、Serena、CodeGraph、Tree-sitter、dsh 审阅组件、ReactBits Ghost Fibers、Three.js、字体及场景素材各自遵循其许可证。
+Z 主项目采用 MIT 许可。OpenCode、Electron、模型 SDK、Serena、CodeGraph、Tree-sitter、dsh 审阅组件、ReactBits Ghost Fibers、Three.js、字体及场景素材各自遵循其许可证。
 
 第三方来源与授权参见 [总说明](../lib/THIRD_PARTY_NOTICES.md)、[技能说明](../lib/skills/THIRD_PARTY_NOTICES.md)、[OpenCode 上游说明](../vendor/opencode/UPSTREAM.md)、[dsh 来源](../lib/vendor/dsh-code-review/VENDOR.md)、[启动页资源](../renderer/splash/README.md)、[中文字体许可](../renderer/assets/NotoSerifSC-OFL.txt)、[场景素材](../renderer/work-gui/palace/assets/LICENSES.md)及[星河素材](../renderer/work-gui/palace/assets/GALAXY-LICENSE.md)。
 
-欢迎通过 [Issues](https://github.com/ViaTumLab/YAgent/issues) 提交可复现问题。请附版本、系统、模型连接类型、复现步骤及脱敏日志，并区分模型回答问题、API 兼容问题、工具失败和 UI 显示问题。
+欢迎通过 [Issues](https://github.com/zyfyz666/z-agent/issues) 提交可复现问题。请附版本、系统、模型连接类型、复现步骤及脱敏日志，并区分模型回答问题、API 兼容问题、工具失败和 UI 显示问题。
