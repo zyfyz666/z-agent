@@ -5317,6 +5317,18 @@ body.is-mac .welcome-logo-mac { display: block; filter: none; }
 }
 
 /* Prose / markdown in assistant messages */
+.math-expression { color: inherit; word-break: normal; overflow-wrap: normal; text-wrap: nowrap; }
+.math-expression .katex { font-size: 1.08em; text-indent: 0; }
+.math-display {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 12px 0;
+  padding: 4px 2px;
+}
+.math-display .katex-display { margin: 0; }
+.math-source { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg-body p { margin: 0 0 10px; }
 .msg-body p:last-child { margin-bottom: 0; }
 .msg-body a {

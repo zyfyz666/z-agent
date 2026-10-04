@@ -661,13 +661,50 @@ function syncCurrentSessionAgentUi(session = state.currentSession) {
   scheduleRightSidebarReviewRefresh();
 }
 
+const observerHistorySelection = new Map();
+let observerPendingSessionId = '';
+let observerEarlierSessionId = '';
+let sessionLoadToken = 0;
+
+function renderWdMonitorLoading() {
+  const host = $('#rs-watchdog');
+  if (!host) return;
+  const loading = document.createElement('p');
+  loading.className = 'wd-history-loading'; loading.setAttribute('role', 'status');
+  loading.textContent = '正在读取观察记录…';
+  host.replaceChildren(loading);
+  host.dataset.wdState = 'loading'; host.dataset.wdSessionId = observerPendingSessionId;
+  host.dataset.wdRunKey = '';
+}
+
 function renderWdMonitor(session = state.currentSession) {
+  if (observerPendingSessionId) { renderWdMonitorLoading(); return; }
   if (session && state.currentSession?.id !== session.id) return;
   const monitor = window.ZWdMonitor;
   if (!monitor) return;
   const runCtx = session?.id ? getRunCtx(session.id) : null;
-  monitor.render($('#rs-watchdog'), monitor.selectSession(session, runCtx));
+  const selection = monitor.selectSession(session, runCtx, observerHistorySelection.get(session?.id) || '');
+  monitor.render($('#rs-watchdog'), { ...selection, earlierLoading: observerEarlierSessionId === session?.id });
 }
+
+$('#rs-watchdog')?.addEventListener('change', event => {
+  if (!event.target.matches('[data-observer-history]') || !state.currentSession?.id || observerPendingSessionId) return;
+  const key = event.target.value;
+  if (key) observerHistorySelection.set(state.currentSession.id, key);
+  else observerHistorySelection.delete(state.currentSession.id);
+  renderWdMonitor();
+});
+
+$('#rs-watchdog')?.addEventListener('click', async event => {
+  if (!event.target.closest('[data-observer-earlier]') || observerEarlierSessionId || observerPendingSessionId) return;
+  const session = state.currentSession;
+  if (!session?.messagesTruncated) return;
+  observerEarlierSessionId = session.id;
+  renderWdMonitor();
+  try { await loadSessionHistoryBackwards(session, { render: true, maxPages: 1 }); }
+  catch (error) { toast(error?.message || '观察记录加载失败，请重试'); }
+  finally { observerEarlierSessionId = ''; renderWdMonitor(); }
+});
 
 function canStartRun() {
   return state.activeRuns.size < MAX_CONCURRENT_RUNS;
@@ -1219,7 +1256,10 @@ async function init() {
     }
   });
 
-  window.addEventListener('focus', () => updateContextInfo());
+  window.addEventListener('focus', () => {
+    updateContextInfo();
+    void refreshVisibleConnectionSettings();
+  });
 
   // Auto-create first session if none. If the most recent session belonged to
   // a workspace folder that has been deleted, never reopen it — start Blank.
@@ -1535,6 +1575,7 @@ async function applyExternalSessionChange(detail = {}) {
   state.currentSession.title = fresh.title;
   state.currentSession.pinned = !!fresh.pinned;
   state.currentSession.workspace = fresh.workspace || '';
+  state.currentSession.workspaceKind = fresh.workspaceKind || 'selected';
   syncAgentBrowserVisibility();
   state.currentSession.parentSessionId = fresh.parentSessionId || '';
   state.currentSession.handoff = fresh.handoff || null;
@@ -1559,20 +1600,25 @@ function isBlankNewChat(session) {
 }
 
 function isBlankUnassignedNewChat(session) {
-  return isBlankNewChat(session) && !String(session.workspace || '').trim();
+  return isBlankNewChat(session)
+    && (session.workspaceKind === 'default' || !String(session.workspace || '').trim());
 }
 
-function syncCurrentSessionWorkspace(workspace) {
+function syncCurrentSessionWorkspace(workspace, workspaceKind = 'selected') {
   if (!state.currentSession) return;
   state.currentSession.workspace = workspace || '';
+  state.currentSession.workspaceKind = workspaceKind;
   syncAgentBrowserVisibility();
-  const key = workspaceGroupKey(workspace);
+  const key = workspaceGroupKey(state.currentSession);
   if (workspaceSidebarMeta[key]?.hidden) {
     workspaceSidebarMeta[key] = { ...workspaceSidebarMeta[key], hidden: false };
     saveWorkspaceSidebarMeta();
   }
   const summary = state.sessions.find(session => session.id === state.currentSession.id);
-  if (summary) summary.workspace = workspace || '';
+  if (summary) {
+    summary.workspace = workspace || '';
+    summary.workspaceKind = workspaceKind;
+  }
   renderSessionList();
 }
 
@@ -1801,6 +1847,7 @@ function normalizeWorkspaceUiPath(workspace) {
 }
 
 function workspaceGroupKey(sessionOrWorkspace) {
+  if (sessionOrWorkspace?.workspaceKind === 'default') return 'blank';
   const workspace = typeof sessionOrWorkspace === 'string'
     ? sessionOrWorkspace
     : String(sessionOrWorkspace?.workspace || '');
@@ -1810,7 +1857,7 @@ function workspaceGroupKey(sessionOrWorkspace) {
 
 function workspaceGroupLabel(workspace) {
   const value = normalizeWorkspaceUiPath(workspace);
-  if (!value) return 'blank';
+  if (!value) return '对话';
   return value.split('/').filter(Boolean).pop() || value;
 }
 
@@ -1896,7 +1943,7 @@ function renderSessionList() {
     .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
 
   state.sessions.forEach(session => {
-    const workspace = String(session.workspace || '').trim();
+    const workspace = session.workspaceKind === 'default' ? '' : String(session.workspace || '').trim();
     const key = workspaceGroupKey(session);
     const label = workspaceGroupLabel(workspace);
     if (!groups.has(key)) groups.set(key, {
@@ -2160,13 +2207,16 @@ async function newSession() {
 }
 
 async function createOrActivateNewSession() {
+  const loadToken = ++sessionLoadToken;
+  observerPendingSessionId = '';
   cancelPromptOptimization({ announce: false });
   closeModelPicker();
   closeReasoningPicker();
   switchSidebarNav('tasks');
   // A new task inherits the current task's home: a blank task stays blank, a
   // task inside workspace A opens the next task inside A.
-  const inheritedWorkspace = String(state.currentSession?.workspace || '').trim();
+  const inheritedWorkspace = state.currentSession?.workspaceKind === 'default'
+    ? '' : String(state.currentSession?.workspace || '').trim();
   const existing = inheritedWorkspace
     ? state.sessions.find(session => (
         isBlankNewChat(session)
@@ -2178,6 +2228,7 @@ async function createOrActivateNewSession() {
       if (state.currentSession?.id) pauseUiForSession(state.currentSession.id);
       await loadSession(existing.id);
     }
+    else renderWdMonitor(state.currentSession);
     return existing;
   }
   if (state.currentSession?.id) {
@@ -2185,21 +2236,36 @@ async function createOrActivateNewSession() {
     pauseUiForSession(state.currentSession.id);
   }
   showSessionLoading('正在创建新对话…');
-  const s = await api.createSession(Boolean(inheritedWorkspace), inheritedWorkspace);
+  observerPendingSessionId = 'new'; renderWdMonitorLoading();
+  let s;
+  try { s = await api.createSession(Boolean(inheritedWorkspace), inheritedWorkspace); }
+  catch (error) {
+    if (loadToken !== sessionLoadToken) return null;
+    observerPendingSessionId = ''; renderWdMonitor();
+    showSessionLoading('无法创建新对话');
+    return null;
+  }
+  if (loadToken !== sessionLoadToken) return s;
+  observerPendingSessionId = '';
   if (!s) {
+    renderWdMonitor();
     showSessionLoading('无法创建新对话');
     return null;
   }
   state.currentSession = s;
+  renderWdMonitor(s);
   syncAgentBrowserVisibility();
   syncPetFocusedSession(s);
   restoreComposerDraftForSession(s.id);
   clearMessages();
   setEmptyState(true);
-  state.config = inheritedWorkspace
+  const createdConfig = inheritedWorkspace
     ? await api.activateWorkspace(inheritedWorkspace)
     : await api.setConfig({ workspace: '' });
+  if (loadToken !== sessionLoadToken) return s;
+  state.config = createdConfig;
   await renderRightSidebarReview({ force: true });
+  if (loadToken !== sessionLoadToken) return s;
   syncCurrentSessionAgentUi(s);
   updateTaskBar();
   updateSendState();
@@ -2207,9 +2273,11 @@ async function createOrActivateNewSession() {
 }
 
 async function loadSession(id) {
+  const loadToken = ++sessionLoadToken;
   cancelPromptOptimization({ announce: false });
   const summary = state.sessions.find(session => session.id === String(id));
   if (summary?.workspaceMissing) {
+    observerPendingSessionId = ''; renderWdMonitor();
     await confirmDeadWorkspaceCleanup(summary);
     return;
   }
@@ -2222,14 +2290,26 @@ async function loadSession(id) {
     pauseUiForSession(previousSessionId);
     showSessionLoading();
   }
+  observerPendingSessionId = String(id); renderWdMonitorLoading();
   const activeEntry = state.activeRuns.get(id);
-  const s = activeEntry?.sessionRef || await api.getSession(id, { messageLimit: MESSAGE_LOAD_LIMIT });
+  let s;
+  try { s = activeEntry?.sessionRef || await api.getSession(id, { messageLimit: MESSAGE_LOAD_LIMIT }); }
+  catch (error) {
+    if (loadToken !== sessionLoadToken) return;
+    observerPendingSessionId = ''; renderWdMonitor();
+    showSessionLoading('任务打开失败');
+    return;
+  }
+  if (loadToken !== sessionLoadToken) return;
+  observerPendingSessionId = '';
   if (!s) {
+    renderWdMonitor();
     showSessionLoading('任务打开失败');
     return;
   }
   markSessionLoadBaseline(s);
   state.currentSession = s;
+  renderWdMonitor(s);
   syncAgentBrowserVisibility();
   syncPetFocusedSession(s);
   if (!previousSessionId || switchingSessions) restoreComposerDraftForSession(s.id);
@@ -2238,13 +2318,16 @@ async function loadSession(id) {
   renderMessages(s.messages || []);
   setEmptyState((s.messages || []).length === 0);
   ensureEarlierMessagesBar(s);
-  state.config = await api.setConfig({ workspace: s.workspace || '' });
+  const sessionConfig = await api.setConfig({ workspace: s.workspace || '' });
+  if (loadToken !== sessionLoadToken) return;
+  state.config = sessionConfig;
 
   const runCtx = getRunCtx(s.id);
   syncCurrentSessionAgentUi(s);
   if (runCtx) bindActiveRunUi(s.id);
   else showTyping(false);
   await renderRightSidebarReview({ force: true });
+  if (loadToken !== sessionLoadToken) return;
   updateTaskBar();
   updateSendState();
   renderSessionList();
@@ -2262,7 +2345,11 @@ async function saveCurrentSession(session = state.currentSession) {
       if (state.currentSession?.id === session.id) syncPetFocusedSession(session);
     }
   }
-  await api.saveSession(buildSessionSavePayload(session));
+  const saved = await api.saveSession(buildSessionSavePayload(session));
+  if (saved?.id === session.id && saved.workspace) {
+    session.workspace = saved.workspace;
+    session.workspaceKind = saved.workspaceKind || 'selected';
+  }
   await refreshSessions();
   if (state.currentSession?.id === session.id) updateTaskBar();
 }
@@ -2447,6 +2534,7 @@ function renderMessages(messages) {
 const MESSAGE_LOAD_LIMIT = 40;
 const EARLIER_MESSAGES_PAGE = 60;
 let earlierMessagesLoading = false;
+const sessionHistoryLoads = new WeakMap();
 
 // 采用(尾加载)会话时记录一次基线:内存里最初装了多少条消息、从磁盘哪个下标开始。
 // 之后翻页只会扩大“磁盘派生前缀”;运行期间 push 的新消息不在磁盘头部里。
@@ -2542,31 +2630,51 @@ async function loadEarlierMessages() {
 // Pages come back capped by count AND accumulated size, so pull contiguous
 // ranges that always end at messagesStart until the conversation is whole.
 // A shorter page simply means the loop keeps pulling; ranges never overlap.
-async function loadSessionHistoryBackwards(session, { render = false } = {}) {
+async function loadSessionHistoryBackwards(session, { render = false, maxPages = 500 } = {}) {
+  const pending = sessionHistoryLoads.get(session);
+  if (pending) {
+    await pending;
+    if (maxPages === 1 || (render && state.currentSession !== session)) return session;
+    return loadSessionHistoryBackwards(session, { render, maxPages });
+  }
+  const loading = loadSessionHistoryPages(session, { render, maxPages });
+  sessionHistoryLoads.set(session, loading);
+  try { return await loading; }
+  finally { if (sessionHistoryLoads.get(session) === loading) sessionHistoryLoads.delete(session); }
+}
+
+async function loadSessionHistoryPages(session, { render = false, maxPages = 500 } = {}) {
   let guard = 0;
-  while ((Number(session.messagesStart) || 0) > 0 && guard++ < 500) {
+  while ((Number(session.messagesStart) || 0) > 0 && guard++ < Math.min(500, maxPages)) {
     const cursor = Number(session.messagesStart) || 0;
     const requestStart = Math.max(0, cursor - EARLIER_MESSAGES_PAGE);
-    const result = await api.getSessionMessages(session.id, requestStart, cursor - requestStart);
+    const result = await api.getSessionMessages(session.id, requestStart, cursor - requestStart, { fromEnd: true });
     // The user may have switched sessions while the page was in flight;
     // never prepend another conversation's history into the DOM.
     if (render && state.currentSession !== session) return session;
+    if ((Number(session.messagesStart) || 0) !== cursor) continue;
     if (result?.ok === false || !Array.isArray(result?.messages) || !result.messages.length) {
       if (render) throw new Error(result?.error || '加载失败');
       break;
     }
     const page = result.messages;
+    const pageStart = Number.isInteger(result.offset) ? result.offset : requestStart;
+    // Size-capped history pages must meet the current tail exactly. Never
+    // silently drop the gap if an older main process returns a forward prefix.
+    if (pageStart < requestStart || pageStart + page.length !== cursor) {
+      throw new Error('历史分页结果不连续，请重启 Z 后重试');
+    }
     session.messages = [...page, ...(Array.isArray(session.messages) ? session.messages : [])];
-    session.messagesStart = requestStart;
-    if (requestStart <= 0) delete session.messagesTruncated;
+    session.messagesStart = pageStart;
+    if (pageStart <= 0) delete session.messagesTruncated;
     if (render) {
       rebaseRenderedMessageIndices(page.length);
-      prependRenderedHistory(page, requestStart);
+      prependRenderedHistory(page, pageStart);
       ensureEarlierMessagesBar(session);
     }
   }
   session.totalMessages = Array.isArray(session.messages) ? session.messages.length : 0;
-  if (render) ensureEarlierMessagesBar(session);
+  if (render) { ensureEarlierMessagesBar(session); renderWdMonitor(session); }
   return session;
 }
 
@@ -8649,8 +8757,6 @@ async function requireOpenCodeInteractionReply(result, runCtx, label) {
 }
 
 const SHELL_PERMISSION_ACTIONS = new Set(['bash', 'shell', 'command']);
-const USER_FILE_WRITE_PERMISSIONS = new Set(['edit']);
-const WORKSPACE_REQUIRED_MESSAGE = '请先选择工作区后，再执行需要写入磁盘的任务。';
 
 async function handleOpenCodePermission(runCtx, event) {
   const data = event?.data || event?.properties || {};
@@ -8663,17 +8769,7 @@ async function handleOpenCodePermission(runCtx, event) {
   const accessMode = runCtx.accessMode || getCurrentAccessMode();
   const isShellPermission = SHELL_PERMISSION_ACTIONS.has(actionKey);
   let reply = 'reject';
-  let stopForWorkspace = false;
-  if (!runCtx.workspace && USER_FILE_WRITE_PERMISSIONS.has(actionKey)) {
-    stopForWorkspace = true;
-    runCtx.workspaceRequired = true;
-    runCtx.partialContent = WORKSPACE_REQUIRED_MESSAGE;
-    upsertOpenCodeTimeline(runCtx, 'workspace-required', {
-      type: 'progress',
-      content: WORKSPACE_REQUIRED_MESSAGE
-    });
-    scheduleOpenCodeRender(runCtx);
-  } else if (isShellPermission && accessMode === 'full') {
+  if (isShellPermission && accessMode === 'full') {
     reply = 'always';
   } else if (isShellPermission && accessMode === 'delegate') {
     const command = resources.join('\n')
@@ -8738,9 +8834,6 @@ async function handleOpenCodePermission(runCtx, event) {
     result = { ok: false, error: error?.message || String(error) };
   }
   await requireOpenCodeInteractionReply(result, runCtx, '权限回复');
-  if (stopForWorkspace) {
-    try { await api.openCodeCancelRun(runCtx.runId); } catch {}
-  }
 }
 
 async function handleOpenCodeQuestion(runCtx, event) {
@@ -9588,7 +9681,6 @@ function openCodeResultToAgentRun(result, runCtx) {
     ? ''
     : splitTaggedThinkingText(partialAgreement.text).text.trim();
   const summaryStarted = result.status === 'done'
-    && !runCtx.workspaceRequired
     && !!resultText;
   if (summaryStarted) {
     let finalTextIndex = -1;
@@ -9646,9 +9738,7 @@ function openCodeResultToAgentRun(result, runCtx) {
     deletions: Number(rawReviewSummary?.deletions) || changes.reduce((sum, file) => sum + file.deletions, 0),
     files: changes
   };
-  const status = runCtx.workspaceRequired
-    ? 'done'
-    : (result.status === 'interrupted' ? 'interrupted' : (result.status === 'error' ? 'error' : 'done'));
+  const status = result.status === 'interrupted' ? 'interrupted' : (result.status === 'error' ? 'error' : 'done');
   runCtx.agentState.status = status;
   runCtx.finalStatus = status;
   const watchdog = window.ZWdMonitor?.finish(result.watchdog || runCtx.activeAgentRun?.watchdog, status) || null;
@@ -9693,17 +9783,13 @@ function openCodeResultToAgentRun(result, runCtx) {
       : null,
     iteration: timeline.filter(item => item.type === 'tool_call').length,
     toolCallCount: result.toolCalls?.length || 0,
-    textContent: runCtx.workspaceRequired
-      ? WORKSPACE_REQUIRED_MESSAGE
-      : (resultText || partialText || ''),
+    textContent: resultText || partialText || '',
     thinkingContent: result.reasoning || '',
     timeline,
     subagents: runCtx.activeAgentRun.subagents || [],
     todos: resultTodos,
     todosFromTool: runCtx.agentState.todosFromTool || resultTodos.length > 0,
-    outcome: runCtx.workspaceRequired
-      ? '任务等待用户选择工作区。'
-      : (status === 'done'
+    outcome: (status === 'done'
         ? (result.goal?.verified && Number(result.goal.acceptanceRounds) > 0
           ? `Goal 已通过 ${Number(result.goal.acceptanceRounds) || 0} 轮验收。`
           : !result.delivery?.passive && result.delivery?.verified && Number(result.delivery.acceptanceRounds) > 0
@@ -9714,9 +9800,7 @@ function openCodeResultToAgentRun(result, runCtx) {
                 ? (result.delivery.passive ? result.delivery.failure : '任务已完成，但交付核对未完全通过，请查看核对记录。')
           : 'Z Kernel 已完成执行并返回真实会话结果。')
         : ''),
-    acceptanceCriteria: runCtx.workspaceRequired
-      ? []
-      : (runCtx.workMode === 'goal'
+    acceptanceCriteria: (runCtx.workMode === 'goal'
       ? (resultTodos.length
         ? resultTodos.map(todo => ({ text: todo.text, status: todo.done ? 'satisfied' : 'pending' }))
         : [{ text: '真实工件验收轮', status: result.goal?.verified ? 'satisfied' : 'pending' }])
@@ -9917,6 +10001,11 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         handoff: session.handoff || null
       });
       if (!start?.ok) throw new Error(start?.error || 'Z Kernel 启动失败');
+      if (start.workspace) {
+        session.workspace = runCtx.workspace = start.workspace;
+        session.workspaceKind = start.workspaceKind || 'selected';
+        if (state.currentSession?.id === session.id) updateTaskBar();
+      }
       await rejectStartedOpenCodeRunIfAborted(runCtx, openCodeRunId);
       runCtx.runAbortController?.signal.addEventListener('abort', () => {
         api.openCodeCancelRun(openCodeRunId).catch(() => {});
@@ -10470,6 +10559,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   }
 
   await saveCurrentSession(runSession);
+  runCtx.workspace = runSession.workspace || '';
   const taskStartTime = Date.now();
   runCtx.startedAt = taskStartTime;
   let taskOk = true;
@@ -10772,7 +10862,6 @@ function createRunCtx(sessionId, ui = true, workspace = '') {
     modelName: '',
     configName: '',
     presentationMode: 'standard',
-    workspaceRequired: false,
     currentRequest: '',
     shouldAbort: false,
     abortController: controller,
@@ -18405,6 +18494,7 @@ $('#settingsSidebarNav')?.addEventListener('keydown', event => {
 });
 
 function switchTab(tab) {
+  if (tab === 'api') void renderConnectionList();
   if (tab !== 'quick-launch' && quickLaunchCapturing) stopQuickLaunchCapture();
   const meta = SETTINGS_TAB_META[tab] || SETTINGS_TAB_META.about;
   settingsOverlay.dataset.activeTab = tab;
@@ -19911,12 +20001,28 @@ function formatConnectionCatalogStatus(connection = {}) {
   return parts.join(' · ');
 }
 
+let connectionListRequestSequence = 0;
+
+async function refreshVisibleConnectionSettings() {
+  if (!$('#connectionDialog')?.open && !settingsOverlay.classList.contains('hidden')
+      && $('#tab-api')?.classList.contains('active')) {
+    await renderConnectionList();
+  }
+  if ($('#modelPickerDialog')?.open || !$('#modelQuickMenu')?.classList.contains('hidden')) {
+    await refreshQuickModels();
+  }
+}
+
 async function renderConnectionList() {
   const listEl = $('#connectionList');
   if (!listEl) return;
+  const sequence = ++connectionListRequestSequence;
   try {
-    connectionCache = await api.connectionsList();
+    const connections = await api.connectionsList();
+    if (sequence !== connectionListRequestSequence) return;
+    connectionCache = connections;
   } catch (error) {
+    if (sequence !== connectionListRequestSequence) return;
     listEl.innerHTML = `<div class="session-empty">连接加载失败：${escapeHtml(error?.message || error)}</div>`;
     return;
   }
@@ -22241,24 +22347,22 @@ function updateTaskBar() {
   // workspace is locked for that conversation.
   const workspaceLocked = !isBlankNewChat(state.currentSession);
   if (ws) {
-    folderName.textContent = workspaceGroupLabel(ws);
+    folderName.textContent = state.currentSession.workspaceKind === 'default' ? '任务文件夹' : workspaceGroupLabel(ws);
     folderButton?.classList.remove('task-bar-folder-empty');
     openBtn.disabled = false;
     if (vsCodeBtn && !vsCodeBtn.classList.contains('is-launching')) vsCodeBtn.disabled = !vsCodeStatus.available;
     api.yanagentEnsure?.(ws);
   } else {
-    // A locked blank task reads "blank" instead of inviting a choice it can no
-    // longer make.
-    folderName.textContent = workspaceLocked ? 'blank' : '选择工作区';
-    // A locked blank task drops the accent highlight: it no longer invites a
-    // choice, so it renders as a quiet pill that reads "blank".
-    folderButton?.classList.toggle('task-bar-folder-empty', !workspaceLocked);
+    folderName.textContent = '自动任务文件夹';
+    folderButton?.classList.remove('task-bar-folder-empty');
     openBtn.disabled = true;
     if (vsCodeBtn) vsCodeBtn.disabled = true;
   }
   if (folderButton) {
     folderButton.disabled = workspaceLocked;
-    folderButton.title = workspaceLocked ? '已有对话内容，工作区已锁定' : '选择工作区文件夹';
+    folderButton.title = workspaceLocked
+      ? `任务文件夹：${ws}`
+      : '已自动准备任务文件夹，也可以选择项目文件夹';
     if (workspaceLocked) closeWorkspaceChoiceMenu();
   }
   syncTaskActionLabels();
@@ -22277,8 +22381,7 @@ function closeWorkspaceChoiceMenu() {
   setWorkspaceChoiceMenuOpen(false);
 }
 
-// Empty workspace = Blank: the conversation stays in this task but is not
-// bound to any folder.
+// An empty choice returns to this conversation's automatic task directory.
 async function applySessionWorkspace(workspace) {
   const targetSession = state.currentSession;
   if (!targetSession) return;
@@ -22289,7 +22392,7 @@ async function applySessionWorkspace(workspace) {
   const reusable = state.sessions.find(session => (
     session.id !== targetSession.id
     && isBlankNewChat(session)
-    && String(session.workspace || '').trim() === normalized
+    && (normalized ? String(session.workspace || '').trim() === normalized : session.workspaceKind === 'default')
   ));
   if (reusable && isBlankNewChat(targetSession) && !getComposerText().trim()) {
     if (state.currentSession?.id) pauseUiForSession(state.currentSession.id);
@@ -22297,21 +22400,23 @@ async function applySessionWorkspace(workspace) {
     if (removed?.ok) {
       state.sessions = state.sessions.filter(session => session.id !== targetSession.id);
       await loadSession(reusable.id);
-      toast(normalized ? '工作区已更新' : '不在项目中工作');
+      toast(normalized ? '工作区已更新' : '已使用自动任务文件夹');
       return;
     }
     // Deletion refused (for example it just started running): fall through to
     // a plain unbind so the user choice still applies.
   }
   const updated = await api.setSessionWorkspace(targetSession.id, workspace, false);
-  if (!updated || String(updated.workspace || '') !== String(workspace || '')) {
+  if (!updated?.workspace || (normalized && String(updated.workspace) !== normalized)) {
     toast('工作区更新失败');
     return;
   }
   targetSession.workspace = updated.workspace || '';
+  targetSession.workspaceKind = updated.workspaceKind || 'selected';
   const summary = state.sessions.find(session => session.id === targetSession.id);
   if (summary) {
     summary.workspace = updated.workspace || '';
+    summary.workspaceKind = updated.workspaceKind || 'selected';
     summary.updatedAt = updated.updatedAt;
   }
   if (state.currentSession?.id !== targetSession.id) {
@@ -22319,9 +22424,9 @@ async function applySessionWorkspace(workspace) {
     return;
   }
   state.config = await api.activateWorkspace(updated.workspace || '');
-  syncCurrentSessionWorkspace(updated.workspace || '');
+  syncCurrentSessionWorkspace(updated.workspace || '', updated.workspaceKind || 'selected');
   updateTaskBar();
-  toast(workspace ? '工作区已更新' : '不在项目中工作');
+  toast(workspace ? '工作区已更新' : '已使用自动任务文件夹');
 }
 
 async function openCurrentWorkspaceInVsCode() {
@@ -22637,29 +22742,45 @@ function localImagePathFromUrl(value) {
 function renderMarkdown(text) {
   if (!text) return '';
   if (String(text).length > 200000) return `<pre>${escapeHtml(String(text))}</pre>`;
-  // 先抽出代码块，避免其内部内容被后续规则误处理
+  // Protect fenced/inline code before math, links, and Markdown formatting.
   const codeBlocks = [];
-  let t = String(text).replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    codeBlocks.push(code.replace(/\n$/, ''));
-    return `\u0000CODE${codeBlocks.length - 1}\u0000`;
-  });
+  const source = String(text).replace(/\r\n?/g, '\n').replace(/\u0000/g, '\ufffd');
+  const fences = /^ {0,3}(`{3,}|~{3,})[^\n]*\n/gm;
+  const parts = [];
+  let cursor = 0;
+  let opening;
+  while ((opening = fences.exec(source))) {
+    const fence = opening[1];
+    const closing = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}[ \\t]*(?:\\n|$)`, 'gm');
+    closing.lastIndex = fences.lastIndex;
+    const end = closing.exec(source);
+    codeBlocks.push(source.slice(fences.lastIndex, end ? end.index : source.length).replace(/\n$/, ''));
+    parts.push(source.slice(cursor, opening.index), `\u0000CODE${codeBlocks.length - 1}\u0000\n`);
+    cursor = end ? closing.lastIndex : source.length;
+    fences.lastIndex = cursor;
+  }
+  parts.push(source.slice(cursor));
+  let t = parts.join('');
   const inlineCodes = [];
-  t = t.replace(/`([^`]+)`/g, (_, code) => {
+  t = t.replace(/(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, (_, ticks, code) => {
     inlineCodes.push(code);
     return `\u0000INLINE${inlineCodes.length - 1}\u0000`;
   });
+  const math = window.ZMathMarkdown?.extract(t);
+  if (math) t = math.text;
+  const mathSource = value => math ? window.ZMathMarkdown.restoreSource(value, math.expressions) : value;
   const agentLinks = [];
   const agentImages = [];
   const saveAgentLink = (label, url) => {
-    const target = normalizeAgentUrl(url);
+    const target = normalizeAgentUrl(mathSource(url));
     if (!target) return null;
-    agentLinks.push({ label, url: target });
+    agentLinks.push({ label: mathSource(label), url: target });
     return `\u0000AGENTLINK${agentLinks.length - 1}\u0000`;
   };
   const saveAgentImage = (alt, url) => {
-    const target = normalizeAgentImageUrl(url);
+    const target = normalizeAgentImageUrl(mathSource(url));
     if (!target) return null;
-    agentImages.push({ alt: String(alt || 'Agent 图片').slice(0, 160), url: target });
+    agentImages.push({ alt: mathSource(String(alt || 'Agent 图片')).slice(0, 160), url: target });
     return `\u0000AGENTIMAGE${agentImages.length - 1}\u0000`;
   };
   // Preserve standard Markdown images before link auto-detection. External
@@ -22678,7 +22799,6 @@ function renderMarkdown(text) {
     return token ? token + match.slice(source.length) : match;
   });
   t = escapeHtml(t);
-  t = t.replace(/\u0000INLINE(\d+)\u0000/g, (_, i) => `<code>${escapeHtml(inlineCodes[Number(i)])}</code>`);
   // bold / italic
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, '<em>$1</em>');
@@ -22700,9 +22820,12 @@ function renderMarkdown(text) {
     const b = block.trim();
     if (!b) return '';
     if (/^<(h\d|ul|ol|pre|li|table|blockquote)/.test(b)) return block;
-    if (/^\u0000(?:CODE|AGENTIMAGE)\d+\u0000$/.test(b)) return block;
+    if (/^\u0000(?:CODE|AGENTIMAGE|MATHBLOCK)\d+\u0000$/.test(b)) return block;
     return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
   }).join('\n');
+  // Math HTML must not pass through Markdown replacements or attribute values.
+  if (math) t = window.ZMathMarkdown.restore(t, math.expressions);
+  t = t.replace(/\u0000INLINE(\d+)\u0000/g, (_, i) => `<code>${escapeHtml(inlineCodes[Number(i)])}</code>`);
   // 还原代码块（内容做转义）
   t = t.replace(/\u0000CODE(\d+)\u0000/g, (_, i) =>
     `<div class="md-code-block"><span class="md-code-kind">纯文本</span><button type="button" class="md-code-copy" data-state="idle" aria-label="复制整段代码" aria-live="polite" title="复制整段代码">${ICONS.copy}</button><pre><code>${escapeHtml(codeBlocks[Number(i)])}</code></pre></div>`);

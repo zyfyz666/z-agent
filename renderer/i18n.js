@@ -2,6 +2,10 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installYanI18n(global) {
   const ZH_EN = Object.freeze({
+    '观察记录': 'Observer history', '选择此对话的观察记录': 'Choose an observation from this conversation',
+    '正在读取观察记录…': 'Loading observer history…', '最近一轮': 'Latest run', '当前运行': 'Current run',
+    '加载更早记录': 'Load earlier records', '正在加载更早记录…': 'Loading earlier records…',
+    '观察记录加载失败，请重试': 'Could not load observer history. Try again.',
     '选择连接': 'Select connection', '切换 API 连接': 'Switch API connection', '切换 API': 'Switch API',
     'API 连接': 'API connection', '规则': 'Rules', '规则模式': 'Rule mode', '观察者设置': 'Observer settings',
     '细节模式': 'Details', '检查间隔（工具动作数）': 'Check interval (tool actions)',
@@ -294,7 +298,10 @@
     '连接、工具、上下文与观察者状态的常见问题，都有下一步说明。': 'Find the next step for common connection, tool, context, and Observer issues.',
     'Z 的这次更新': 'What is new in Z', '新的工作台、使用引导与观察者面板。': 'The new workspace, user guide, and Observer panel.',
     '看看新变化': 'See what changed', '开始你的第一件事': 'Start your first task',
-    '连接模型、选择工作区，再给 Z 一个明确的目标。': 'Connect a model, choose a workspace, and give Z a clear goal.',
+    '连接模型后即可开始。Z 会自动准备任务文件夹，也支持选择已有项目。': 'Connect a model and start. Z prepares a task folder automatically; you can also choose an existing project.',
+    '任务文件夹': 'Task folder', '自动任务文件夹': 'Automatic task folder',
+    '使用自动任务文件夹': 'Use automatic task folder', '已使用自动任务文件夹': 'Using the automatic task folder',
+    '已自动准备任务文件夹，也可以选择项目文件夹': 'A task folder is ready. You can also choose a project folder.',
     '打开使用指南': 'Open the user guide', '当前版本': 'Current version', 'Z · v1.6.1 · 本机工作台': 'Z · v1.6.1 · Local workspace',
     '本地版本': 'Local version', '从实际现象出发，找到下一步的处理方法。': 'Start with what happened and find your next step.',
     '第一次使用 Z？': 'New to Z?', '从这里开始': 'Start here',

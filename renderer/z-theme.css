@@ -29,6 +29,13 @@
 .wd-model-state { padding: 12px; background: var(--bg-elev2); border: 1px solid var(--border); border-radius: 9px; font-size: 12px; line-height: 1.7; }
 .wd-model-state p { margin: 5px 0 0; color: var(--text-dim); overflow-wrap: anywhere; }
 .wd-config-button { font-size: 12px; margin-left: auto; }
+.wd-history { display: grid; gap: 8px; margin: -8px 0 20px; min-width: 0; }
+.wd-history-select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev2); color: var(--text); font: inherit; font-size: 12px; }
+.wd-history-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wd-history-caption { margin: 0; color: var(--text-dim); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.wd-history-earlier { justify-self: start; border: 0; padding: 2px 0; background: transparent; color: var(--accent-text); font-size: 12px; cursor: pointer; }
+.wd-history-earlier:disabled { opacity: .6; cursor: wait; }
+.wd-history-loading { padding: 24px 20px; color: var(--text-dim); font-size: 13px; }
 html[data-theme="dark"] {
   --bg: #151715; --bg-elev: #1d201d; --bg-elev2: #252925; --bg-soft: #181b18;
   --bg-hover: #292e28; --bg-active: #323a2e; --sidebar-bg: #111411;

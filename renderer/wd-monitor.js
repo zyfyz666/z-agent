@@ -108,20 +108,47 @@
       : next.enabled === false ? 'disabled' : outcome === 'error' ? 'error' : 'completed' };
   }
 
-  function selectSession(session, runCtx) {
+  function availableRuns(session, runCtx) {
+    const savedRuns = new Map();
+    let prompt = '';
+    const offset = count(session?.messagesStart) || 0;
+    const makeRun = (run, key, message, mode = 'history', status = run.status || 'done') => {
+      const ts = count(run.startedAt) || count(message?.ts) || count(message?.timestamp) || count(run.completedAt);
+      const date = ts ? new Date(ts) : null;
+      const time = date && Number.isFinite(date.getTime())
+        ? date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '时间未记录';
+      return { key, mode, status, snapshot: normalizeSnapshot(run.watchdog), timestamp: ts,
+        label: `${time} · ${prompt || '任务记录'}` };
+    };
+    (session?.messages || []).forEach((message, index) => {
+      if (message?.role === 'user') prompt = text(message.content, 200).replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (message?.role !== 'assistant' || !message.agentRun) return;
+      const run = message.agentRun;
+      const key = run.runId ? `run:${run.runId}` : `message:${offset + index}`;
+      savedRuns.delete(key);
+      savedRuns.set(key, makeRun(run, key, message));
+    });
+    const runs = [...savedRuns.values()].reverse();
     if (session?.id && runCtx?.sessionId === session.id) {
-      const snapshot = normalizeSnapshot(runCtx.activeAgentRun?.watchdog);
+      const run = runCtx.activeAgentRun || {};
+      const snapshot = normalizeSnapshot(run.watchdog);
       const status = runCtx.shouldAbort ? 'interrupted' : runCtx.finalStatus
         || ({ completed: 'done', interrupted: 'interrupted', error: 'error' }[snapshot?.outcome]) || 'working';
-      return {
-        mode: status === 'working' ? 'live' : 'history', status,
-        snapshot
-      };
+      const key = `run:${runCtx.runId || run.runId || 'current'}`;
+      const duplicate = runs.findIndex(item => item.key === key);
+      if (duplicate >= 0) runs.splice(duplicate, 1);
+      runs.unshift(makeRun({ ...run, startedAt: run.startedAt || runCtx.startedAt }, key, null,
+        status === 'working' ? 'live' : 'history', status));
     }
-    const saved = [...(session?.messages || [])].reverse().find(message => message?.role === 'assistant' && message.agentRun)?.agentRun;
-    return saved
-      ? { mode: 'history', status: saved.status || 'done', snapshot: normalizeSnapshot(saved.watchdog) }
-      : { mode: 'empty', status: 'idle', snapshot: null };
+    return runs;
+  }
+
+  function selectSession(session, runCtx, selectedKey = '') {
+    const runs = availableRuns(session, runCtx);
+    const selected = runs.find(run => run.key === selectedKey) || runs[0];
+    return { ...(selected || { mode: 'empty', status: 'idle', snapshot: null }),
+      runs, selectedKey: selectedKey && selected?.key === selectedKey ? selectedKey : '',
+      sessionId: session?.id || '', hasEarlier: session?.messagesTruncated === true };
   }
 
   function ruleName(rule) { return RULES[rule] || `其他规则（${rule}）`; }
@@ -223,6 +250,28 @@
     configure.type = 'button'; configure.dataset.observerConfig = 'true';
     configure.setAttribute('aria-label', '观察者模型和检查间隔');
     header.append(configure);
+    const history = node('div', 'wd-history');
+    const historyLabel = node('label', 'wd-section-heading', '观察记录');
+    historyLabel.htmlFor = 'wdHistorySelect';
+    const select = node('select', 'wd-history-select');
+    select.id = 'wdHistorySelect'; select.dataset.observerHistory = 'true';
+    select.setAttribute('aria-label', '选择此对话的观察记录');
+    const runs = selection?.runs || [];
+    const current = node('option', '', runs[0]?.mode === 'live' ? '当前运行' : '最近一轮');
+    current.value = ''; select.append(current);
+    runs.forEach(run => {
+      const option = node('option', '', `${run.label}${run.snapshot ? '' : ' · 无记录'}`);
+      option.value = run.key; select.append(option);
+    });
+    select.value = selection?.selectedKey || '';
+    select.disabled = !runs.length;
+    history.append(historyLabel, select);
+    if (selection?.label) history.append(node('p', 'wd-history-caption', selection.label));
+    if (selection?.hasEarlier) {
+      const earlier = node('button', 'wd-history-earlier', selection.earlierLoading ? '正在加载更早记录…' : '加载更早记录');
+      earlier.type = 'button'; earlier.dataset.observerEarlier = 'true'; earlier.disabled = !!selection.earlierLoading;
+      history.append(earlier);
+    }
     const status = node('section', 'wd-status');
     status.dataset.state = view.phase;
     const dot = node('span', 'wd-status-dot');
@@ -253,6 +302,9 @@
     const heading = node('h3', 'wd-section-heading', '触发时间线');
     heading.append(node('span', 'wd-event-count', `${view.events.length} 条记录`));
     events.append(heading);
+    if (selection?.snapshot?.interventions > view.events.length) {
+      events.append(node('p', 'wd-history-caption', `本轮共 ${selection.snapshot.interventions} 次介入，保留最近 ${view.events.length} 条提醒。`));
+    }
     if (view.events.length) {
       const timeline = node('ol', 'wd-timeline');
       view.events.forEach(event => {
@@ -286,11 +338,13 @@
       empty.append(orbit, node('h4', 'wd-empty-title', view.emptyTitle), node('p', 'wd-empty-description', view.emptyDescription));
       events.append(empty);
     }
-    monitor.append(header, status, stats, latest, events,
+    monitor.append(header, history, status, stats, latest, events,
       node('footer', 'wd-footer', '观察者关注执行过程并发出提醒，不保证答案或解题结果正确。'));
     host.replaceChildren(monitor);
     host.dataset.wdState = view.phase;
+    host.dataset.wdSessionId = selection?.sessionId || '';
+    host.dataset.wdRunKey = selection?.key || '';
   }
 
-  return { MAX_EVENTS, normalizeSnapshot, reduce, finish, selectSession, viewModel, ruleName, deliveryLabel, render };
+  return { MAX_EVENTS, normalizeSnapshot, reduce, finish, availableRuns, selectSession, viewModel, ruleName, deliveryLabel, render };
 });

@@ -5,6 +5,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; img-src 'self' data: https: file:; media-src 'self' data: blob: https:; connect-src 'self' https://api.deepseek.com https://dashscope.aliyuncs.com https://open.bigmodel.cn https://ark.cn-beijing.volces.com https://api.moonshot.cn https://api.stepfun.com https://api.minimaxi.com https://*; frame-src https: http: file:;" />
   <title>Z</title>
+  <link rel="stylesheet" href="vendor/katex/katex.min.css" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="review.css" />
   <link rel="stylesheet" href="dsh-review.css" />
@@ -117,13 +118,13 @@
             <span id="taskBarTitle" class="task-bar-title" title="双击重命名任务">新对话</span>
             <span class="task-bar-sep">·</span>
             <div id="taskBarFolderWrap" class="task-bar-folder-wrap">
-              <button id="taskBarFolder" class="task-bar-folder" type="button" title="选择工作区文件夹" aria-haspopup="menu" aria-expanded="false" aria-controls="workspaceChoiceMenu">
+              <button id="taskBarFolder" class="task-bar-folder" type="button" title="已自动准备任务文件夹，也可以选择项目文件夹" aria-haspopup="menu" aria-expanded="false" aria-controls="workspaceChoiceMenu">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                <span id="taskBarFolderName" class="task-bar-folder-name">选择工作区</span>
+                <span id="taskBarFolderName" class="task-bar-folder-name">任务文件夹</span>
               </button>
               <div id="workspaceChoiceMenu" class="workspace-choice-menu hidden" role="menu" aria-label="工作区选项">
                 <button type="button" class="workspace-choice-item" data-workspace-choice="pick" role="menuitem">选择一个工作区</button>
-                <button type="button" class="workspace-choice-item" data-workspace-choice="blank" role="menuitem">不在项目中工作</button>
+                <button type="button" class="workspace-choice-item" data-workspace-choice="blank" role="menuitem">使用自动任务文件夹</button>
               </div>
             </div>
             <div id="taskGitBranchWrap" class="task-git-branch-wrap hidden">
@@ -1931,7 +1932,7 @@
                     <div class="about-settings-row">
                       <div class="about-row-copy">
                         <h3>开始你的第一件事</h3>
-                        <p>连接模型、选择工作区，再给 Z 一个明确的目标。</p>
+                        <p>连接模型后即可开始。Z 会自动准备任务文件夹，也支持选择已有项目。</p>
                       </div>
                       <div class="about-row-actions">
                         <button class="conn-pill" type="button" data-vision-relay-guide="yan-guide" aria-haspopup="dialog" aria-controls="visionRelayGuideDialog">打开使用指南</button>
@@ -2105,6 +2106,9 @@
   <script src="../lib/delivery-contract.js"></script>
   <script src="../lib/gpt-model-profile.js"></script>
   <script src="../lib/model-presentation.js"></script>
+  <!-- Load KaTeX before Monaco's AMD loader so it exposes window.katex. -->
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="math-markdown.js"></script>
   <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
   <script src="review-editor.js"></script>
   <script src="vendor/dsh-code-review/core.js"></script>

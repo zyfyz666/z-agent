@@ -1,5 +1,14 @@
 # Third-Party Notices
 
+## KaTeX
+
+Z uses KaTeX 0.19.0 for local math rendering. The renderer bundle and fonts in
+`renderer/vendor/katex` are distributed under the MIT License, copyright
+Khan Academy and other contributors. The complete notice is included at
+`renderer/vendor/katex/LICENSE`.
+
+Source: https://github.com/KaTeX/KaTeX
+
 ## Prime Agent Continual Harness
 
 Yan Agent's Continual Harness implementation adapts architectural ideas and

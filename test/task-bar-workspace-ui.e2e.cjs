@@ -1,7 +1,7 @@
 'use strict';
 
 // Task-bar acceptance: Yanxi Code removed from the workspace-tools menu, the
-// "选择工作区" button carries the high-contrast empty state, and the task title
+// automatic task folder is ready without a mandatory folder choice, and the task title
 // opens the rename dialog on double click.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -48,12 +48,11 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yan-task-bar-e2e-'));
         shadow: getComputedStyle(button).boxShadow
       };
     });
-    assert.equal(emptyState.hasClass, true, 'empty-state class must be applied without a workspace');
-    assert.ok(
-      ['rgb(217, 119, 87)', 'rgb(194, 97, 63)'].includes(emptyState.background),
-      `workspace button must use the accent background, got ${emptyState.background}`
-    );
-    assert.notEqual(emptyState.shadow, 'none');
+    assert.equal(emptyState.hasClass, false, 'automatic tasks must not show a mandatory workspace prompt');
+    assert.equal(await page.locator('#taskBarFolderName').textContent(), '任务文件夹');
+    const taskFolder = await page.evaluate(() => state.currentSession.workspace);
+    assert.ok(fs.existsSync(taskFolder), 'the automatic folder must exist');
+    assert.equal(await page.locator('#taskBarOpenFolder').isEnabled(), true);
 
     await page.locator('#taskBarTitle').dblclick();
     await page.locator('#renameTaskModal:not(.hidden)').waitFor();

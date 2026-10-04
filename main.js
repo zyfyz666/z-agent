@@ -56,6 +56,7 @@ const {
   normalizeWorkspacePath,
   sameWorkspace
 } = require('./lib/session-handoff');
+const { taskWorkspaceRoot, ensureTaskWorkspace, legacyRuntimeWorkspace } = require('./lib/task-workspace');
 const { pruneYanagentEvidence } = require('./lib/yanagent-evidence');
 const skillRegistry = require('./lib/skill-registry');
 const codeGraphRuntime = require('./lib/codegraph-runtime');
@@ -1329,6 +1330,11 @@ process.env.YAN_ELECTRON_RUNTIME = process.execPath;
 const configPath = path.join(dataDir, 'config.json');
 const sessionsDir = path.join(dataDir, 'sessions');
 const filesDir = path.join(dataDir, 'uploads');
+const defaultTasksRoot = taskWorkspaceRoot({
+  documentsDirectory: app.getPath('documents'),
+  userDataDirectory: userDataDir,
+  isolated: isE2EMode || !!e2eUserDataDir
+});
 
 // 进程级兜底:主进程没有任何未捕获异常处理时,单个 EPIPE/类型错误就会让整个应用
 // 直接消失。这里记录崩溃现场(文件+控制台)但保持存活,让用户有机会保存会话。
@@ -3657,10 +3663,12 @@ function applyProviderSelection(cfg, providerId, apiKey, supplierId = '') {
 
 function loadConfig() {
   let cfg = null;
+  let loadedConfigText = null;
   let shouldPersistNormalizedState = false;
   try {
     if (fs.existsSync(configPath)) {
-      cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      loadedConfigText = fs.readFileSync(configPath, 'utf8');
+      cfg = JSON.parse(loadedConfigText);
       if (cfg && typeof cfg === 'object') transformConfigSecrets(cfg, decryptConfigSecret);
     }
   } catch (e) {
@@ -3867,7 +3875,11 @@ function loadConfig() {
   }
 
   // 迁移旧配置：旧的单 apiKey 迁移到 apiKeys.deepseek
-  if (merged.api?.apiKey && !merged.api.apiKeys?.deepseek) {
+  // Modern supplier configs already mirror the active connection's key here.
+  // Re-migrating it creates an unlisted DeepSeek key on every read, which the
+  // pruning pass then clears and persists again as an unnecessary full write.
+  if (!hasStoredProviderSuppliers && cfg.api?.connectionsMigrated !== true
+      && merged.api?.apiKey && !merged.api.apiKeys?.deepseek) {
     if (!merged.api.apiKeys) merged.api.apiKeys = buildDefaultApiKeys();
     merged.api.apiKeys.deepseek = merged.api.apiKey;
   }
@@ -3932,8 +3944,19 @@ function loadConfig() {
     engine: 'opencode',
     engineVersion: OPENCODE_VERSION
   };
-  if (shouldPersistNormalizedState) saveConfig(merged);
+  if (shouldPersistNormalizedState) saveNormalizedConfigIfCurrent(merged, loadedConfigText);
   return merged;
+}
+
+function saveNormalizedConfigIfCurrent(cfg, loadedConfigText) {
+  // A settings refresh can overlap an external atomic edit. A normalization
+  // read has no authority to overwrite a newer file with its older snapshot.
+  let currentText;
+  try { currentText = fs.readFileSync(configPath, 'utf8'); }
+  catch { return false; }
+  if (typeof loadedConfigText !== 'string' || currentText !== loadedConfigText) return false;
+  saveConfig(cfg);
+  return true;
 }
 
 function normalizeAgentConfig(agent = {}) {
@@ -6729,19 +6752,49 @@ function invalidateSessionRecordCache(id) {
   sessionRecordCache.delete(String(id || ''));
 }
 
+const sessionWorkspaceAssignments = new Map();
+
+async function ensureStoredSessionWorkspace(session) {
+  if (!session || !isSafeSessionId(session.id)) return session;
+  if (String(session.workspace || '').trim() && ['default', 'selected'].includes(session.workspaceKind)) return session;
+  if (sessionWorkspaceAssignments.has(session.id)) return sessionWorkspaceAssignments.get(session.id);
+  const operation = (async () => {
+    const workspace = await ensureTaskWorkspace(session, { root: defaultTasksRoot, dataDirectory: dataDir });
+    Object.assign(session, workspace);
+    // Assigning a task folder must not reorder old conversations or touch any
+    // historical files in their former private runtime folder.
+    await writeSessionFileAtomic(sessionPath(session.id), JSON.stringify(session, null, 2));
+    await refreshSessionSummaryCache(session.id, session);
+    return session;
+  })();
+  sessionWorkspaceAssignments.set(session.id, operation);
+  try { return await operation; }
+  finally {
+    if (sessionWorkspaceAssignments.get(session.id) === operation) sessionWorkspaceAssignments.delete(session.id);
+  }
+}
+
 async function readSessionRecord(id, options = {}) {
   const key = String(id || '');
   const file = sessionPath(key);
   if (!file || !fs.existsSync(file)) return null;
-  const stat = await fsp.stat(file);
+  let stat = await fsp.stat(file);
   const cached = sessionRecordCache.get(key);
   let data;
+  let needsSanitizing = false;
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
     data = cached.session;
   } else {
-    data = pruneSessionRuntimeBookkeeping(sanitizeSessionReviewSummaries(JSON.parse(await fsp.readFile(file, 'utf8'))));
-    touchSessionRecordCache(key, data, stat);
+    data = JSON.parse(await fsp.readFile(file, 'utf8'));
+    needsSanitizing = true;
   }
+  if (!String(data.workspace || '').trim() || !['default', 'selected'].includes(data.workspaceKind)) {
+    data = await ensureStoredSessionWorkspace(data);
+    stat = await fsp.stat(file);
+    needsSanitizing = true;
+  }
+  if (needsSanitizing) pruneSessionRuntimeBookkeeping(sanitizeSessionReviewSummaries(data));
+  touchSessionRecordCache(key, data, stat);
   // Task switching only needs the newest messages to paint the conversation;
   // the full history stays cached here and is served page by page through
   // session:messages, so a multi-megabyte session no longer crosses IPC whole.
@@ -6822,6 +6875,7 @@ function toSessionSummary(data) {
     id: data.id,
     title: data.title,
     workspace: data.workspace || '',
+    workspaceKind: data.workspaceKind || (data.workspace ? 'selected' : 'default'),
     parentSessionId: data.parentSessionId || '',
     hasHandoff: !!data.handoff,
     pinned: !!data.pinned,
@@ -6859,6 +6913,7 @@ async function createFreshSessionRecord(options = {}) {
   };
   if (options.parentSessionId) session.parentSessionId = String(options.parentSessionId);
   if (options.handoff) session.handoff = options.handoff;
+  Object.assign(session, await ensureTaskWorkspace(session, { root: defaultTasksRoot }));
   await fsp.writeFile(sessionPath(id), JSON.stringify(session, null, 2));
   return session;
 }
@@ -7047,7 +7102,7 @@ ipcMain.handle('session:get', async (_e, id, options = {}) => {
   return readSessionRecord(id, { messageLimit: options?.messageLimit });
 });
 
-ipcMain.handle('session:messages', async (_e, { id, offset, limit } = {}) => {
+ipcMain.handle('session:messages', async (_e, { id, offset, limit, fromEnd = false } = {}) => {
   const session = await readSessionRecord(id);
   if (!session) return { ok: false, error: '会话不存在' };
   const messages = Array.isArray(session.messages) ? session.messages : [];
@@ -7056,6 +7111,20 @@ ipcMain.handle('session:messages', async (_e, { id, offset, limit } = {}) => {
   const requestedCount = Math.max(1, Math.min(200, Number(limit) || 40));
   // Cap each page by accumulated size too, so paging back through a session
   // full of multi-megabyte messages never materializes them all at once.
+  // Backward readers need a suffix ending at their existing history cursor;
+  // returning a size-limited prefix would leave an unseen gap before it.
+  if (fromEnd === true) {
+    const requestedEnd = Math.min(total, Math.floor(requestedStart + requestedCount));
+    let start = requestedEnd;
+    let size = 0;
+    while (start > requestedStart) {
+      const estimated = estimateMessageSize(messages[start - 1]);
+      if (start < requestedEnd && size + estimated > MESSAGE_PAGE_CHAR_BUDGET) break;
+      start -= 1;
+      size += estimated;
+    }
+    return { ok: true, messages: messages.slice(start, requestedEnd), total, offset: start };
+  }
   let end = requestedStart;
   let size = 0;
   let count = 0;
@@ -7105,12 +7174,12 @@ ipcMain.handle('session:save', async (_e, session) => {
     return { ok: false, error: '会话 ID 无效', code: 'invalid-session-id' };
   }
   ensureDirs();
+  const stored = await readSessionRecord(session.id);
   // The renderer may hold only the newest slice of the conversation (loaded
   // through session:get with a message limit). Re-attach the older messages
   // from the stored record so a tail save can never truncate the history.
   let persisted = session;
   if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
-    const stored = await readSessionRecord(session.id);
     if (stored && Array.isArray(stored.messages)) {
       const head = stored.messages.slice(0, session.messagesStart);
       persisted = {
@@ -7122,6 +7191,9 @@ ipcMain.handle('session:save', async (_e, session) => {
       delete persisted.totalMessages;
     }
   }
+  Object.assign(persisted, await ensureTaskWorkspace(persisted, {
+    root: defaultTasksRoot, dataDirectory: dataDir, previousSession: stored
+  }));
   sanitizeSessionReviewSummaries(persisted);
   pruneSessionRuntimeBookkeeping(persisted);
   persisted.updatedAt = Date.now();
@@ -7143,15 +7215,17 @@ ipcMain.handle('session:set-workspace', async (_e, { id, workspace, activate = t
   // 走缓存读取,避免为改一个字段而整包解析 45MB 会话
   const data = await readSessionRecord(id);
   if (!data) return null;
-  data.workspace = workspace || '';
+  Object.assign(data, await ensureTaskWorkspace({ ...data, workspace: workspace || '' }, {
+    root: defaultTasksRoot, dataDirectory: dataDir
+  }));
   data.updatedAt = Date.now();
   await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
   await refreshSessionSummaryCache(id, data);
   if (activate !== false) {
-    activateWorkspace(workspace || '');
-  } else if (workspace) {
-    migrateMemoryToWorkspace(workspace);
-    ensureYanagent(workspace);
+    activateWorkspace(data.workspace);
+  } else if (data.workspace) {
+    migrateMemoryToWorkspace(data.workspace);
+    ensureYanagent(data.workspace);
   }
   return data;
 });
@@ -9015,10 +9089,7 @@ function ensureBundledAgentSkills(cfg) {
 // IPC: OpenCode runtime (the only Agent execution authority)
 // ---------------------------------------------------------------------------
 function getNoWorkspaceAgentDirectory(sessionId) {
-  const key = crypto.createHash('sha256')
-    .update(String(sessionId || 'anonymous'))
-    .digest('hex');
-  return path.join(dataDir, 'opencode-runtime', 'no-workspace', key);
+  return legacyRuntimeWorkspace(dataDir, sessionId);
 }
 
 async function selectedRunSkills(requestedSkills, cfg, { workspace, workMode } = {}) {
@@ -9149,12 +9220,24 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     request = { ...request, runId: admittedRunId };
     openCodeRunAdmissions.set(admittedRunId, String(request.yanSessionId || ''));
     admissionPending = true;
-    const workspaceInput = Object.prototype.hasOwnProperty.call(request, 'workspace')
-      ? request.workspace
-      : cfg.workspace;
-    const workspace = workspaceSandbox.normalizeWorkspace(workspaceInput);
-    const executionDirectory = workspace || getNoWorkspaceAgentDirectory(request.yanSessionId);
+    const authoritativeSession = request.yanSessionId ? await readSessionRecord(request.yanSessionId) : null;
+    // The persisted conversation owns its directory. A stale renderer must
+    // not erase it, borrow another task's folder, or fall back to private storage.
+    const runWorkspaceSession = authoritativeSession || {
+      id: isSafeSessionId(request.yanSessionId) ? String(request.yanSessionId)
+        : `sess_run_${crypto.createHash('sha256').update(admittedRunId).digest('hex')}`,
+      workspace: Object.prototype.hasOwnProperty.call(request, 'workspace') ? request.workspace : cfg.workspace
+    };
+    const runWorkspace = await ensureTaskWorkspace(runWorkspaceSession, {
+      root: defaultTasksRoot, dataDirectory: dataDir, previousSession: authoritativeSession
+    });
+    const workspace = runWorkspace.workspace;
+    const workspaceKind = runWorkspace.workspaceKind;
+    const executionDirectory = workspace;
     await fsp.mkdir(executionDirectory, { recursive: true });
+    if (authoritativeSession && !sameWorkspace(request.workspace, workspace)) {
+      notifyDesktopSessionUpdate({ id: authoritativeSession.id, reason: 'workspace-assigned', workspace, workspaceKind });
+    }
     const prompt = String(request.prompt || '').trim()
       || (Array.isArray(request.selectedSkills) && request.selectedSkills.length
         ? 'Apply the explicitly selected Skills to the current task.'
@@ -9289,7 +9372,6 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         entries: evolutionSelection.entries || []
       });
     }
-    const authoritativeSession = yanSessionId ? await readSessionRecord(yanSessionId) : null;
     const visionAbortController = new AbortController();
     openCodeActiveRuns.set(runId, {
       task: null,
@@ -9457,6 +9539,8 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       workspace: executionDirectory,
       userWorkspace: workspace,
       hasUserWorkspace: !!workspace,
+      workspaceKind,
+      legacyRuntimeWorkspace: runWorkspace.legacyRuntimeWorkspace || '',
       providerId: selection.providerId,
       modelId: selection.modelId,
       observerConnection: observerConnectionForRun(cfg),
@@ -9658,6 +9742,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         changes: [],
         usage: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
         contextTokens: 0,
+        ...(error?.watchdog ? { watchdog: error.watchdog } : {}),
         error: openCodeErrorDetail(error)
       };
       if (coreTurnStarted) yanCore.completeTurn(runId, failedResult);
@@ -9678,7 +9763,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       openCodeActiveRuns.delete(runId);
       refreshAgentRuntimeActivity();
     });
-    return { ok: true, runId, version: OPENCODE_VERSION };
+    return { ok: true, runId, version: OPENCODE_VERSION, workspace, workspaceKind };
   } catch (error) {
     const runId = String(request.runId || '');
     if (coreTurnStarted) yanCore.completeTurn(runId, { status: 'error', error: openCodeErrorDetail(error) });

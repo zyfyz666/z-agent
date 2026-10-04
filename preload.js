@@ -105,7 +105,7 @@ contextBridge.exposeInMainWorld('yan', {
   // Sessions
   listSessions: () => ipcRenderer.invoke('session:list'),
   getSession: (id, options = {}) => ipcRenderer.invoke('session:get', id, options),
-  getSessionMessages: (id, offset = 0, limit = 40) => ipcRenderer.invoke('session:messages', { id, offset, limit }),
+  getSessionMessages: (id, offset = 0, limit = 40, options = {}) => ipcRenderer.invoke('session:messages', { id, offset, limit, fromEnd: options?.fromEnd === true }),
   createSession: (forceNew = false, workspace = '') => ipcRenderer.invoke('session:create', { forceNew, workspace }),
   saveSession: (session) => ipcRenderer.invoke('session:save', session),
   renameSession: (id, title) => ipcRenderer.invoke('session:rename', { id, title }),
