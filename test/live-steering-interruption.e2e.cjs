@@ -156,9 +156,9 @@ async function waitSettled(sessionId) {
   await page.waitForFunction(id => !state.activeRuns.has(id), sessionId, { timeout: 75_000 });
   return page.evaluate(id => yan.getSession(id), sessionId);
 }
-async function waitGuidance(text) {
-  await page.waitForFunction(marker => state.currentSession.messages?.some(message => message.content === marker
-    && message.liveGuidance?.status === 'delivered'), text, { timeout: 30_000 });
+async function waitGuidance(text, status = 'queued') {
+  await page.waitForFunction(({ marker, status }) => state.currentSession.messages?.some(message => message.content === marker
+    && message.liveGuidance?.status === status), { marker: text, status }, { timeout: 30_000 });
   return page.evaluate(marker => state.currentSession.messages.find(message => message.content === marker), text);
 }
 function assertPaused(session, expectedKernelId) {
@@ -167,7 +167,8 @@ function assertPaused(session, expectedKernelId) {
   for (const marker of [markers.firstGuide, markers.secondGuide, markers.pauseGuide]) {
     const messages = session.messages.filter(message => message.content === marker);
     assert.equal(messages.length, 1, 'guidance message persists exactly once');
-    assert.equal(messages[0].liveGuidance?.status, 'delivered');
+    assert.equal(messages[0].liveGuidance?.status, marker === markers.pauseGuide ? 'failed' : 'delivered');
+    if (marker !== markers.pauseGuide) assert.equal(messages[0].liveGuidance?.deliveryEvidence, 'provider-response');
   }
   const interrupted = session.messages.findLast(message => message.role === 'assistant' && message.agentRun?.status === 'interrupted');
   assert.ok(interrupted, 'manual pause persists an interrupted assistant message');
@@ -221,7 +222,9 @@ function assertPaused(session, expectedKernelId) {
       runId: initialRun.runId, yanSessionId: sessionA.id, requestId: firstGuide.liveGuidance.requestId, text: markers.firstGuide
     });
     assert.equal(duplicate.ok, true, duplicate.error);
-    assert.equal(duplicate.delivered, true);
+    assert.equal(duplicate.accepted, true);
+    assert.equal(duplicate.delivered, false);
+    assert.equal(await page.locator('.msg-live-guidance').last().textContent(), '等待引导');
     const wrongSession = await page.evaluate(payload => yan.openCodeSteerRun(payload), {
       runId: initialRun.runId, yanSessionId: sessionB.id, requestId: 'wrong-session-4197', text: 'MUST_NOT_REACH_OTHER_SESSION_4197'
     });
@@ -232,6 +235,9 @@ function assertPaused(session, expectedKernelId) {
     const release = pendingStreams.get('steer');
     assert.ok(release && !release.destroyed);
     finish(release, readCall('call-after-guidance-read'));
+    await waitGuidance(markers.firstGuide, 'delivered');
+    await waitGuidance(markers.secondGuide, 'delivered');
+    assert.equal(await page.locator('.msg-live-guidance').last().textContent(), '已经引导');
     const guided = await waitSettled(sessionA.id);
     assert.ok(guidedRequestSeen, 'a subsequent real kernel model step received both guidance messages');
     assert.equal(guided.openCodeSessionId, initialRun.kernelSessionId);

@@ -25,6 +25,7 @@ function failedRunHandler() {
     flushOpenCodeRendererEvents: runId => calls.flushed.push(runId),
     yanCore: { completeTurn: (runId, result) => calls.core.push({ runId, result }) },
     completeOpenCodeReconcileRun: (runId, result) => calls.reconciled.push({ runId, result }),
+    mainRendererReady: true,
     mainWindow: {
       isDestroyed: () => false,
       webContents: { send: (channel, payload) => calls.sent.push({ channel, payload }) }

@@ -28,6 +28,7 @@ const electronStub = {
     on: () => {},
     once: () => {},
     whenReady: () => new Promise(() => {}),
+    disableHardwareAcceleration: () => {},
     commandLine: { appendSwitch: () => {}, appendArgument: () => {} }
   },
   BrowserWindow: class StubWindow {},

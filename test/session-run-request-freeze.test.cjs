@@ -42,7 +42,7 @@ function fixture() {
         queueMicrotask(() => complete({ result: { textContent: 'Done', status: 'done' } }));
         return { ok: true };
       },
-      async openCodeSteerRun(payload) { guidance.push(structuredClone(payload)); return { ok: true, delivered: true }; },
+      async openCodeSteerRun(payload) { guidance.push(structuredClone(payload)); return { ok: true, accepted: true, delivered: true, deliveryEvidence: 'provider-response' }; },
       async openCodeCancelRun() {}
     },
     ensureFullSessionLoaded: async value => value,

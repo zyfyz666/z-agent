@@ -6756,9 +6756,15 @@ function renderLiveGuidanceStatus(element, guidance) {
     element.querySelector('.msg-body')?.after(status);
   }
   status.dataset.status = guidance.status;
-  status.textContent = guidance.status === 'delivered' ? '已引导当前任务'
+  status.textContent = guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response' ? '已经引导'
+    : guidance.status === 'delivered' ? '引导记录（送达未确认）'
     : guidance.status === 'failed' ? `未送达：${guidance.error || '请重试或排队发送'}`
-      : '引导待确认…';
+      : '等待引导';
+  status.title = guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response'
+    ? '已确认包含此引导的请求到达模型接口；不代表模型一定会遵循。'
+    : guidance.status === 'failed' ? guidance.error || '没有确认这条引导到达模型接口。'
+      : guidance.status === 'delivered' ? '旧版本只记录内核接收，无法确认当时是否送入模型。'
+        : '已保留这条引导，等待后续模型请求携带它；当前正在执行的请求不会被打断。';
 }
 
 function refreshLiveGuidanceStatus(session, message) {
@@ -6766,6 +6772,33 @@ function refreshLiveGuidanceStatus(session, message) {
   const elements = $('#messages')?.querySelectorAll('.msg[data-guidance-request-id]') || [];
   const element = [...elements].find(item => item.dataset.guidanceRequestId === message.liveGuidance.requestId);
   renderLiveGuidanceStatus(element, message.liveGuidance);
+}
+
+function applyLiveGuidanceStatus(runCtx, event) {
+  if (event?.type !== 'yan.guidance.status') return false;
+  const session = runCtx.sessionRef || state.activeRuns.get(runCtx.sessionId)?.sessionRef;
+  const data = event.data || {};
+  const message = session?.messages?.find(item => item.liveGuidance?.requestId === data.requestId
+    && item.liveGuidance.runId === runCtx.runId);
+  if (!message || !['delivered', 'failed'].includes(data.status)) return true;
+  const guidance = message.liveGuidance;
+  if (guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response') return true;
+  if (data.status === 'delivered' && data.deliveryEvidence !== 'provider-response') return true;
+  Object.assign(guidance, { status: data.status,
+    ...(data.status === 'delivered' ? { deliveryEvidence: data.deliveryEvidence, deliveredAt: data.deliveredAt, error: '' }
+      : { error: String(data.error || '未确认送入模型') }) });
+  refreshLiveGuidanceStatus(session, message);
+  if (!runCtx.replayingHistory) void saveCurrentSession(session).catch(() => {});
+  return true;
+}
+
+function settleLiveGuidanceStatuses(runCtx) {
+  for (const message of runCtx?.sessionRef?.messages || []) {
+    if (message.liveGuidance?.runId !== runCtx.runId || !['pending', 'queued'].includes(message.liveGuidance.status)) continue;
+    message.liveGuidance.status = 'failed';
+    message.liveGuidance.error = '任务已停止或结束，未确认送入模型';
+    refreshLiveGuidanceStatus(runCtx.sessionRef, message);
+  }
 }
 
 async function steerCurrentComposerTurn() {
@@ -6795,18 +6828,27 @@ async function steerCurrentComposerTurn() {
       throw new Error('当前任务已停止或结束，指令已保留');
     }
     const result = await api.openCodeSteerRun({ runId, yanSessionId: sessionId, requestId, text });
-    if (!result?.ok || result.delivered !== true) throw new Error(result?.error || '当前任务未确认接收，请重试或排队发送');
-    message.liveGuidance.status = 'delivered';
+    if (!result?.ok || result.accepted !== true) throw new Error(result?.error || '当前任务未确认接收，请重试或排队发送');
+    // A late queue acknowledgement must never overwrite a provider receipt or
+    // a terminal event that arrived while this IPC call was still pending.
+    if (message.liveGuidance.status === 'pending') message.liveGuidance.status = 'queued';
+    if (result.delivered === true && result.deliveryEvidence === 'provider-response') {
+      message.liveGuidance.status = 'delivered';
+      message.liveGuidance.deliveryEvidence = result.deliveryEvidence;
+      message.liveGuidance.deliveredAt = result.deliveredAt;
+    }
   } catch (error) {
-    message.liveGuidance.status = 'failed';
-    message.liveGuidance.error = String(error?.message || error || '引导失败');
+    if (message.liveGuidance.deliveryEvidence !== 'provider-response') {
+      message.liveGuidance.status = 'failed';
+      message.liveGuidance.error = String(error?.message || error || '引导失败');
+    }
   }
   refreshLiveGuidanceStatus(session, message);
   try { await saveCurrentSession(session); }
   catch (error) {
     if (state.currentSession?.id === sessionId) toast(`引导记录保存失败：${error?.message || error}`);
   }
-  return message.liveGuidance.status === 'delivered';
+  return ['queued', 'delivered'].includes(message.liveGuidance.status);
 }
 
 function queueCurrentComposerTurn() {
@@ -9771,6 +9813,7 @@ function normalizeAgentTodos(value) {
 function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
   if (!event?.type) return;
   runCtx.openCodeLastEventAt = Date.now();
+  if (event.type === 'yan.guidance.status' && applyLiveGuidanceStatus(runCtx, event)) return;
   if (updateSubagentWorkflow(runCtx, event, deferEffects)) return;
   const data = event.data || event.properties || {};
   if (event.type === 'yan.thrash.watchdog.status' || event.type === 'yan.thrash.watchdog') {
@@ -11746,6 +11789,7 @@ function getActiveRun(runCtx) {
 }
 
 function finalizeAgentRun(content, status, activeRun, bodyEl, error, runCtx) {
+  settleLiveGuidanceStatuses(runCtx);
   // 收尾读取 partialContent 前,必须把合帧缓冲里未应用的流式增量同步落定,
   // 否则最后一批(≤250ms)文本会从最终消息里丢失
   if (runCtx) flushOpenCodeStreamDeltas(runCtx);

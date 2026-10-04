@@ -1,4 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Tray, nativeImage, webContents, screen, session, clipboard, globalShortcut, safeStorage, net: electronNet } = require('electron');
+const { configureSoftwareRendering, createRendererHealthLog, attachProcessHealthLogging, attachRendererRecovery } = require('./lib/renderer-recovery');
+configureSoftwareRendering(app);
 const path = require('path');
 const os = require('os');
 const { agiEnabled, evolutionEnabled, isolateWorkMode } = require('./lib/work-mode-isolation');
@@ -228,7 +230,7 @@ let mainWindow = null;
 const openCodeEventBatcher = new OpenCodeEventBatcher({
   flushIntervalMs: 16,
   onBatch(runId, events) {
-    if (!mainWindow || mainWindow.isDestroyed() || !events.length) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainRendererReady || !events.length) return;
     mainWindow.webContents.send('opencode:event-batch', { runId, events });
   },
   onSlowConsumer(runId, info) {
@@ -236,7 +238,7 @@ const openCodeEventBatcher = new OpenCodeEventBatcher({
     try { yanCore?.recordBackpressure(runId, info); } catch (error) {
       console.warn('[yan-core] backpressure telemetry failed:', error?.message || error);
     }
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainRendererReady) return;
     mainWindow.webContents.send('opencode:event', {
       runId,
       event: { type: 'yan.opencode.slow-consumer', data: info }
@@ -249,7 +251,7 @@ function sendOpenCodeRendererEvent(runId, event) {
     console.warn('[yan-core] provider event ingestion failed:', error?.message || error);
   }
   recordOpenCodeReconcileEvent(runId, event);
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainRendererReady) {
     openCodeEventBatcher.flush(runId);
     return;
   }
@@ -295,7 +297,16 @@ function completeOpenCodeReconcileRun(runId, completedResult) {
   if (!entry || entry.completed) return;
   entry.completed = completedResult || null;
   entry.completedAt = Date.now();
-  const timer = setTimeout(() => openCodeRunReconcile.delete(String(runId)), OPENCODE_RECONCILE_COMPLETED_TTL_MS);
+  const expireWhenVisible = () => {
+    // A crashed view can remain on its recovery page until the user returns.
+    // Keep the completed result for that view to reconcile when it reopens.
+    if (mainRendererReady) openCodeRunReconcile.delete(String(runId));
+    else {
+      const retry = setTimeout(expireWhenVisible, OPENCODE_RECONCILE_COMPLETED_TTL_MS);
+      retry.unref?.();
+    }
+  };
+  const timer = setTimeout(expireWhenVisible, OPENCODE_RECONCILE_COMPLETED_TTL_MS);
   timer.unref?.();
 }
 
@@ -1330,6 +1341,9 @@ async function migrateLegacyDataDir() {
 }
 
 const dataDir = STABLE_DATA_DIR;
+const rendererHealthLog = createRendererHealthLog(path.join(dataDir, 'logs'));
+attachProcessHealthLogging(app, rendererHealthLog);
+rendererHealthLog.write('software-rendering-enabled');
 process.env.YAN_OFFICECLI_DATA_DIR = path.join(dataDir, 'runtimes', 'officecli');
 process.env.YAN_ELECTRON_RUNTIME = process.execPath;
 const configPath = path.join(dataDir, 'config.json');
@@ -4440,11 +4454,17 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  mainWindow.webContents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
-    if (isMainFrame) mainRendererReady = false;
+  const recoveryWindow = mainWindow;
+  attachRendererRecovery(recoveryWindow, {
+    loadInterface: () => recoveryWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')),
+    log: rendererHealthLog, shell, dialog, isQuitting: () => isQuiting,
+    onAvailabilityChange: ready => { mainRendererReady = ready; },
+    onShowRecovery: () => {
+      destroySplashWindow();
+      if (!recoveryWindow.isDestroyed()) recoveryWindow.show();
+    }
   });
-  mainWindow.webContents.on('did-finish-load', () => { mainRendererReady = true; });
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')).catch(() => {});
   mainWindow.webContents.on('did-attach-webview', (_event, guestContents) => {
     configureBrowserGuest(guestContents);
   });
@@ -4462,12 +4482,6 @@ function createWindow() {
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     const tag = ['LOG', 'WARN', 'ERROR'][level] || 'LOG';
     console.log(`[renderer ${tag}] ${message}  (${sourceId}:${line})`);
-  });
-  mainWindow.webContents.on('render-process-gone', (_e, details) => {
-    console.log('[renderer gone]', JSON.stringify(details));
-  });
-  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
-    console.log('[did-fail-load]', code, desc, url);
   });
 
   if (process.argv.includes('--dev')) {
@@ -10005,7 +10019,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         }
       }
       completeOpenCodeReconcileRun(runId, completedResult);
-      if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow && !mainWindow.isDestroyed() && mainRendererReady) {
         mainWindow.webContents.send('opencode:completed', { runId, result: completedResult });
       }
       if (!request.utility && ['done', 'error'].includes(result?.status) && result?.userRequestedFinish !== true) {
@@ -10040,7 +10054,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       };
       if (coreTurnStarted) yanCore.completeTurn(runId, failedResult);
       completeOpenCodeReconcileRun(runId, failedResult);
-      if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow && !mainWindow.isDestroyed() && mainRendererReady) {
         mainWindow.webContents.send('opencode:completed', {
           runId,
           result: failedResult
@@ -10322,13 +10336,16 @@ function steerOpenCodeRun(payload = {}) {
     if (!isLive()) return failure('当前任务已结束或正在停止，引导未送达。', 'STEERING_STALE');
     try {
       const delivery = await sidecar.deliverInterjection(runId, {
-        kind: 'guidance', guidance: text, requestFinish: false, hardCancel: false, source: 'user'
+        kind: 'guidance', guidance: text, requestId, requestFinish: false, hardCancel: false, source: 'user'
       });
-      if (!isLive()) return failure('引导发送期间任务已结束或停止，未确认送达。', 'STEERING_STALE');
-      if (delivery?.ok !== true || delivery.delivered !== true) {
+      if (delivery?.ok !== true || delivery.accepted !== true) {
         return failure(delivery?.error || '内核未确认收到引导。', 'STEERING_DELIVERY_FAILED');
       }
-      return { ...identity, ok: true, delivered: true, version: delivery.version, phase: delivery.phase };
+      const delivered = delivery.delivered === true && delivery.deliveryEvidence === 'provider-response';
+      if (!isLive() && !delivered) return failure('引导发送期间任务已结束或停止，未确认送达。', 'STEERING_STALE');
+      return { ...identity, ok: true, accepted: true, delivered,
+        deliveredAt: delivery.deliveredAt, deliveryEvidence: delivery.deliveryEvidence,
+        version: delivery.version, phase: delivery.phase };
     } catch (error) {
       return failure(error?.message || String(error), 'STEERING_DELIVERY_FAILED');
     }
@@ -10490,12 +10507,6 @@ if (!gotSingleInstanceLock) {
     focusMainWindow();
   });
 }
-
-// Software WebGL fallback: Chromium blocks the software rasterizer by default
-// on machines without a usable GPU (RDP/VM), which would leave the 3D
-// work-island view blank. Hardware rendering is still preferred when present.
-app.commandLine.appendSwitch('enable-unsafe-swiftshader');
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
 app.whenReady().then(async () => {
   if (e2eOrphanShutdownStarted) return;

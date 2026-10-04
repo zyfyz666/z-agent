@@ -147,7 +147,7 @@ async function waitText(marker) {
 async function guidance(marker, enter = false) {
   await send(marker, enter);
   await page.waitForFunction(marker => state.currentSession.messages.some(message => message.content === marker
-    && message.liveGuidance?.status === 'delivered'), marker, { timeout: 30_000 });
+    && ['queued', 'delivered'].includes(message.liveGuidance?.status)), marker, { timeout: 30_000 });
   return page.evaluate(marker => state.currentSession.messages.find(message => message.content === marker), marker);
 }
 async function settled(id) {

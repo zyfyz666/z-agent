@@ -26,7 +26,7 @@ function fixture(deliver) {
       hasRun: id => kernels.has(id),
       async deliverInterjection(runId, analysis) {
         calls.push({ runId, analysis });
-        return deliver ? deliver(runId, analysis) : { ok: true, delivered: true, version: calls.length, phase: 'work' };
+        return deliver ? deliver(runId, analysis) : { ok: true, accepted: true, delivered: false, version: calls.length, phase: 'work' };
       },
       analyzeInterjection() { throw new Error('live steering must not call an auxiliary model'); }
     },
@@ -43,11 +43,12 @@ test('live guidance directly reaches the active kernel with exact session owners
   const f = fixture();
   const result = await f.send(request());
   assert.equal(result.ok, true);
-  assert.equal(result.delivered, true);
+  assert.equal(result.accepted, true);
+  assert.equal(result.delivered, false);
   assert.equal(result.requestId, 'message-1');
   assert.equal(result.yanSessionId, 'sess_alpha');
   assert.deepEqual(JSON.parse(JSON.stringify(f.calls)), [{ runId: 'run-a', analysis: {
-    kind: 'guidance', guidance: request().text, requestFinish: false, hardCancel: false, source: 'user'
+    kind: 'guidance', guidance: request().text, requestId: request().requestId, requestFinish: false, hardCancel: false, source: 'user'
   } }]);
 });
 
@@ -60,7 +61,7 @@ test('concurrent retries and later acknowledgement retries share one delivery an
   assert.equal(first, concurrent);
   await Promise.resolve();
   assert.equal(f.calls.length, 1);
-  resolve({ ok: true, delivered: true, version: 7 });
+  resolve({ ok: true, accepted: true, delivered: false, version: 7 });
   const result = await first;
   assert.equal(await concurrent, result);
   f.runs.delete('run-a');
@@ -114,7 +115,7 @@ for (const state of ['finished', 'cancelled', 'replaced']) {
     if (state === 'finished') f.runs.clear();
     if (state === 'cancelled') f.active.visionAbortController.abort();
     if (state === 'replaced') f.runs.set('run-a', { yanSessionId: 'sess_other' });
-    resolve({ ok: true, delivered: true, version: 1 });
+    resolve({ ok: true, accepted: true, delivered: false, version: 1 });
     const result = await pending;
     assert.equal(result.ok, false);
     assert.equal(result.delivered, false);

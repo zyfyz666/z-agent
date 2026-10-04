@@ -30,7 +30,7 @@ function fixture() {
   const b = { id: 'B', messages: [] };
   const drafts = { A: 'First guidance', B: 'Keep B draft' };
   const saved = [], calls = [], shown = [], cleared = [], notices = [];
-  const runCtx = { runId: 'run-A', sessionId: 'A', shouldAbort: false };
+  const runCtx = { runId: 'run-A', sessionId: 'A', sessionRef: a, shouldAbort: false };
   let sequence = 0;
   let queued = 0;
   const context = {
@@ -60,6 +60,7 @@ function fixture() {
   };
   vm.createContext(context);
   vm.runInContext(section('const sessionSaveQueues = ', 'async function persistCurrentSession('), context);
+  vm.runInContext(section('function applyLiveGuidanceStatus(', 'async function steerCurrentComposerTurn('), context);
   vm.runInContext(section('async function steerCurrentComposerTurn(', 'function queueCurrentComposerTurn('), context);
   vm.runInContext(section('async function sendMessage()', 'async function submitMediaMessage('), context);
   return { context, a, b, drafts, runCtx, saved, calls, shown, cleared, notices, get queued() { return queued; } };
@@ -76,9 +77,12 @@ test('running Send persists pending guidance before directly delivering it to th
   assert.equal(f.calls[0].yanSessionId, 'A');
   assert.equal(f.calls[0].text, 'First guidance');
   assert.deepEqual(f.shown, [{ content: 'First guidance' }]);
-  f.calls[0].resolve({ ok: true, delivered: true });
+  f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
   await pending;
-  assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.status, 'delivered');
+  assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.status, 'queued');
+  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'yan.guidance.status', data: {
+    requestId: f.calls[0].requestId, status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' } });
+  await until(() => f.saved.at(-1).messages.at(-1).liveGuidance.status === 'delivered');
   assert.equal(f.a.messages[0].content, 'Original request');
 });
 
@@ -104,10 +108,52 @@ test('detached guidance keeps its status badge without restoring runtime request
   const element = { dataset: {}, querySelector: () => status };
   const context = vm.createContext({});
   vm.runInContext(section('function renderLiveGuidanceStatus(', 'function refreshLiveGuidanceStatus('), context);
-  context.renderLiveGuidanceStatus(element, { timelineKey: 'display-history', status: 'delivered' });
-  assert.equal(status.textContent, '已引导当前任务');
+  context.renderLiveGuidanceStatus(element, { timelineKey: 'display-history', status: 'delivered', deliveryEvidence: 'provider-response' });
+  assert.equal(status.textContent, '已经引导');
   assert.equal(status.dataset.status, 'delivered');
   assert.equal(element.dataset.guidanceRequestId, undefined);
+});
+
+test('queue and historical kernel-only acknowledgements never display model delivery', () => {
+  const status = { dataset: {}, textContent: '' };
+  const element = { dataset: {}, querySelector: () => status };
+  const context = vm.createContext({});
+  vm.runInContext(section('function renderLiveGuidanceStatus(', 'function refreshLiveGuidanceStatus('), context);
+  for (const value of ['pending', 'queued']) {
+    context.renderLiveGuidanceStatus(element, { requestId: 'q', status: value });
+    assert.equal(status.textContent, '等待引导');
+  }
+  context.renderLiveGuidanceStatus(element, { requestId: 'old', status: 'delivered' });
+  assert.equal(status.textContent, '引导记录（送达未确认）');
+});
+
+test('provider proof wins a late acknowledgement and remains confined to its original conversation', async () => {
+  const f = fixture();
+  const pending = f.context.steerCurrentComposerTurn();
+  await until(() => f.calls.length === 1);
+  f.context.state.currentSession = f.b;
+  const data = { requestId: f.calls[0].requestId, status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' };
+  f.context.applyLiveGuidanceStatus({ ...f.runCtx, runId: 'wrong-run' }, { type: 'yan.guidance.status', data });
+  assert.equal(f.a.messages.at(-1).liveGuidance.status, 'pending');
+  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'yan.guidance.status', data });
+  f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
+  await pending;
+  f.context.settleLiveGuidanceStatuses(f.runCtx);
+  assert.equal(f.a.messages.at(-1).liveGuidance.status, 'delivered');
+  assert.equal(f.a.messages.at(-1).liveGuidance.deliveredAt, 123);
+  assert.equal(f.b.messages.length, 0);
+  assert.equal(f.drafts.B, 'Keep B draft');
+});
+
+test('a stopped run retains unsent guidance with an explicit failure instead of waiting forever', async () => {
+  const f = fixture();
+  const pending = f.context.steerCurrentComposerTurn();
+  await until(() => f.calls.length === 1);
+  f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'yan.guidance.status', data: {
+    requestId: f.calls[0].requestId, status: 'failed', error: '任务已停止，未确认送入模型' } });
+  f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
+  await pending;
+  assert.equal(f.a.messages.at(-1).liveGuidance.status, 'failed');
 });
 
 test('mounting the composer keeps explicit Stop and Queue controls before removing the old action container', () => {
@@ -144,9 +190,9 @@ test('multiple in-flight guidance messages remain distinct when acknowledgements
   const second = f.context.steerCurrentComposerTurn();
   await until(() => f.calls.length === 2);
   assert.notEqual(f.calls[0].requestId, f.calls[1].requestId);
-  f.calls[1].resolve({ ok: true, delivered: true });
+  f.calls[1].resolve({ ok: true, accepted: true, delivered: true, deliveryEvidence: 'provider-response' });
   await second;
-  f.calls[0].resolve({ ok: true, delivered: true });
+  f.calls[0].resolve({ ok: true, accepted: true, delivered: true, deliveryEvidence: 'provider-response' });
   await first;
   const messages = f.saved.at(-1).messages;
   assert.deepEqual(messages.map(message => message.content), ['Original request', 'First guidance', 'Second guidance']);
@@ -161,7 +207,7 @@ test('switching conversations while guidance is pending never clears or saves th
   f.context.state.currentSession = f.b;
   gate.resolve();
   await until(() => f.calls.length === 1);
-  f.calls[0].resolve({ ok: true, delivered: true });
+  f.calls[0].resolve({ ok: true, accepted: true, delivered: true, deliveryEvidence: 'provider-response' });
   await pending;
   assert.equal(f.drafts.B, 'Keep B draft');
   assert.deepEqual(f.cleared, ['A']);
