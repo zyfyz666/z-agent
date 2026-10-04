@@ -270,7 +270,7 @@ test('first-message rewind with a default title survives blank-chat cleanup whil
     api: { listSessions: async () => [rewound, blank], deleteSession: async id => { deleted.push(id); return { ok: true }; } },
     renderSessionList() {}, clearYanCoreQueuedIntentsForThread() {} });
   vm.runInContext(section('function isDefaultSessionTitle(', 'function syncCurrentSessionWorkspace('), context);
-  vm.runInContext(section('async function refreshSessions(', '// Core IPC is optional'), context);
+  vm.runInContext(section('function setSessionSummaries(', '// Core IPC is optional'), context);
   await context.refreshSessions();
   assert.deepEqual(deleted, []);
   assert.equal(context.isBlankNewChat(rewound), false);

@@ -959,6 +959,36 @@ body.is-mac .sidebar-brand-name-mac { display: inline; }
 }
 .session-item:hover { background: var(--bg-hover); color: var(--text); }
 .session-item.active { background: var(--bg-elev2); color: var(--text); }
+.session-kind-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+}
+.session-backups-dialog {
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(640px, calc(100vh - 40px));
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--bg-elev);
+}
+.session-backups-dialog::backdrop { background: #0006; }
+.session-backups-dialog h2 { margin: 0 0 10px; font-size: 18px; }
+.session-backups-dialog p { color: var(--text-dim); line-height: 1.6; font-size: 13px; }
+.session-backup-list { display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
+.session-backup-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 8px; text-align: left;
+  color: var(--text); background: var(--bg-elev2); cursor: pointer;
+}
+.session-backup-row > span:nth-child(2) { grid-row: 2; color: var(--text-dim); font-size: 12px; }
+.session-backup-row strong { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 12px; }
+.session-backup-row:hover { background: var(--bg-hover); }
 .session-title-shell {
   min-width: 0;
   flex: 1;

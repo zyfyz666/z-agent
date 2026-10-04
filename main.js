@@ -6939,7 +6939,7 @@ async function readSessionRecord(id, options = {}) {
 // that actually changed.
 const sessionSummaryCache = new Map();
 
-async function listSessionSummaries() {
+async function listSessionSummaries({ includeRewindBackups = false } = {}) {
   ensureDirs();
   const files = await fsp.readdir(sessionsDir);
   const summaries = [];
@@ -6982,13 +6982,17 @@ async function listSessionSummaries() {
       summaries.push({ ...summary, workspaceMissing: workspaceMissing(summary.workspace) });
     } catch { /* skip invalid session files */ }
   }
-  return summaries.sort((a, b) => {
+  const ids = new Set(summaries.map(summary => summary.id));
+  return summaries.filter(summary => includeRewindBackups || !summary.isRewindBackup
+    || !ids.has(summary.rewindBackupOf?.sessionId)).sort((a, b) => {
     if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
     return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
 }
 
 function toSessionSummary(data) {
+  const backup = data.rewindBackupOf;
+  const backupSourceId = isSafeSessionId(backup?.sessionId) ? backup.sessionId : '';
   return {
     id: data.id,
     title: data.title,
@@ -6998,6 +7002,12 @@ function toSessionSummary(data) {
     hasHandoff: !!data.handoff,
     ...(data.forkedFrom ? { forkedFrom: data.forkedFrom } : {}),
     ...(data.rewindState ? { rewindState: data.rewindState } : {}),
+    ...(backupSourceId ? { rewindBackupOf: { sessionId: backupSourceId,
+      createdAt: Number(backup.createdAt) || Number(data.createdAt) || 0,
+      messageCount: Number(backup.messageCount) || 0 },
+      isRewindBackup: data.contextReset?.kind === 'rewind-backup'
+        && data.contextReset.sourceSessionId === backupSourceId
+        && Array.isArray(data.messages) && data.messages.length === backup.messageCount } : {}),
     conversationRevision: sessionConversationRevision(data),
     pinned: !!data.pinned,
     createdAt: data.createdAt,
@@ -7337,7 +7347,7 @@ function deleteSessionRecord(id, options = {}) {
   return operation;
 }
 
-ipcMain.handle('session:list', () => listSessionSummaries());
+ipcMain.handle('session:list', () => listSessionSummaries({ includeRewindBackups: true }));
 
 ipcMain.handle('session:get', async (_e, id, options = {}) => {
   return readSessionRecord(id, { messageLimit: options?.messageLimit });

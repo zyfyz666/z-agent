@@ -5,6 +5,9 @@
     '最近': 'Recent', '按最近更新时间排列': 'Sorted by last updated', '显示更多': 'Show more',
     '重命名': 'Rename', '操作失败，请重试': 'Action failed. Try again.', '对话名称保存失败': 'Could not save conversation name',
     '回退到这里': 'Rewind to here', '对话回退': 'Conversation rewind',
+    '回退备份': 'Rewind backups', '备份': 'Backup', '查看': 'View',
+    '这个对话还没有回退备份': 'This conversation has no rewind backups yet',
+    '每次回退前的记录都保留在这里。查看备份不会改变当前项目文件；从备份继续发送会成为独立分支。': 'History before each rewind is kept here. Viewing a backup leaves current project files unchanged; continuing it creates an independent branch.',
     '回退对话': 'Rewind conversation', '恢复对话': 'Restore conversation', '撤回并编辑': 'Rewind and edit',
     '回退到这里；保留这条消息，当前文件不变': 'Rewind through this message; current files stay unchanged',
     '撤回重写；后续对话会备份，当前文件不变': 'Rewind and rewrite; later messages are backed up and files stay unchanged',
@@ -407,6 +410,10 @@
     if (normalize(target) !== 'en' || !/[\u3400-\u9fff]/u.test(source)) return source;
     const exact = ZH_EN[source.trim()];
     if (exact) return source.replace(source.trim(), exact);
+    const rewindBackups = source.match(/^回退备份（(\d+)）$/u);
+    if (rewindBackups) return `Rewind backups (${rewindBackups[1]})`;
+    const backupMessages = source.match(/^(\d+) 条消息( · 已继续)?$/u);
+    if (backupMessages) return `${backupMessages[1]} message${backupMessages[1] === '1' ? '' : 's'}${backupMessages[2] ? ' · Continued' : ''}`;
     const rewindConfirmation = source.match(/^保留到第 (\d+) 条消息（含这条）。后续对话会备份，可恢复；项目文件保持不变。$/u);
     if (rewindConfirmation) return `Keep through message ${rewindConfirmation[1]}, inclusive. Later conversation history will be backed up for recovery; project files stay unchanged.`;
     const modelChecks = source.match(/^模型检查 (\d+) 次$/u);

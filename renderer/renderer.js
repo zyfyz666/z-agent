@@ -1457,8 +1457,19 @@ function applyReadingFont(value) {
   return font;
 }
 
+function setSessionSummaries(summaries) {
+  const records = Array.isArray(summaries) ? summaries : [];
+  const ids = new Set(records.map(session => session.id));
+  // Snapshots remain on disk and readable through their history entry. Only
+  // untouched snapshots with a surviving source stay out of the task list.
+  // A continued backup is an independent conversation; an orphan stays visible.
+  state.rewindBackups = records.filter(session => !!session.rewindBackupOf?.sessionId);
+  state.sessions = records.filter(session => session.isRewindBackup !== true
+    || !ids.has(session.rewindBackupOf?.sessionId));
+}
+
 async function refreshSessions() {
-  state.sessions = await api.listSessions();
+  setSessionSummaries(await api.listSessions());
   const blanks = state.sessions.filter(isBlankUnassignedNewChat);
   if (blanks.length > 1) {
     const currentBlank = blanks.find(session => session.id === state.currentSession?.id);
@@ -1474,7 +1485,7 @@ async function refreshSessions() {
       session.id,
       'duplicate_blank_session_removed'
     )));
-    state.sessions = await api.listSessions();
+    setSessionSummaries(await api.listSessions());
   }
   renderSessionList();
 }
@@ -1557,12 +1568,15 @@ async function listRecoveredYanCoreTurns() {
 async function applyExternalSessionChange(detail = {}) {
   const currentId = state.currentSession?.id || null;
   await refreshSessions();
-  if (detail.id && !state.sessions.some(session => session.id === detail.id)) {
+  // A viewed backup stays on disk even while omitted from navigation. Its
+  // metadata updates must not trigger deletion cleanup or discard its draft.
+  const allSessionSummaries = [...state.sessions, ...(state.rewindBackups || [])];
+  if (detail.id && !allSessionSummaries.some(session => session.id === detail.id)) {
     settleAgentInteractionsForSession(detail.id);
   }
 
   if (!currentId || detail.id !== currentId) return;
-  const summary = state.sessions.find(session => session.id === currentId);
+  const summary = allSessionSummaries.find(session => session.id === currentId);
   if (!summary) {
     await clearYanCoreQueuedIntentsForThread(currentId, 'session_removed_externally');
     state.composerDrafts.delete(String(currentId));
@@ -1858,10 +1872,42 @@ function openSessionSidebarMenu(anchor, sessionId, position) {
     label: session.pinned ? '取消置顶任务' : '置顶任务',
     icon: ICONS.pin,
     onSelect: () => toggleSessionPinnedFromSidebar(session)
-  }, {
+  }, ...(sessionRewindBackupsFor(sessionId).length ? [{
+    label: `回退备份（${sessionRewindBackupsFor(sessionId).length}）`, icon: SESSION_REWIND_ICON,
+    onSelect: () => openSessionRewindBackups(sessionId)
+  }] : []), {
     label: '移除任务', icon: ICONS.trash, danger: true,
     onSelect: () => deleteSessionFromSidebar(sessionId)
   }], position);
+}
+
+function sessionRewindBackupsFor(sessionId) {
+  return (state.rewindBackups || []).filter(session => session.rewindBackupOf?.sessionId === sessionId)
+    .slice().sort((a, b) => (Number(b.rewindBackupOf.createdAt) || 0) - (Number(a.rewindBackupOf.createdAt) || 0));
+}
+
+function openSessionRewindBackups(sessionId = state.currentSession?.id) {
+  const backups = sessionRewindBackupsFor(sessionId);
+  if (!backups.length) { toast('这个对话还没有回退备份'); return; }
+  $('#sessionRewindBackupsDialog')?.remove();
+  const dialog = document.createElement('dialog');
+  dialog.id = 'sessionRewindBackupsDialog';
+  dialog.className = 'session-backups-dialog';
+  dialog.setAttribute('aria-labelledby', 'sessionRewindBackupsTitle');
+  dialog.innerHTML = `<h2 id="sessionRewindBackupsTitle">回退备份</h2>
+    <p>每次回退前的记录都保留在这里。查看备份不会改变当前项目文件；从备份继续发送会成为独立分支。</p>
+    <div class="session-backup-list">${backups.map(backup => `<button type="button" class="session-backup-row" data-backup-id="${escapeAttr(backup.id)}">
+      <span>${escapeHtml(new Date(backup.rewindBackupOf.createdAt || backup.createdAt).toLocaleString(state.config?.language === 'en' ? 'en-US' : 'zh-CN'))}</span>
+      <span>${Number(backup.rewindBackupOf.messageCount) || 0} 条消息${backup.isRewindBackup ? '' : ' · 已继续'}</span><strong>查看</strong>
+    </button>`).join('')}</div><button type="button" class="secondary-btn" data-backups-close>关闭</button>`;
+  document.body.appendChild(dialog);
+  dialog.querySelector('[data-backups-close]').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.querySelectorAll('[data-backup-id]').forEach(button => button.addEventListener('click', async () => {
+    dialog.close();
+    await loadSession(button.dataset.backupId);
+  }));
+  dialog.showModal();
 }
 
 let sessionTitleResizeObserver = null;
@@ -2056,6 +2102,8 @@ function renderSessionList() {
             <span class="session-title-copy" aria-hidden="true">${escapeHtml(displaySessionTitle(session.title))}</span>
           </span>
         </span>
+        ${session.forkedFrom || (session.rewindBackupOf && !session.isRewindBackup) ? '<span class="session-kind-badge">分支</span>'
+          : session.isRewindBackup ? '<span class="session-kind-badge">备份</span>' : ''}
         ${interactionStatus ? `<span class="session-interaction-status" role="status">${interactionStatus}</span>` : ''}
         <button type="button" class="session-more-btn" data-session-menu-toggle="${escapeAttr(session.id)}" aria-label="任务操作" aria-expanded="false">⋯</button>
       </div>`;
@@ -2669,7 +2717,8 @@ function renderSessionRewindState() {
   restore.disabled = !!reason;
   restore.title = reason || '恢复备份中的对话记录，当前文件不变';
   const backup = $('#sessionRewindBackupBtn');
-  backup.textContent = restored ? '查看上一个对话状态' : '查看回退前记录';
+  const backups = sessionRewindBackupsFor(session.id);
+  backup.textContent = backups.length ? `回退备份（${backups.length}）` : restored ? '查看上一个对话状态' : '查看回退前记录';
   backup.dataset.sessionId = session.rewindState.backupSessionId;
 }
 
@@ -2817,6 +2866,10 @@ async function restoreSessionRewind() {
 }
 
 async function openSessionRewindBackup() {
+  if (sessionRewindBackupsFor(state.currentSession?.id).length) {
+    openSessionRewindBackups(state.currentSession.id);
+    return;
+  }
   const backupId = state.currentSession?.rewindState?.backupSessionId;
   if (!backupId) return;
   const loadToken = sessionLoadToken;
