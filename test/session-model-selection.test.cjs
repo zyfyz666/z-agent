@@ -37,9 +37,9 @@ function fixture() {
     console,
     state: { currentSession: a, sessions: [a, b], activeRuns: new Map(), config: { agentModel: model('global'), api: {} } },
     api: {
-      setSessionModel(id, selection) {
+      setSessionModel(id, selection, conversationRevision) {
         const pending = deferred();
-        saves.push({ id, selection, ...pending });
+        saves.push({ id, selection, conversationRevision, ...pending });
         return pending.promise;
       },
       setModelRole() { throw new Error('Text model must not mutate the global role'); },
@@ -124,6 +124,25 @@ test('an older delayed response cannot overwrite a newer model selection in the 
   assert.equal(await older, false);
   assert.equal(f.a.modelSelection.modelId, 'new');
   assert.deepEqual(f.badges, [{ session: 'A', model: 'new' }]);
+});
+
+test('a model change freezes the history revision and its late response cannot overwrite a rewound conversation', async () => {
+  const f = fixture();
+  f.a.conversationRevision = 4;
+  const pending = f.context.selectSessionTextModel(model('late'));
+  assert.equal(f.saves[0].conversationRevision, 4);
+  Object.assign(f.context, {
+    observerHistorySelection: new Map(), interjectionThreads: new Map(), pendingAgentHandoffs: new Map()
+  });
+  vm.runInContext(section('function clearSessionRewindUiHistory(', 'async function applySessionRewindResult('), f.context);
+  f.context.clearSessionRewindUiHistory('A');
+  const rewound = { ...f.a, conversationRevision: 5, modelSelection: model('historical') };
+  f.context.state.currentSession = rewound;
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: model('late') });
+  assert.equal(await pending, false);
+  assert.equal(rewound.modelSelection.modelId, 'historical');
+  assert.equal(f.a.modelSelection.modelId, 'a');
+  assert.deepEqual(f.badges, []);
 });
 
 test('the actual menu callback saves to its original conversation without repainting the other conversation menu', async () => {

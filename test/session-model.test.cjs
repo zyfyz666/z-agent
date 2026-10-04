@@ -11,6 +11,7 @@ const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueu
 const { taskWorkspaceRoot, ensureTaskWorkspace } = require('../lib/task-workspace');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
 const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
+const rewind = require('../lib/session-rewind');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -47,7 +48,7 @@ function fixture(t) {
   const compressionCalls = [];
   let writeGate = null;
   const context = vm.createContext({
-    fs, fsp: { ...fs.promises, async writeFile(...args) {
+    ...rewind, fs, fsp: { ...fs.promises, async writeFile(...args) {
       if (writeGate) { const gate = writeGate; writeGate = null; gate.enter(); await gate.promise; }
       return fs.promises.writeFile(...args);
     } }, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,

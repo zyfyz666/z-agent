@@ -148,8 +148,10 @@ test('preload sends live-guidance and session-model payloads through their dedic
   const payload = request();
   await api.openCodeSteerRun(payload);
   await api.setSessionModel('sess_alpha', { providerId: 'fixture-a', supplierId: 'official', modelId: 'model-a' });
+  await api.setSessionModel('sess_alpha', { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b' }, 3);
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     ['opencode:steer-run', payload],
-    ['session:model-set', { id: 'sess_alpha', modelSelection: { providerId: 'fixture-a', supplierId: 'official', modelId: 'model-a' } }]
+    ['session:model-set', { id: 'sess_alpha', modelSelection: { providerId: 'fixture-a', supplierId: 'official', modelId: 'model-a' }, conversationRevision: 0 }],
+    ['session:model-set', { id: 'sess_alpha', modelSelection: { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b' }, conversationRevision: 3 }]
   ]);
 });

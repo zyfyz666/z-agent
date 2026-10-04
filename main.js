@@ -95,7 +95,9 @@ const { detectVsCode, launchVsCode } = require('./lib/vscode-launcher');
 const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
 const { normalizeObserverSettings } = require('./lib/observer-model');
-const { forkBoundary, createSessionForkRecord, isForkSession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
+const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
+const { sessionConversationRevision, assertConversationRevision, rewindBoundary, createRewindBackup,
+  restoreRewindSnapshot, createRewoundSession } = require('./lib/session-rewind');
 const workspaceSandbox = require('./lib/workspace-sandbox');
 const { classifyDelegatedShellCommand } = require('./lib/shell-command-risk');
 const {
@@ -6980,6 +6982,8 @@ function toSessionSummary(data) {
     parentSessionId: data.parentSessionId || '',
     hasHandoff: !!data.handoff,
     ...(data.forkedFrom ? { forkedFrom: data.forkedFrom } : {}),
+    ...(data.rewindState ? { rewindState: data.rewindState } : {}),
+    conversationRevision: sessionConversationRevision(data),
     pinned: !!data.pinned,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
@@ -7053,14 +7057,83 @@ async function forkSessionRecord(boundary = {}) {
   });
 }
 
-async function persistForkKernelBinding(sessionId, openCodeSessionId) {
+async function persistForkKernelBinding(sessionId, openCodeSessionId, conversationRevision = 0) {
   if (!isSafeSessionId(sessionId) || !String(openCodeSessionId || '').trim()) return;
   return withSessionWrite(sessionId, async () => {
     const stored = await readSessionRecord(sessionId, { sessionLocked: true });
-    if (!isForkSession(stored) || stored.openCodeSessionId === openCodeSessionId) return;
+    assertConversationRevision(stored, conversationRevision);
+    if (!isAuthoritativeHistorySession(stored) || stored.openCodeSessionId === openCodeSessionId) return;
     const updated = { ...stored, openCodeSessionId: String(openCodeSessionId) };
     await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(updated, null, 2));
     await refreshSessionSummaryCache(sessionId, updated);
+  });
+}
+
+const sessionRewindOperations = new Set();
+
+function assertSessionRewindIdle(sessionId) {
+  const pending = Object.values(yanCore?.state?.intents || {}).some(intent =>
+    intent?.threadId === sessionId && ['queued', 'consumed'].includes(intent.status));
+  if (isSessionRunActive(sessionId) || pending || manualContextCompressions.has(sessionId)) {
+    throw Object.assign(new Error('当前对话仍在运行或排队，请结束后再回退。'), { code: 'SESSION_REWIND_BUSY' });
+  }
+}
+
+async function rewindSessionRecord(request = {}, { restore = false } = {}) {
+  const id = String(request.sessionId || '');
+  if (!isSafeSessionId(id)) throw Object.assign(new Error('对话不存在。'), { code: 'SESSION_REWIND_SOURCE_NOT_FOUND' });
+  return withSessionWrite(id, async () => {
+    sessionRewindOperations.add(id);
+    try {
+      assertSessionRewindIdle(id);
+      ensureDirs();
+      // Read the durable full record without migrations or cache mutation. A
+      // failed backup/write must leave the previous conversation untouched.
+      const text = await fsp.readFile(sessionPath(id), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') throw Object.assign(new Error('对话不存在。'), { code: 'SESSION_REWIND_SOURCE_NOT_FOUND' });
+        throw error;
+      });
+      const source = JSON.parse(text);
+      if (source?.id !== id) throw Object.assign(new Error('对话记录 ID 不一致。'), { code: 'SESSION_REWIND_SOURCE_NOT_FOUND' });
+      assertConversationRevision(source, request.conversationRevision);
+      let messages;
+      let modelSelection;
+      if (restore) {
+        const backupId = source.rewindState?.backupSessionId;
+        if (!isSafeSessionId(backupId)) throw Object.assign(new Error('找不到回退前的备份对话。'), { code: 'SESSION_REWIND_BACKUP_NOT_FOUND' });
+        const backupText = await fsp.readFile(sessionPath(backupId), 'utf8').catch(error => {
+          if (error.code === 'ENOENT') throw Object.assign(new Error('回退前的备份对话已经不存在。'), { code: 'SESSION_REWIND_BACKUP_NOT_FOUND' });
+          throw error;
+        });
+        ({ messages, modelSelection } = restoreRewindSnapshot(source, JSON.parse(backupText)));
+      } else messages = rewindBoundary(source, request);
+      Object.assign(source, await ensureTaskWorkspace(source, { root: defaultTasksRoot, dataDirectory: dataDir }));
+      const cfg = loadConfig();
+      const candidates = composerConnections(cfg).flatMap(connection => connection.models.map(model => ({
+        providerId: connection.providerId, supplierId: connection.supplierId, modelId: model.id
+      })));
+      const now = Date.now();
+      const backupSessionId = `sess_${now.toString(36)}${crypto.randomBytes(6).toString('hex')}`;
+      const backup = createRewindBackup(source, { id: backupSessionId, now });
+      const session = createRewoundSession(source, messages, { backupSessionId, now,
+        action: restore ? 'restore' : 'rewind', modelSelection, candidates, defaultSelection: cfg.agentModel });
+      // Commit a separate, independently resumable backup FIRST. Even if the
+      // second atomic rename fails, both the old original and its backup survive.
+      await writeSessionFileAtomic(sessionPath(backupSessionId), JSON.stringify(backup, null, 2));
+      await refreshSessionSummaryCache(backupSessionId, backup);
+      notifyDesktopSessionUpdate({ id: backupSessionId, reason: 'rewind-backup-created', sourceSessionId: id });
+      // Admissions reserve their target before waiting on this same write lock.
+      // Catch any task that arrived while the backup was being written.
+      assertSessionRewindIdle(id);
+      await writeSessionFileAtomic(sessionPath(id), JSON.stringify(session, null, 2));
+      await refreshSessionSummaryCache(id, session);
+      notifyDesktopSessionUpdate({ id, reason: restore ? 'rewind-restored' : 'rewound',
+        backupSessionId, conversationRevision: session.conversationRevision });
+      const { tail, messagesStart } = selectTailMessages(session.messages, 40);
+      return { ok: true, backupSessionId, conversationRevision: session.conversationRevision,
+        session: messagesStart > 0 ? { ...session, messages: tail, totalMessages: session.messages.length,
+          messagesStart, messagesTruncated: true } : session };
+    } finally { sessionRewindOperations.delete(id); }
   });
 }
 
@@ -7252,21 +7325,22 @@ ipcMain.handle('session:get', async (_e, id, options = {}) => {
   return readSessionRecord(id, { messageLimit: options?.messageLimit });
 });
 
-async function setSessionModelRecord(id, requested) {
+async function setSessionModelRecord(id, requested, conversationRevision = 0) {
   if (!isSafeSessionId(id)) return { ok: false, error: '会话 ID 无效', code: 'invalid-session-id' };
   return withSessionWrite(id, async () => {
     const stored = await readSessionRecord(id, { sessionLocked: true });
     if (!stored) return { ok: false, error: '会话不存在', code: 'session-not-found' };
+    assertConversationRevision(stored, conversationRevision);
     const modelSelection = resolveSessionModelSelection(loadConfig(), requested);
     const data = { ...stored, modelSelection, updatedAt: Date.now() };
     await writeSessionFileAtomic(sessionPath(id), JSON.stringify(data, null, 2));
     await refreshSessionSummaryCache(id, data);
-    return { ok: true, id, modelSelection };
+    return { ok: true, id, modelSelection, conversationRevision: sessionConversationRevision(stored) };
   });
 }
 
-ipcMain.handle('session:model-set', async (_e, { id, modelSelection } = {}) => {
-  try { return await setSessionModelRecord(id, modelSelection); }
+ipcMain.handle('session:model-set', async (_e, { id, modelSelection, conversationRevision } = {}) => {
+  try { return await setSessionModelRecord(id, modelSelection, conversationRevision); }
   catch (error) { return { ok: false, error: error.message, code: error.code || 'session-model-save-failed' }; }
 });
 
@@ -7319,6 +7393,16 @@ ipcMain.handle('session:fork', async (_e, boundary = {}) => {
   catch (error) { return { ok: false, error: error.message, code: error.code || 'SESSION_FORK_FAILED' }; }
 });
 
+ipcMain.handle('session:rewind', async (_e, request = {}) => {
+  try { return await rewindSessionRecord(request); }
+  catch (error) { return { ok: false, error: error.message, code: error.code || 'SESSION_REWIND_FAILED' }; }
+});
+
+ipcMain.handle('session:rewind-restore', async (_e, request = {}) => {
+  try { return await rewindSessionRecord(request, { restore: true }); }
+  catch (error) { return { ok: false, error: error.message, code: error.code || 'SESSION_REWIND_FAILED' }; }
+});
+
 // Session JSON is the only durable copy of the conversation. Write to a
 // temporary file and rename so a crash mid-write cannot truncate it.
 // 保存/改名/置顶等写操作后,顺手刷新摘要缓存,
@@ -7333,13 +7417,14 @@ async function refreshSessionSummaryCache(id, data) {
 }
 
 async function writeSessionFileAtomic(filePath, content) {
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  await fsp.writeFile(temporary, content);
+  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   try {
+    await fsp.writeFile(temporary, content, { flag: 'wx' });
     await fsp.rename(temporary, filePath);
-  } catch {
-    await fsp.copyFile(temporary, filePath);
-    await fsp.rm(temporary, { force: true });
+  } finally {
+    // Never fall back to copying over the sole durable record: a failed copy
+    // can truncate it. Failed renames leave the existing destination intact.
+    await fsp.rm(temporary, { force: true }).catch(() => {});
   }
 }
 
@@ -7350,6 +7435,8 @@ ipcMain.handle('session:save', async (_e, session) => {
   return withSessionWrite(session.id, async () => {
     ensureDirs();
     const stored = await readSessionRecord(session.id, { sessionLocked: true });
+    try { assertConversationRevision(stored, session.conversationRevision); }
+    catch (error) { return { ok: false, error: error.message, code: error.code }; }
     // The renderer may hold only the newest slice of the conversation (loaded
     // through session:get with a message limit). Re-attach the older messages
     // from the stored record so a tail save can never truncate the history.
@@ -7368,6 +7455,7 @@ ipcMain.handle('session:save', async (_e, session) => {
       }
     }
     persisted = preserveForkAuthority(stored, persisted);
+    persisted.conversationRevision = sessionConversationRevision(stored);
     Object.assign(persisted, await ensureTaskWorkspace(persisted, {
       root: defaultTasksRoot, dataDirectory: dataDir, previousSession: stored
     }));
@@ -9399,6 +9487,8 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     if (request.yanSessionId && !authoritativeSession && request.utility !== true) {
       throw Object.assign(new Error('会话不存在，请重新打开对话。'), { code: 'session-not-found' });
     }
+    assertConversationRevision(authoritativeSession, request.conversationRevision);
+    request.conversationRevision = sessionConversationRevision(authoritativeSession);
     delete request.forkHistory;
     const forkContext = forkRunContext(authoritativeSession, request);
     if (forkContext) Object.assign(request, forkContext);
@@ -9694,7 +9784,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     let forkBindingWrite = Promise.resolve();
     const recordForkBinding = nativeId => {
       if (!forkContext || !nativeId) return forkBindingWrite;
-      forkBindingWrite = forkBindingWrite.then(() => persistForkKernelBinding(yanSessionId, nativeId))
+      forkBindingWrite = forkBindingWrite.then(() => persistForkKernelBinding(yanSessionId, nativeId, request.conversationRevision))
         .catch(error => console.warn('[session-fork] Kernel binding could not be saved:', error?.message || error));
       return forkBindingWrite;
     };
@@ -10030,31 +10120,51 @@ ipcMain.handle('yan:core-state', (_e, payload = {}) => {
   }
 });
 
-ipcMain.handle('yan:core-enqueue-intent', (_e, payload = {}) => {
+ipcMain.handle('yan:core-enqueue-intent', async (_e, payload = {}) => {
+  const id = String(payload.threadId || '');
+  if (sessionRewindOperations.has(id)) {
+    return { ok: false, error: '对话正在回退或恢复，请稍后再发送。', code: 'SESSION_REWIND_BUSY' };
+  }
   try {
-    return { ok: true, intent: yanCore.enqueueIntent(payload) };
+    return await withSessionWrite(id, async () => {
+      const stored = isSafeSessionId(id) ? await readSessionRecord(id, { sessionLocked: true }) : null;
+      if (isSafeSessionId(id) && !stored) return { ok: false, error: '会话不存在。', code: 'session-not-found' };
+      assertConversationRevision(stored, payload.conversationRevision);
+      const existing = yanCore.state?.intents?.[String(payload.intentId || '')];
+      if (existing) {
+        if (existing.threadId !== id) return { ok: false, error: '排队请求属于另一对话。', code: 'SESSION_REVISION_CHANGED' };
+        assertConversationRevision(stored, existing.intent?.conversationRevision);
+      }
+      const intent = { ...(payload.intent || {}), conversationRevision: sessionConversationRevision(stored) };
+      return { ok: true, intent: yanCore.enqueueIntent({ ...payload, intent }) };
+    });
   } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
+    return { ok: false, error: error?.message || String(error), code: error?.code };
   }
 });
 
-ipcMain.handle('yan:core-consume-intent', (_e, intentId) => {
+async function mutateSessionIntent(intentId, method) {
+  const id = String(intentId || '');
+  const record = yanCore.state?.intents?.[id];
+  if (!record) return { ok: false, error: '排队请求不存在或已处理。' };
+  const threadId = String(record.threadId || '');
+  if (sessionRewindOperations.has(threadId)) return { ok: false, error: '对话正在回退或恢复。', code: 'SESSION_REWIND_BUSY' };
   try {
-    const intent = yanCore.consumeIntent(intentId);
-    return intent ? { ok: true, intent } : { ok: false, error: '排队请求不存在或已处理。' };
+    return await withSessionWrite(threadId, async () => {
+      const stored = isSafeSessionId(threadId) ? await readSessionRecord(threadId, { sessionLocked: true }) : null;
+      if (isSafeSessionId(threadId) && !stored) return { ok: false, error: '会话不存在。', code: 'session-not-found' };
+      assertConversationRevision(stored, record.intent?.conversationRevision);
+      const intent = yanCore[method](id);
+      return intent ? { ok: true, intent } : { ok: false, error: '排队请求不存在或已处理。' };
+    });
   } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
+    return { ok: false, error: error?.message || String(error), code: error?.code };
   }
-});
+}
 
-ipcMain.handle('yan:core-requeue-intent', (_e, intentId) => {
-  try {
-    const intent = yanCore.requeueIntent(intentId);
-    return intent ? { ok: true, intent } : { ok: false, error: '排队请求不存在。' };
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
-  }
-});
+ipcMain.handle('yan:core-consume-intent', (_e, intentId) => mutateSessionIntent(intentId, 'consumeIntent'));
+
+ipcMain.handle('yan:core-requeue-intent', (_e, intentId) => mutateSessionIntent(intentId, 'requeueIntent'));
 
 ipcMain.handle('yan:core-ack-intent', (_e, intentId) => {
   try {

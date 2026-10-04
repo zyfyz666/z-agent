@@ -28,7 +28,8 @@ function fixture() {
   const entered = new Promise(resolve => { saveEntered = resolve; });
   let composerText = 'Preserve the initial API signatures.';
   const context = vm.createContext({
-    structuredClone, console, AbortController,
+    structuredClone, console, AbortController, sessionRewindRequests: new Map(),
+    messageForkAnchor: async message => `anchor:${message.content}`,
     state: { currentSession: a, config: {}, activeRuns: new Map(), attachments: [], selectedSkills: [], selectedSubagents: [] },
     api: {
       async saveSession(payload) {
@@ -81,6 +82,25 @@ function fixture() {
     + 'return runOpenCodeLoop(runSession, null, runCtx);\n}', context);
   return { context, a, b, prior, entered, releaseSave, starts, guidance, saves };
 }
+
+test('rewound conversations send their revision and a frozen request boundary when starting the kernel', async () => {
+  const f = fixture();
+  f.a.conversationRevision = 3;
+  f.a.contextReset = { kind: 'rewind' };
+  f.context.messageForkAnchor = async message => {
+    f.a.conversationRevision = 4; // A later metadata refresh cannot relabel an old prompt.
+    return `anchor:${message.content}`;
+  };
+  const pending = f.context.submitMessage('Continue from the rewind.', [], [], { session: f.a });
+  await f.entered;
+  f.releaseSave();
+  await pending;
+  assert.equal(f.starts.length, 1);
+  assert.equal(f.starts[0].conversationRevision, 3);
+  assert.equal(f.starts[0].requestMessageIndex, 2);
+  assert.equal(f.starts[0].requestMessageAnchor, 'anchor:Continue from the rewind.');
+  assert.equal(f.saves[0].conversationRevision, 3);
+});
 
 for (const switchConversation of [false, true]) {
   test(`guidance during the first save cannot replace the initiating prompt, attachments, skills, or history${switchConversation ? ' after switching conversations' : ''}`, async () => {

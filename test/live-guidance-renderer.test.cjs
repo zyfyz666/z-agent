@@ -34,6 +34,7 @@ function fixture() {
   let sequence = 0;
   let queued = 0;
   const context = {
+    sessionRewindRequests: new Map(), refreshSessionForkActions() {},
     state: { currentSession: a, activeRuns: new Map([['A', { runCtx, sessionRef: a }]]),
       attachments: [], selectedSkills: [], selectedSubagents: [] },
     input: { get value() { return drafts[context.state.currentSession.id]; } },

@@ -281,6 +281,12 @@
           <span class="session-fork-files">共享当前文件；不会回滚文件</span>
         </div>
 
+        <div id="sessionRewindState" class="session-rewind-state hidden" aria-label="对话回退">
+          <span id="sessionRewindLabel">已回退对话；当前文件不变</span>
+          <button id="sessionRewindRestoreBtn" class="session-rewind-action" type="button">恢复回退前</button>
+          <button id="sessionRewindBackupBtn" class="session-rewind-action" type="button">查看回退前记录</button>
+        </div>
+
         <div id="browserFocusConversationDock" class="browser-focus-conversation-dock collapsed">
           <div class="browser-focus-conversation-surface conversation-preview-shell">
             <button id="browserFocusChatToggle" class="browser-focus-chat-toggle conversation-preview-row" type="button" aria-expanded="false" aria-controls="chatScroll">

@@ -2,6 +2,34 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installYanI18n(global) {
   const ZH_EN = Object.freeze({
+    '回退到这里': 'Rewind to here', '对话回退': 'Conversation rewind',
+    '回退对话': 'Rewind conversation', '恢复对话': 'Restore conversation', '撤回并编辑': 'Rewind and edit',
+    '回退到这里；保留这条消息，当前文件不变': 'Rewind through this message; current files stay unchanged',
+    '撤回重写；后续对话会备份，当前文件不变': 'Rewind and rewrite; later messages are backed up and files stay unchanged',
+    '正在更新对话历史，请稍后': 'Updating conversation history. Please wait.',
+    '请先打开对话': 'Open a conversation first',
+    '任务执行中，结束后可回退对话': 'Wait for this task to finish before rewinding',
+    '此对话有排队消息，请先处理后再回退': 'Resolve queued messages before rewinding this conversation',
+    '正在保存对话，请稍后再回退': 'Saving conversation. Please wait before rewinding.',
+    '请重启 Z 后使用对话回退': 'Restart Z to use conversation rewind',
+    '等待这条消息完成后再回退': 'Wait for this message to finish before rewinding',
+    '消息保存后可回退': 'Available after this message is saved',
+    '已回退对话；当前文件不变': 'Conversation rewound; current files unchanged',
+    '已恢复对话；当前文件不变': 'Conversation restored; current files unchanged',
+    '恢复回退前': 'Restore before rewind', '查看回退前记录': 'View history before rewind',
+    '恢复上一个对话状态': 'Restore previous conversation state', '查看上一个对话状态': 'View previous conversation state',
+    '恢复备份中的对话记录，当前文件不变': 'Restore the conversation backup; current files stay unchanged',
+    '对话回退失败，请重试': 'Could not rewind conversation. Try again.',
+    '恢复对话失败，请重试': 'Could not restore conversation. Try again.',
+    '对话历史已更新，可从任务列表重新打开': 'Conversation history updated. Reopen it from the task list.',
+    '将所选消息放回输入框，并回退到它之前。当前对话会先备份，可恢复；项目文件保持不变。': 'Return this message to the composer and rewind to before it. The current conversation will be backed up for recovery; project files stay unchanged.',
+    '对话已变化，请重新选择回退位置': 'Conversation changed. Select the rewind point again.',
+    '对话历史已变化，旧排队消息未发送': 'Conversation history changed; the older queued message was not sent',
+    '已撤回，可编辑后重发；当前文件不变': 'Rewound. Edit and resend; current files stay unchanged.',
+    '已回退对话，后续记录已备份；当前文件不变': 'Conversation rewound with later history backed up; current files unchanged',
+    '恢复备份中的对话记录。当前对话也会先备份，项目文件保持不变。': 'Restore the conversation backup. The current conversation will also be backed up; project files stay unchanged.',
+    '回退前的备份已不存在，当前对话仍可继续': 'The rewind backup is no longer available. You can continue this conversation.',
+    '无法打开对话备份，请重试': 'Could not open the conversation backup. Try again.',
     '从这里创建分支': 'Branch conversation from here',
     '从这里创建分支；共享当前文件，不会回滚文件': 'Branch conversation from here; uses current files without rolling them back',
     '对话分支来源': 'Conversation branch source', '分支来自': 'Branched from',
@@ -377,6 +405,8 @@
     if (normalize(target) !== 'en' || !/[\u3400-\u9fff]/u.test(source)) return source;
     const exact = ZH_EN[source.trim()];
     if (exact) return source.replace(source.trim(), exact);
+    const rewindConfirmation = source.match(/^保留到第 (\d+) 条消息（含这条）。后续对话会备份，可恢复；项目文件保持不变。$/u);
+    if (rewindConfirmation) return `Keep through message ${rewindConfirmation[1]}, inclusive. Later conversation history will be backed up for recovery; project files stay unchanged.`;
     const modelChecks = source.match(/^模型检查 (\d+) 次$/u);
     if (modelChecks) return `Model reviews: ${modelChecks[1]}`;
     const modelPhase = source.match(/^(.+) · (等待动作|正在判断|已完成判断|规则模式继续工作|本轮已结束)$/u);

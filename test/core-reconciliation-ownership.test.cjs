@@ -39,6 +39,7 @@ function fixture(blockedPhase) {
   let sequence = 0;
   let summaryCount = 0;
   const context = vm.createContext({
+    sessionRewindRequests: new Map(),
     console: { log: noop }, window: {},
     state: { currentSession: null, config: {}, sessions: [session], queuedTurns: new Map(), activeRuns: new Map() },
     normalizeSkillCalls: value => value,

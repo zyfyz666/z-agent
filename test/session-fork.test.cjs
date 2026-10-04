@@ -8,6 +8,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
 const fork = require('../lib/session-fork');
+const rewind = require('../lib/session-rewind');
 const { createSessionWriteQueue, sessionModelSnapshot, inferSessionModelSelection } = require('../lib/session-model');
 const { ensureTaskWorkspace, defaultTaskWorkspace } = require('../lib/task-workspace');
 
@@ -50,7 +51,7 @@ function fixture(t, { defaultWorkspace = false, count = 112 } = {}) {
   const notifications = [];
   const config = { agentModel: model('default') };
   const context = vm.createContext({
-    ...fork, fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, console,
+    ...fork, ...rewind, fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, console,
     defaultTasksRoot, dataDir: root, ensureTaskWorkspace, withSessionWrite: createSessionWriteQueue(),
     sessionModelSnapshot,
     initialSessionModelSelection: session => inferSessionModelSelection(session, config.agentModel),

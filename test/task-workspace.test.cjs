@@ -15,6 +15,7 @@ const { findReusableBlankSession } = require('../lib/session-policy');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
 const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
+const rewind = require('../lib/session-rewind');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -36,7 +37,7 @@ function fixture(t) {
   const events = [];
   const activations = [];
   const context = vm.createContext({
-    fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
+    ...rewind, fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
     loadConfig: () => ({ agentModel: { providerId: '', supplierId: '', modelId: '', modelType: 'text' } }),

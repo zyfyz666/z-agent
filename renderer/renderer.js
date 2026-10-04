@@ -1518,9 +1518,12 @@ async function hydrateQueuedTurns() {
       const intent = record.intent && typeof record.intent === 'object' ? record.intent : {};
       const session = state.sessions.find(item => String(item.id) === String(record.threadId));
       if (!session || state.queuedTurns.has(String(record.threadId))) continue;
+      const conversationRevision = Number(record.conversationRevision ?? intent.conversationRevision) || 0;
+      if (conversationRevision !== (Number(session.conversationRevision) || 0)) continue;
       state.queuedTurns.set(String(record.threadId), {
         id: String(record.id),
         sessionRef: session,
+        conversationRevision,
         text: String(intent.prompt || ''),
         attachments: Array.isArray(intent.attachments) ? intent.attachments.map(item => ({ ...item })) : [],
         skillCalls: Array.isArray(intent.skillCalls) ? intent.skillCalls.map(item => ({ ...item })) : [],
@@ -2366,8 +2369,12 @@ async function saveCurrentSession(session = state.currentSession) {
   const previous = sessionSaveQueues.get(session.id) || Promise.resolve();
   const pending = previous.catch(() => {}).then(() => persistCurrentSession(session));
   sessionSaveQueues.set(session.id, pending);
+  refreshSessionForkActions(session);
   try { return await pending; }
-  finally { if (sessionSaveQueues.get(session.id) === pending) sessionSaveQueues.delete(session.id); }
+  finally {
+    if (sessionSaveQueues.get(session.id) === pending) sessionSaveQueues.delete(session.id);
+    refreshSessionForkActions(session);
+  }
 }
 
 async function persistCurrentSession(session) {
@@ -2409,7 +2416,10 @@ function displaySessionTitle(title) {
 // stable reference while older pages or a running reply are being added.
 const sessionForkSavedMessages = new WeakSet();
 const sessionForkRequests = new Map();
+const sessionRewindRequests = new Map();
+let sessionRewindActionSignature = '';
 const SESSION_FORK_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 14H7l-4 4V4h14v5"/><path d="M14 12h7v7h-4l-3 3z"/></svg>';
+const SESSION_REWIND_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 3 8M3 4v7h7"/><path d="M12 7v5l3 2"/></svg>';
 
 function markSessionForkMessagesSaved(messages) {
   for (const message of Array.isArray(messages) ? messages : []) {
@@ -2441,6 +2451,7 @@ function sessionMessageForElement(element, session = state.currentSession) {
 
 function sessionForkDisabledReason(session, target) {
   if (typeof api.forkSession !== 'function') return '请重启 Z 后使用对话分支';
+  if (sessionRewindRequests.has(session?.id)) return '正在更新对话历史，请稍后';
   if (sessionForkRequests.has(session?.id)) return '正在创建对话分支…';
   if (sessionHistoryLoads.has(session)) return '正在加载历史消息，请稍后';
   const message = target?.message;
@@ -2478,12 +2489,230 @@ function syncMessageForkAction(element) {
   button.title = reason || '从这里创建分支；共享当前文件，不会回滚文件';
   button.setAttribute('aria-label', '从这里创建分支');
   button.setAttribute('aria-busy', String(sessionForkRequests.has(state.currentSession?.id)));
+  syncMessageRewindAction(element, target);
 }
 
 function refreshSessionForkActions(session = state.currentSession) {
   if (state.currentSession !== session) return;
   $$('#messages .msg').forEach(syncMessageForkAction);
+  renderSessionRewindState();
 }
+
+function sessionRewindBusyReason(session, { ignoreRequest = false } = {}) {
+  if (!session?.id) return '请先打开对话';
+  if (!ignoreRequest && sessionRewindRequests.has(session.id)) return '正在更新对话历史，请稍后';
+  if (isSessionExecutionActive(session.id)) return '任务执行中，结束后可回退对话';
+  if (state.queuedTurns.has(String(session.id))) return '此对话有排队消息，请先处理后再回退';
+  if (sessionSaveQueues.has(session.id)) return '正在保存对话，请稍后再回退';
+  if (sessionHistoryLoads.has(session)) return '正在加载历史消息，请稍后';
+  if (sessionForkRequests.has(session.id)) return '正在创建对话分支…';
+  return '';
+}
+
+function sessionRewindDisabledReason(session, target, options) {
+  if (typeof api.rewindSession !== 'function') return '请重启 Z 后使用对话回退';
+  const busy = sessionRewindBusyReason(session, options);
+  if (busy) return busy;
+  const message = target?.message;
+  if (!message || !['user', 'assistant'].includes(message.role)
+      || message.streaming === true || message.pending === true
+      || ['running', 'working', 'pending', 'waiting', 'queued', 'thinking'].includes(message.agentRun?.status)) {
+    return '等待这条消息完成后再回退';
+  }
+  if (!sessionForkSavedMessages.has(message)) return '消息保存后可回退';
+  return '';
+}
+
+function syncMessageRewindAction(element, target = sessionMessageForElement(element)) {
+  const actions = element?.querySelector(':scope > .msg-actions');
+  if (!actions) return;
+  let button = actions.querySelector('[data-act="rewind"]');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'msg-action-btn msg-rewind-btn';
+    button.dataset.act = 'rewind';
+    button.innerHTML = SESSION_REWIND_ICON;
+    button.addEventListener('click', () => { void rewindSessionFromMessage(element); });
+    actions.appendChild(button);
+  }
+  const reason = sessionRewindDisabledReason(state.currentSession, target);
+  button.disabled = !!reason;
+  button.title = reason || '回退到这里；保留这条消息，当前文件不变';
+  button.setAttribute('aria-label', '回退到这里');
+  button.setAttribute('aria-busy', String(sessionRewindRequests.has(state.currentSession?.id)));
+  const edit = actions.querySelector('[data-act="edit"]');
+  if (edit) {
+    edit.disabled = !!reason;
+    edit.title = reason || '撤回重写；后续对话会备份，当前文件不变';
+  }
+}
+
+function refreshSessionRewindActions() {
+  const session = state.currentSession;
+  const signature = JSON.stringify([session?.id, session?.conversationRevision, session?.messagesStart,
+    session?.messages?.length, sessionRewindBusyReason(session)]);
+  // updateSendState also runs on every composer keystroke. Message actions
+  // only need a sweep when the history or its mutability actually changed.
+  if (signature === sessionRewindActionSignature) return;
+  sessionRewindActionSignature = signature;
+  $$('#messages .msg').forEach(element => syncMessageRewindAction(element));
+  renderSessionRewindState();
+}
+
+function renderSessionRewindState() {
+  const bar = $('#sessionRewindState');
+  if (!bar) return;
+  const session = state.currentSession;
+  const visible = !!session?.rewindState?.backupSessionId && !observerPendingSessionId;
+  bar.classList.toggle('hidden', !visible);
+  if (!visible) return;
+  const restored = session.rewindState.action === 'restore';
+  $('#sessionRewindLabel').textContent = restored ? '已恢复对话；当前文件不变' : '已回退对话；当前文件不变';
+  const restore = $('#sessionRewindRestoreBtn');
+  const reason = typeof api.restoreSessionRewind !== 'function' ? '请重启 Z 后使用对话回退' : sessionRewindBusyReason(session);
+  restore.textContent = restored ? '恢复上一个对话状态' : '恢复回退前';
+  restore.disabled = !!reason;
+  restore.title = reason || '恢复备份中的对话记录，当前文件不变';
+  const backup = $('#sessionRewindBackupBtn');
+  backup.textContent = restored ? '查看上一个对话状态' : '查看回退前记录';
+  backup.dataset.sessionId = session.rewindState.backupSessionId;
+}
+
+function clearSessionRewindUiHistory(sessionId) {
+  observerHistorySelection.delete(sessionId);
+  interjectionThreads.delete(sessionId);
+  pendingAgentHandoffs.delete(sessionId);
+  sessionModelSelectionVersions.set(sessionId, (sessionModelSelectionVersions.get(sessionId) || 0) + 1);
+}
+
+async function applySessionRewindResult(result, source, loadToken, { editMessage = null } = {}) {
+  if (result?.ok === false || result?.session?.id !== source.id) throw new Error(result?.error || '对话回退失败，请重试');
+  clearSessionRewindUiHistory(source.id);
+  try { await refreshSessions(); } catch (error) { console.warn('[session-rewind] list refresh failed:', error); }
+  // The old object deliberately keeps its old revision. Any delayed save or
+  // submission using it must be rejected by the main process, never promoted
+  // into the new history. A fresh load also replaces native-context caches.
+  if (loadToken === sessionLoadToken && state.currentSession?.id === source.id) {
+    const resumeToken = sessionLoadToken + 1;
+    await loadSession(source.id);
+    if (editMessage && sessionLoadToken === resumeToken && state.currentSession !== source
+        && state.currentSession?.id === source.id && !observerPendingSessionId) {
+      captureComposerDraftForSession(source.id);
+      const oldDraft = state.composerDrafts.get(source.id);
+      if (oldDraft && result.backupSessionId && !state.composerDrafts.has(result.backupSessionId)) {
+        state.composerDrafts.set(result.backupSessionId, oldDraft);
+      }
+      setComposerText(editMessage.content || '', { preserveSkills: false });
+      const skills = normalizeSkillCalls(editMessage.skillCalls || editMessage.skillCall).map(skill =>
+        installedSkillPickerItems().find(item => item.id === skill.id) || skill);
+      setComposerSkills(skills);
+      setComposerSubagents(editMessage.subagentRoles || editMessage.subagents || []);
+      state.attachments = (editMessage.attachments || []).map(item => ({ ...item }));
+      renderAttachments();
+      autoGrow();
+      captureComposerDraftForSession(source.id);
+      input.focus({ preventScroll: true });
+      setComposerCaretByTextOffset(getComposerText().length);
+    }
+  } else {
+    toast('对话历史已更新，可从任务列表重新打开');
+  }
+  return result.session;
+}
+
+async function rewindSessionFromMessage(element, { edit = false } = {}) {
+  const session = state.currentSession;
+  const target = sessionMessageForElement(element, session);
+  if (!session || !target || !element.isConnected) return null;
+  const reason = sessionRewindDisabledReason(session, target);
+  if (reason) { toast(reason); return null; }
+  if (edit && target.message.role !== 'user') return null;
+  const loadToken = sessionLoadToken;
+  const anchorText = messageForkAnchorText(target.message);
+  const conversationRevision = Number(session.conversationRevision) || 0;
+  const operation = {};
+  sessionRewindRequests.set(session.id, operation);
+  refreshSessionForkActions(session);
+  updateSendState();
+  try {
+    const confirmed = await requestGenericConfirmation({
+      title: edit ? '撤回重写' : '回退对话',
+      description: edit
+        ? '将所选消息放回输入框，并回退到它之前。当前对话会先备份，可恢复；项目文件保持不变。'
+        : `保留到第 ${target.messageIndex + 1} 条消息（含这条）。后续对话会备份，可恢复；项目文件保持不变。`,
+      confirmLabel: edit ? '撤回并编辑' : '回退到这里'
+    });
+    if (!confirmed) return null;
+    if (loadToken !== sessionLoadToken || state.currentSession !== session) return null;
+    const changed = sessionRewindDisabledReason(session, target, { ignoreRequest: true });
+    if (changed) throw new Error(changed);
+    const localIndex = session.messages.indexOf(target.message);
+    if (localIndex < 0 || localIndex + (Number(session.messagesStart) || 0) !== target.messageIndex
+        || messageForkAnchorText(target.message) !== anchorText
+        || (Number(session.conversationRevision) || 0) !== conversationRevision) {
+      throw new Error('对话已变化，请重新选择回退位置');
+    }
+    const messageAnchor = await messageForkAnchor(target.message);
+    const result = await api.rewindSession({
+      sessionId: session.id, messageIndex: target.messageIndex, messageAnchor, conversationRevision,
+      ...(edit ? { includeSelected: false } : {})
+    });
+    const updated = await applySessionRewindResult(result, session, loadToken, { editMessage: edit ? target.message : null });
+    toast(edit ? '已撤回，可编辑后重发；当前文件不变' : '已回退对话，后续记录已备份；当前文件不变');
+    return updated;
+  } catch (error) { toast(error?.message || '对话回退失败，请重试'); return null; }
+  finally {
+    if (sessionRewindRequests.get(session.id) === operation) sessionRewindRequests.delete(session.id);
+    refreshSessionForkActions();
+    updateSendState();
+  }
+}
+
+async function restoreSessionRewind() {
+  const session = state.currentSession;
+  if (!session?.rewindState?.backupSessionId) return null;
+  const reason = typeof api.restoreSessionRewind !== 'function' ? '请重启 Z 后使用对话回退' : sessionRewindBusyReason(session);
+  if (reason) { toast(reason); return null; }
+  const loadToken = sessionLoadToken;
+  const conversationRevision = Number(session.conversationRevision) || 0;
+  const operation = {};
+  sessionRewindRequests.set(session.id, operation);
+  refreshSessionForkActions(session);
+  updateSendState();
+  try {
+    const confirmed = await requestGenericConfirmation({
+      title: '恢复对话', description: '恢复备份中的对话记录。当前对话也会先备份，项目文件保持不变。', confirmLabel: '恢复对话'
+    });
+    if (!confirmed || loadToken !== sessionLoadToken || state.currentSession !== session) return null;
+    const changed = sessionRewindBusyReason(session, { ignoreRequest: true });
+    if (changed) throw new Error(changed);
+    const result = await api.restoreSessionRewind({ sessionId: session.id, conversationRevision });
+    const restored = await applySessionRewindResult(result, session, loadToken);
+    toast('已恢复对话；当前文件不变');
+    return restored;
+  } catch (error) { toast(error?.message || '恢复对话失败，请重试'); return null; }
+  finally {
+    if (sessionRewindRequests.get(session.id) === operation) sessionRewindRequests.delete(session.id);
+    refreshSessionForkActions();
+    updateSendState();
+  }
+}
+
+async function openSessionRewindBackup() {
+  const backupId = state.currentSession?.rewindState?.backupSessionId;
+  if (!backupId) return;
+  const loadToken = sessionLoadToken;
+  try {
+    const backup = await api.getSession(backupId, { messageLimit: 1 });
+    if (loadToken !== sessionLoadToken) return;
+    if (!backup) { toast('回退前的备份已不存在，当前对话仍可继续'); return; }
+    await loadSession(backupId);
+  } catch { if (loadToken === sessionLoadToken) toast('无法打开对话备份，请重试'); }
+}
+
+$('#sessionRewindRestoreBtn')?.addEventListener('click', () => { void restoreSessionRewind(); });
+$('#sessionRewindBackupBtn')?.addEventListener('click', () => { void openSessionRewindBackup(); });
 
 async function forkSessionFromMessage(element) {
   const session = state.currentSession;
@@ -2620,6 +2849,7 @@ function clearMessages() {
   historyPrependToken++;
   $('#messages').innerHTML = '';
   renderSessionForkOrigin();
+  renderSessionRewindState();
   invalidateConversationTurns();
   renderTurnScaleNavigation();
 }
@@ -2631,6 +2861,7 @@ function showSessionLoading(label = '正在打开任务…') {
   stopSessionEntryFollow?.();
   historyPrependToken++;
   $('#sessionForkOrigin')?.classList.add('hidden');
+  $('#sessionRewindState')?.classList.add('hidden');
   const wrap = $('#messages');
   if (!wrap) return;
   wrap.innerHTML = `<div class="session-loading" role="status" aria-live="polite"><span class="session-loading-spinner" aria-hidden="true"></span><span class="session-loading-label">${escapeHtml(label)}</span></div>`;
@@ -5104,9 +5335,9 @@ function formatHandledDuration(ms) {
 
 async function handleMessageAction(action, el) {
   if (action === 'fork') return forkSessionFromMessage(el);
+  if (action === 'rewind') return rewindSessionFromMessage(el);
+  if (action === 'edit') return rewindSessionFromMessage(el, { edit: true });
   const target = sessionMessageForElement(el);
-  const msgIndex = target?.index ?? -1;
-  const msgs = state.currentSession?.messages || [];
   const msg = target?.message;
   if (action === 'speak') {
     toggleMessageSpeech(el, el.querySelector('[data-act="speak"]'));
@@ -5123,29 +5354,6 @@ async function handleMessageAction(action, el) {
       await navigator.clipboard.writeText(msg.content || '');
       toast('已复制到剪贴板');
     } catch { toast('复制失败'); }
-  } else if (action === 'edit') {
-    // 撤回重写：把内容填回输入框，删除该消息及之后所有消息
-    input.value = msg.content || '';
-    const restoredSkills = normalizeSkillCalls(msg.skillCalls || msg.skillCall).map(skill =>
-      installedSkillPickerItems().find(item => item.id === skill.id) || skill
-    );
-    setComposerSkills(restoredSkills);
-    setComposerSubagents(msg.subagentRoles || msg.subagents || []);
-    msgs.splice(msgIndex);
-    let found = false;
-    $$('#messages .msg').forEach(m => {
-      if (found) m.remove();
-      if (m === el) { found = true; m.remove(); }
-    });
-    await saveCurrentSession();
-    if (msgs.length === 0) setEmptyState(true);
-    renderTurnScaleNavigation();
-    autoGrow();
-    updateSendState();
-    input.focus();
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
-    toast('已撤回，可编辑后重发');
   } else if (action === 'rollback') {
     await rollbackMessageRun(msg, el);
   }
@@ -6323,7 +6531,7 @@ function updateSendState(composerText = getComposerText()) {
     stopping: !!runCtx?.shouldAbort,
     queueing: !!runCtx && hasPayload && needsQueuedTurn,
     steering: !!runCtx && hasText && !needsQueuedTurn,
-    sendDisabled: !!promptOptimizationRun || !hasPayload,
+    sendDisabled: !!promptOptimizationRun || !hasPayload || sessionRewindRequests.has(state.currentSession?.id),
     sendTitle: '发送',
     queueTitle: state.queuedTurns.has(String(state.currentSession?.id || '')) ? '更新排队对话' : '排队发送',
     stopTitle: '中止任务'
@@ -6342,6 +6550,7 @@ function updateSendState(composerText = getComposerText()) {
   updatePromptOptimizerButton(composerText, hasText);
   syncBrowserFocusPromptStatus();
   $('#app')?.classList.toggle('agent-busy', state.activeRuns.size > 0);
+  refreshSessionRewindActions();
 }
 
 sendBtn.addEventListener('click', () => {
@@ -6489,6 +6698,7 @@ function queueCurrentComposerTurn() {
   const queuedTurn = {
     id: queuedId,
     sessionRef: state.currentSession,
+    conversationRevision: Number(state.currentSession.conversationRevision) || 0,
     text,
     attachments,
     skillCalls,
@@ -6500,7 +6710,9 @@ function queueCurrentComposerTurn() {
   void invokeYanCore('yanCoreEnqueueIntent', {
     threadId: sessionId,
     intentId: queuedId,
+    conversationRevision: queuedTurn.conversationRevision,
     intent: {
+      conversationRevision: queuedTurn.conversationRevision,
       prompt: text,
       attachments,
       skillCalls,
@@ -6510,6 +6722,10 @@ function queueCurrentComposerTurn() {
       workMode: modelSelection.modelType || 'text',
     }
   }).then(result => {
+    if (result?.code === 'SESSION_REVISION_CHANGED' && state.queuedTurns.get(sessionId) === queuedTurn) {
+      state.queuedTurns.delete(sessionId);
+      if (state.currentSession?.id === sessionId) { syncQueuedTurnUi(); updateSendState(); }
+    }
     if (!result?.ok) console.warn('[yan-core] queued intent persistence failed:', result?.error || 'unknown error');
   }).catch(error => console.warn('[yan-core] queued intent persistence failed:', error));
   clearComposerPayload();
@@ -7237,6 +7453,7 @@ async function selectSessionTextModel(selection, session = state.currentSession)
   const target = session || await newSession();
   if (!target?.id) throw new Error('没有可用会话');
   const sessionId = String(target.id);
+  const conversationRevision = Number(target.conversationRevision) || 0;
   const version = (sessionModelSelectionVersions.get(sessionId) || 0) + 1;
   sessionModelSelectionVersions.set(sessionId, version);
   const requested = normalizeModelSelectionSnapshot({
@@ -7244,7 +7461,7 @@ async function selectSessionTextModel(selection, session = state.currentSession)
     modelId: selection.modelId || selection.id,
     modelType: 'text'
   });
-  const result = await api.setSessionModel(sessionId, requested);
+  const result = await api.setSessionModel(sessionId, requested, conversationRevision);
   if (!result?.ok || result.id !== sessionId || !result.modelSelection) {
     throw new Error(result?.error || '对话模型保存失败');
   }
@@ -7976,6 +8193,7 @@ composer.addEventListener('drop', async (e) => {
 // Send message
 // ============================================================
 async function sendMessage() {
+  if (sessionRewindRequests.has(state.currentSession?.id)) { toast('正在更新对话历史，请稍后'); return; }
   const text = input.value.trim();
   syncComposerSkillsFromDom();
   syncComposerSubagentsFromDom();
@@ -8008,6 +8226,7 @@ async function submitMediaMessage(text, attachments = [], modelSelection = {}, o
   const session = options.session || state.currentSession;
   if (!session) return { ok: false, error: '没有可用会话' };
   await ensureFullSessionLoaded(session);
+  if (sessionRewindRequests.has(session.id)) return { ok: false, error: 'busy' };
   const intentId = String(options.intentId || '').trim();
   const persistedSubmission = findPersistedIntentSubmission(session, intentId);
   const effectiveModelSelection = normalizeModelSelectionSnapshot(
@@ -10333,6 +10552,7 @@ function syncSessionOpenCodeIdAfterRun(session, agentRun) {
 }
 
 async function runOpenCodeLoop(session, assistantEl, runCtx) {
+  const conversationRevision = Number(runCtx.conversationRevision ?? session.conversationRevision) || 0;
   const latestUserMessage = runCtx.requestMessage
     || [...(session.messages || [])].reverse().find(message => message.role === 'user') || {};
   const requestHistory = runCtx.requestHistory || (session.messages || []).slice(0, -1);
@@ -10352,16 +10572,18 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
       resolve({ content: agentRun.textContent || '', agentRun });
     });
     try {
-      const requestMessageAnchor = session.forkedFrom ? await messageForkAnchor(latestUserMessage) : '';
+      const hasResetHistory = !!(session.forkedFrom || session.contextReset);
+      const requestMessageAnchor = hasResetHistory ? await messageForkAnchor(latestUserMessage) : '';
       const start = await api.openCodeStartRun({
         runId: openCodeRunId,
         yanSessionId: session.id,
+        conversationRevision,
         openCodeSessionId: session.openCodeSessionId || '',
         title: session.title || latestUserMessage.content || 'Z task',
         modelSelection,
         prompt: String(latestUserMessage.content || ''),
         attachments: latestUserMessage.attachments || [],
-        ...(session.forkedFrom ? { requestMessageIndex, requestMessageAnchor } : {}),
+        ...(hasResetHistory ? { requestMessageIndex, requestMessageAnchor } : {}),
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
         subagentRoles: Array.isArray(latestUserMessage.subagentRoles) ? latestUserMessage.subagentRoles : [],
         history: requestHistory.map(message => {
@@ -10469,7 +10691,7 @@ async function persistResumedOpenCodeRunOnce(session, runCtx, result) {
     updateSendState();
   }
   state.activeRuns.delete(session.id);
-  if (state.currentSession?.id === session.id) renderWdMonitor(session);
+  if (state.currentSession?.id === session.id) { renderWdMonitor(session); updateSendState(); }
   syncChatAutoFollowUi(currentChatSessionId());
   const petStatus = agentRun?.status === 'interrupted'
     ? 'paused'
@@ -10769,6 +10991,15 @@ async function getYanCoreIntentRecord(intentId) {
   }
 }
 
+function discardStaleQueuedTurn(sessionId, queued, result) {
+  if (result?.code !== 'SESSION_REVISION_CHANGED') return false;
+  if (state.queuedTurns.get(sessionId) === queued) {
+    state.queuedTurns.delete(sessionId);
+    if (state.currentSession?.id === sessionId) toast('对话历史已变化，旧排队消息未发送');
+  }
+  return true;
+}
+
 function scheduleQueuedTurnDispatch(session) {
   const sessionId = String(session?.id || '');
   if (!sessionId || !state.queuedTurns.has(sessionId) || queuedTurnDispatching.has(sessionId)) return;
@@ -10782,9 +11013,14 @@ function scheduleQueuedTurnDispatch(session) {
       if (Number(queued.retryAfter) > Date.now()) return;
 
       const targetSession = queued.sessionRef || session;
+      if ((Number(queued.conversationRevision) || 0) !== (Number(targetSession.conversationRevision) || 0)) {
+        state.queuedTurns.delete(sessionId);
+        return;
+      }
       const hasYanCoreIntentBridge = typeof api?.yanCoreConsumeIntent === 'function';
       if (hasYanCoreIntentBridge) {
         let consumed = await invokeYanCore('yanCoreConsumeIntent', queued.id);
+        if (discardStaleQueuedTurn(sessionId, queued, consumed)) return;
         if (consumed?.ok !== true) {
           const record = await getYanCoreIntentRecord(queued.id);
           if (record?.status === 'consumed' || record?.status === 'dispatched') {
@@ -10807,12 +11043,14 @@ function scheduleQueuedTurnDispatch(session) {
               return;
             }
             const requeued = await invokeYanCore('yanCoreRequeueIntent', queued.id);
+            if (discardStaleQueuedTurn(sessionId, queued, requeued)) return;
             if (requeued?.ok !== true) {
               queued.retryAfter = Date.now() + 1_000;
               console.warn('[yan-core] stale queued intent claim could not be recovered:', requeued?.error || queued.id);
               return;
             }
             consumed = await invokeYanCore('yanCoreConsumeIntent', queued.id);
+            if (discardStaleQueuedTurn(sessionId, queued, consumed)) return;
             if (consumed?.ok !== true) {
               queued.retryAfter = Date.now() + 1_000;
               return;
@@ -10855,13 +11093,15 @@ function scheduleQueuedTurnDispatch(session) {
         await invokeYanCore('yanCoreAckIntent', queued.id).catch(() => {});
       } else if (!state.queuedTurns.has(sessionId)) {
         state.queuedTurns.set(sessionId, queued);
-        await invokeYanCore('yanCoreRequeueIntent', queued.id).catch(() => {});
+        const requeued = await invokeYanCore('yanCoreRequeueIntent', queued.id).catch(() => null);
+        discardStaleQueuedTurn(sessionId, queued, requeued);
       }
     } catch (error) {
       console.error('[queued-turn] dispatch failed:', error);
       if (queued && !state.queuedTurns.has(sessionId)) {
         state.queuedTurns.set(sessionId, queued);
-        await invokeYanCore('yanCoreRequeueIntent', queued.id).catch(() => {});
+        const requeued = await invokeYanCore('yanCoreRequeueIntent', queued.id).catch(() => null);
+        discardStaleQueuedTurn(sessionId, queued, requeued);
       }
     } finally {
       queuedTurnDispatching.delete(sessionId);
@@ -10885,6 +11125,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   const runSession = options.session || state.currentSession;
   if (!runSession) return { ok: false, error: '没有可用会话' };
   await ensureFullSessionLoaded(runSession);
+  if (sessionRewindRequests.has(runSession.id)) return { ok: false, error: 'busy' };
   const intentId = String(options.intentId || '').trim();
   const persistedSubmission = findPersistedIntentSubmission(runSession, intentId);
   if (persistedSubmission?.complete) return { ok: true, deduped: true };
@@ -10903,6 +11144,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   );
   const ui = state.currentSession?.id === runSession.id;
   const runCtx = createRunCtx(runSession.id, ui, runSession.workspace || '');
+  runCtx.conversationRevision = Number(runSession.conversationRevision) || 0;
   if (options.browserAnnotation) runCtx.browserAnnotation = options.browserAnnotation;
   setRunModelPresentation(runCtx, effectiveModelSelection);
   runCtx.accessMode = getCurrentAccessMode();
@@ -15355,7 +15597,7 @@ function updateContextCompressButton() {
   if (!button) return;
   const session = state.currentSession;
   const compressing = manualContextCompressionSessions.has(session?.id);
-  button.disabled = !session?.openCodeSessionId || isSessionExecutionActive(session?.id);
+  button.disabled = !session?.openCodeSessionId || isSessionExecutionActive(session?.id) || sessionRewindRequests.has(session?.id);
   button.textContent = compressing ? '压缩中…' : '我来压缩';
   button.title = compressing ? '正在压缩上下文' : !session?.openCodeSessionId
     ? '还没有可压缩的上下文' : button.disabled ? '仅任务空闲时可手动压缩' : '压缩早期上下文（会调用当前模型）';
@@ -15364,8 +15606,9 @@ function updateContextCompressButton() {
 async function manuallyCompressContext() {
   const session = state.currentSession;
   if (!session?.openCodeSessionId) { toast('还没有可压缩的上下文'); return; }
-  if (isSessionExecutionActive(session.id)) return;
+  if (isSessionExecutionActive(session.id) || sessionRewindRequests.has(session.id)) return;
   manualContextCompressionSessions.add(session.id);
+  refreshSessionRewindActions();
   updateContextCompressButton();
   const hint = $('#contextRingHint');
   if (hint) hint.textContent = '正在调用模型压缩上下文，请稍候…';
@@ -15394,6 +15637,7 @@ async function manuallyCompressContext() {
     toast(`压缩失败：${error?.message || error}`);
   } finally {
     manualContextCompressionSessions.delete(session.id);
+    refreshSessionRewindActions();
     updateContextInfo();
   }
 }
@@ -22897,6 +23141,7 @@ function bindTaskActions() {
 // Update the task bar (title + folder + buttons)
 function updateTaskBar() {
   renderSessionForkOrigin();
+  renderSessionRewindState();
   const bar = $('#taskBar');
   if (!bar) return;
   closeTaskActionsMenu();
