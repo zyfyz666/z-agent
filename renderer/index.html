@@ -2127,6 +2127,15 @@
       <label for="zConnectionSelect">API 连接</label>
       <select id="zConnectionSelect"></select>
       <div id="zConnectionModelField"><label for="zConnectionModel">模型</label><select id="zConnectionModel"></select></div>
+      <label for="zObserverReasoning">观察者思考强度</label>
+      <select id="zObserverReasoning" aria-describedby="zObserverReasoningHint">
+        <option value="low">轻度</option>
+        <option value="medium">中</option>
+        <option value="high">高</option>
+        <option value="xhigh">极高</option>
+        <option value="max" selected>最高</option>
+      </select>
+      <p id="zObserverReasoningHint">与主模型独立设置，默认最高。仅用于模型观察，从下一轮任务生效。</p>
       <details id="zObserverDetails" hidden>
         <summary>细节模式</summary>
         <label for="zObserverEvery">检查间隔（工具动作数）</label>

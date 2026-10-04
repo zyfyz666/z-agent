@@ -17,7 +17,8 @@ function action(id, target = `src/${id}.js`) {
   };
 }
 
-function fixture(t, { enabled = true, repetitive = false, polls = 3, initial = [], tools = 6, observerConnection, observerJudgeEvery } = {}) {
+function fixture(t, { enabled = true, repetitive = false, polls = 3, initial = [], tools = 6, observerConnection, observerJudgeEvery,
+  prompt = 'Read the project source files.' } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-wd-telemetry-'));
   // Startup may fail while the read-only baseline child is still exiting.
   t.after(() => fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -53,24 +54,30 @@ function fixture(t, { enabled = true, repetitive = false, polls = 3, initial = [
   const events = [];
   const run = listener => sidecar.run({
     runId: 'run-wd', workspace: directory, hasUserWorkspace: true,
-    prompt: 'Read the project source files.', workMode: 'normal', enableSubagents: false,
+    prompt, workMode: 'normal', enableSubagents: false,
     providerId: 'test', modelId: 'test', observerConnection, observerJudgeEvery
   }, event => { events.push(event); listener?.(event); });
   return { sidecar, events, calls, run };
 }
 
-test('runtime invokes the independent observer API and records delivered model advice', async t => {
+for (const grounded of [true, false]) test(`runtime invokes the independent observer API and ${grounded ? 'delivers evidence-backed advice' : 'suppresses advice without evidence'}`, async t => {
   const http = require('node:http');
   const requests = [];
   const server = http.createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
-    requests.push({ path: req.url, auth: req.headers.authorization, body: JSON.parse(body) });
+    const request = { path: req.url, auth: req.headers.authorization, body: JSON.parse(body) };
+    requests.push(request);
+    const input = JSON.parse(request.body.messages.find(message => message.role === 'user').content);
+    const repeatedAction = input.recentActions[1];
+    const decision = { action: 'remind', message: 'The task requires reading each file once; move on from the repeatedly read file.',
+      ...(grounded ? { evidence: [{ actionIndex: repeatedAction.index,
+        fact: `This action reads ${repeatedAction.target} again despite the goal requiring each file to be read exactly once.` }] } : {}) };
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ choices: [{ message: { content: '{"action":"remind","message":"Verify the focused change."}' } }] }));
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
-  const f = fixture(t, { observerJudgeEvery: 2, observerConnection: {
+  const f = fixture(t, { repetitive: true, prompt: 'Read each source file exactly once.', observerJudgeEvery: 2, observerConnection: {
     providerId: 'independent', supplierId: 'official', modelId: 'reviewer', name: 'Reviewer',
     baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'observer-only', apiFormat: 'openai'
   } });
@@ -79,8 +86,14 @@ test('runtime invokes the independent observer API and records delivered model a
   assert.equal(requests[0].auth, 'Bearer observer-only'); assert.equal(requests[0].body.model, 'reviewer');
   assert.equal(result.watchdog.judgeEvery, 2); assert.equal(result.watchdog.model.checks, 1);
   assert.equal(result.watchdog.model.phase, 'stopped');
-  assert.equal(result.watchdog.events[0].rules[0], 'model_observer');
-  assert.equal(result.watchdog.events[0].delivery, 'delivered');
+  if (grounded) {
+    assert.equal(result.watchdog.events[0].rules[0], 'model_observer');
+    assert.equal(result.watchdog.events[0].delivery, 'delivered');
+    assert.equal(f.calls.deliveries, 1);
+  } else {
+    assert.equal(result.watchdog.events.length, 0);
+    assert.equal(f.calls.deliveries, 0);
+  }
   assert.doesNotMatch(JSON.stringify(f.events), /observer-only/);
 });
 

@@ -5,10 +5,23 @@
   const key = value => JSON.stringify([value.providerId, value.supplierId]);
   const t = value => document.documentElement.lang === 'en' ? root.YanI18n?.translate(value) || value : value;
   const option = (value, label) => { const node = document.createElement('option'); node.value = value; node.textContent = label; return node; };
-  const observer = () => host.config?.observer || { model: null, judgeEvery: 6 };
+  const reasoningLabels = Object.freeze({ low: '轻度', medium: '中', high: '高', xhigh: '极高', max: '最高' });
+  const reasoningEffort = value => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return Object.hasOwn(reasoningLabels, normalized) ? normalized : 'max';
+  };
+  const observer = () => host.config?.observer || { model: null, judgeEvery: 6, reasoningEffort: 'max' };
   function render() {
     $('zObserverName').textContent = observer().model?.name || t('规则');
-    $('zObserverPill').title = `${t('观察者')} · ${observer().model?.name || t('规则模式')} · ${observer().judgeEvery || 6}`;
+    const effortLabel = observer().model ? ` · ${t('观察者思考强度')}：${t(reasoningLabels[reasoningEffort(observer().reasoningEffort)])}` : '';
+    $('zObserverPill').title = `${t('观察者')} · ${observer().model?.name || t('规则模式')}${effortLabel} · ${observer().judgeEvery || 6}`;
+  }
+  function renderReasoningControl() {
+    const ruleOnly = $('zConnectionSelect').value === 'rules';
+    $('zObserverReasoning').disabled = saving || ruleOnly;
+    $('zObserverReasoningHint').textContent = t(ruleOnly
+      ? '规则模式不调用模型；选择观察者模型后可调整思考强度。'
+      : '与主模型独立设置，默认最高。仅用于模型观察，从下一轮任务生效。');
   }
   function models(preferred) {
     const ruleOnly = $('zConnectionSelect').value === 'rules';
@@ -17,6 +30,7 @@
     $('zConnectionModel').replaceChildren(...(selected?.models || []).map(item => option(item.id, item.name)));
     if (selected?.models.some(item => item.id === preferred)) $('zConnectionModel').value = preferred;
     $('zConnectionSave').disabled = !ruleOnly && !selected?.models.length;
+    renderReasoningControl();
   }
   async function open() {
     if (saving) return;
@@ -26,6 +40,8 @@
     $('zObserverDetails').hidden = false;
     $('zObserverEvery').value = observer().judgeEvery || 6;
     $('zObserverEvery').disabled = false;
+    $('zObserverReasoning').value = reasoningEffort(observer().reasoningEffort);
+    $('zObserverReasoning').disabled = true;
     $('zConnectionNotice').textContent = t('正在读取连接…');
     $('zConnectionSelect').disabled = true;
     $('zConnectionSave').disabled = true;
@@ -38,6 +54,7 @@
       entries = result.connections || [];
       const current = result.observer?.model;
       $('zObserverEvery').value = result.observer?.judgeEvery || 6;
+      $('zObserverReasoning').value = reasoningEffort(result.observer?.reasoningEffort);
       $('zConnectionSelect').replaceChildren(
         option('rules', t('仅规则观察（不调用模型）')),
         ...entries.map(entry => option(key(entry), entry.name))
@@ -61,10 +78,12 @@
     saving = true;
     $('zConnectionSave').disabled = true;
     $('zConnectionSelect').disabled = true; $('zConnectionModel').disabled = true; $('zObserverEvery').disabled = true;
+    $('zObserverReasoning').disabled = true;
     $('zConnectionNotice').textContent = t('正在保存…');
     try {
       const result = await host.api.configureObserver({
         judgeEvery: Number($('zObserverEvery').value),
+        reasoningEffort: reasoningEffort($('zObserverReasoning').value),
         model: selected ? { providerId: entry.providerId, supplierId: entry.supplierId, modelId: selected.id } : null
       });
       if (result.error) throw new Error(result.error);
@@ -76,6 +95,7 @@
       saving = false; $('zConnectionSave').disabled = false;
       $('zConnectionSelect').disabled = false; $('zConnectionModel').disabled = false;
       $('zObserverEvery').disabled = false;
+      renderReasoningControl();
     }
   }
   root.ZConnectionControls = { mount(options) {

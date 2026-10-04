@@ -3701,6 +3701,7 @@ function loadConfig() {
       name: 'Agnes 2.0 Flash',
       capabilities: DEFAULT_MODELS.find(model => model.id === DEFAULT_MODEL_ROLES.text.model)?.capabilities || {}
     },
+    observer: normalizeObserverSettings(),
     agent: {
       workMode: 'normal',
       accessMode: 'request',
@@ -3839,6 +3840,7 @@ function loadConfig() {
   ));
   merged.api.inputThroughput = normalizeMeasurementStore(merged.api.inputThroughput);
   merged.api.thinking = reasoningSpeedEnablesThinking(storedReasoningSpeed);
+  merged.observer = normalizeObserverSettings(merged.observer);
   merged.agent = normalizeAgentConfig(merged.agent);
   if (cfg.agent?.workMode != null && cfg.agent.workMode !== merged.agent.workMode) {
     shouldPersistNormalizedState = true;
@@ -5992,14 +5994,17 @@ function composerConnections(cfg) {
 }
 
 function observerConnectionForRun(cfg) {
-  const selection = normalizeObserverSettings(cfg.observer).model;
+  const observer = normalizeObserverSettings(cfg.observer);
+  const selection = observer.model;
   if (!selection) return null;
   const entry = composerConnections(cfg).find(item => item.providerId === selection.providerId && item.supplierId === selection.supplierId);
   if (!entry?.models.some(model => model.id === selection.modelId)) {
-    return { ...selection, unavailable: true };
+    return { ...selection, reasoningEffort: observer.reasoningEffort, unavailable: true };
   }
   const connection = getProviderConnectionForSupplier(cfg, selection.providerId, selection.supplierId);
-  return { ...selection, ...connection, apiFormat: MODEL_PROVIDERS[selection.providerId]?.apiFormat || 'openai' };
+  const model = getProviderModels(cfg, selection.providerId, selection.supplierId).find(item => item.id === selection.modelId);
+  return { ...selection, ...connection, reasoningEffort: observer.reasoningEffort,
+    capabilities: model?.capabilities || {}, apiFormat: MODEL_PROVIDERS[selection.providerId]?.apiFormat || 'openai' };
 }
 
 ipcMain.handle('models:connections', () => {
@@ -6017,7 +6022,7 @@ ipcMain.handle('observer:configure', (_event, payload = {}) => {
     if (!selected) return { error: '请选择已启用 API 中的文本模型' };
     payload = { ...payload, model: { providerId: entry.providerId, supplierId: entry.supplierId, modelId: selected.id, name: selected.name } };
   }
-  cfg.observer = normalizeObserverSettings(payload);
+  cfg.observer = normalizeObserverSettings({ ...cfg.observer, ...payload });
   saveConfig(cfg);
   publishModelState(cfg);
   return { observer: cfg.observer };

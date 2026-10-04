@@ -6,12 +6,19 @@ const connection = { providerId: 'observer-api', supplierId: 'other', modelId: '
 const steps = n => Array.from({ length: n }, (_, i) => ({ op: 'read', target: `src/${i}.js`, plan: 'inspect', verify: i === 0 ? 'passed' : null }));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('evidence that becomes empty after bounding cannot trigger a reminder', () => {
+  const input = observerInput('Fix the failed check', steps(6), null);
+  const result = parseObserverReply({ output_text: JSON.stringify({ action: 'remind', message: 'Change strategy',
+    evidence: [{ actionIndex: 6, fact: ' '.repeat(801) + 'Content beyond the retained limit' }] }) }, input);
+  assert.equal(result.action, 'observe');
+});
+
 test('settings default to rules only and normalize a separate exact model identity', () => {
   for (const input of [undefined, null, {}, { judgeEvery: 0 }, { judgeEvery: 101 }, { judgeEvery: 2.5 }]) {
-    assert.deepEqual(normalizeObserverSettings(input), { judgeEvery: 6, model: null });
+    assert.deepEqual(normalizeObserverSettings(input), { judgeEvery: 6, model: null, reasoningEffort: 'max' });
   }
   assert.deepEqual(normalizeObserverSettings({ judgeEvery: 1, model: { ...connection, apiKey: 'must-not-persist' } }), {
-    judgeEvery: 1, model: { providerId: 'observer-api', supplierId: 'other', modelId: 'observer-model', name: 'Observer' }
+    judgeEvery: 1, reasoningEffort: 'max', model: { providerId: 'observer-api', supplierId: 'other', modelId: 'observer-model', name: 'Observer' }
   });
 });
 
@@ -35,18 +42,23 @@ test('input is bounded and omits raw messages, output, credentials and tools', (
   assert.equal(input.totalActions, 100);
   assert.equal(input.recentActions.length, 12);
   assert.equal(input.recentActions[0].target, 'src/88.js');
+  assert.equal(input.recentActions[0].index, 89);
+  assert.deepEqual(input.ruleSignal, { message: 'rule reminder', delivered: false });
+  assert.equal(input.ruleReminderAlreadySent, undefined);
   assert.ok(input.goal.length <= 4000);
   assert.ok(JSON.stringify(input).length < 15000);
   assert.doesNotMatch(JSON.stringify(input), /PRIVATE-TOOL-OUTPUT|private-secret|private-password/);
 });
 
 test('supported response formats only accept observation or reminder JSON', async () => {
-  const reply = JSON.stringify({ action: 'remind', message: 'Run the focused test.' });
+  const reply = JSON.stringify({ action: 'remind', message: 'The failed hypothesis is still being used.',
+    evidence: [{ actionIndex: 1, fact: 'The provided test result disproves the assumption still used in this action.' }] });
+  const input = observerInput('Fix the failure.', steps(2));
   for (const value of [
     { choices: [{ message: { content: reply } }] },
     { content: [{ type: 'text', text: '```json\n' + reply + '\n```' }] },
     { output: [{ content: [{ type: 'output_text', text: reply }] }] }
-  ]) assert.equal(parseObserverReply(value).action, 'remind');
+  ]) assert.equal(parseObserverReply(value, input).action, 'remind');
   assert.throws(() => parseObserverReply({ output_text: '{"action":"halt","message":"stop"}' }));
   assert.throws(() => parseObserverReply({ output_text: 'not JSON' }));
   const result = await reviewWithModel(connection, {}, { fetchImpl: async (url, options) => {
@@ -66,7 +78,7 @@ test('custom cadence is non-blocking, deduplicated and allows only one model rev
   observer.observe(steps(1)); await tick(); assert.equal(calls, 0);
   assert.equal(observer.observe(steps(2)), undefined); await tick(); assert.equal(calls, 1);
   observer.observe(steps(2)); observer.observe(steps(20)); await tick(); assert.equal(calls, 1);
-  resolve({ action: 'remind', message: 'Check results.' }); await observer.pending;
+  resolve({ action: 'remind', message: 'Check results.', evidence: [{ actionIndex: 1, fact: 'Concrete task deviation.' }] }); await observer.pending;
   assert.equal(guidance.length, 1); assert.equal(guidance[0].step, 2);
   observer.observe(steps(3)); await tick(); assert.equal(calls, 1);
   observer.observe(steps(4)); await tick(); assert.equal(calls, 2);
@@ -103,3 +115,71 @@ test('finishing or cancelling suppresses late advice, even from an uncooperative
     assert.equal(deliveries, 0); observer.stop();
   }
 });
+
+test('the prompt defaults to observation and requests confirmed, verifiable deviation rather than ordinary exploration', () => {
+  const input = observerInput('A task', steps(2), { message: 'A rule matched' });
+  const prompt = observerRequest(connection, input).body.messages[0].content;
+  for (const required of ['默认决定必须是 observe', '确认主 Agent 已经进入误区', '正常探索', '单次失败', '处理缓慢',
+    '合理替代解释', '不要用自信措辞或猜测补足证据', '不得捏造']) assert.ok(prompt.includes(required), required);
+  assert.match(input.instruction, /尚未作为提醒发送/);
+});
+
+test('reminders without evidence, with fabricated indexes, or citing actions outside the provided summary become observations', () => {
+  const input = observerInput('A task', steps(100));
+  for (const evidence of [undefined, [], [{ actionIndex: 1, fact: 'Too old to verify.' }],
+    [{ actionIndex: 101, fact: 'Invented future action.' }], [{ actionIndex: '100', fact: 'Wrong type.' }],
+    [{ actionIndex: 100, fact: '' }]]) {
+    const result = parseObserverReply({ output_text: JSON.stringify({ action: 'remind', message: 'I am certain.', evidence }) }, input);
+    assert.equal(result.action, 'observe');
+    assert.doesNotMatch(result.message, /certain/);
+  }
+  const valid = parseObserverReply({ output_text: JSON.stringify({ action: 'remind', message: 'Reconsider the disproved assumption.',
+    evidence: [{ actionIndex: 100, fact: 'The latest action still relies on an assumption contradicted by the provided verification.' }] }) }, input);
+  assert.equal(valid.action, 'remind');
+  assert.equal(valid.evidence[0].actionIndex, 100);
+});
+
+test('the runtime also suppresses an ungrounded reminder from an injected reviewer', async () => {
+  const guidance = [];
+  const observer = new ModelObserver({ connection, judgeEvery: 1,
+    review: async () => ({ action: 'remind', message: 'Maybe try a different approach.' }),
+    onGuidance: result => guidance.push(result) });
+  observer.observe(steps(1)); await observer.pending;
+  assert.deepEqual(guidance, []);
+  assert.equal(observer.state.phase, 'observing');
+  assert.equal(observer.state.checks, 1);
+  observer.stop();
+});
+
+test('reminder evidence is deduplicated, capped, and cleaned before guidance delivery', () => {
+  const input = observerInput('A task', steps(6));
+  const evidence = [
+    { actionIndex: 1, fact: 'First fact.' }, { actionIndex: 1, fact: 'First fact.' },
+    { actionIndex: 2, fact: 'Second fact.' }, { actionIndex: 3, fact: 'token=private-secret ' + 'f'.repeat(1000) },
+    { actionIndex: 4, fact: 'Fourth fact.' }
+  ];
+  const decision = parseObserverReply({ output_text: JSON.stringify({ action: 'remind', message: 'Correct the misconception.', evidence }) }, input);
+  assert.equal(decision.evidence.length, 3);
+  assert.deepEqual(decision.evidence.map(item => item.actionIndex), [1, 2, 3]);
+  assert.ok(decision.evidence[2].fact.length <= 800);
+  assert.doesNotMatch(JSON.stringify(decision), /private-secret/);
+});
+
+for (const sameAction of [false, true]) {
+  test(`a newly passed verification suppresses obsolete in-flight advice (${sameAction ? 'existing' : 'new'} action)`, async () => {
+    let resolve;
+    const guidance = [];
+    const initial = [{ op: 'test', target: 'focused-test', verify: 'failed' }];
+    const observer = new ModelObserver({ connection, judgeEvery: 1,
+      review: () => new Promise(done => { resolve = done; }), onGuidance: value => guidance.push(value) });
+    observer.observe(initial); await tick();
+    observer.observe(sameAction ? [{ ...initial[0], verify: 'passed' }]
+      : [...initial, { op: 'test', target: 'focused-test', verify: 'passed' }]);
+    resolve({ action: 'remind', message: 'The original failure is still unresolved.',
+      evidence: [{ actionIndex: 1, fact: 'The supplied test failed.' }] });
+    await observer.pending;
+    assert.deepEqual(guidance, []);
+    assert.match(observer.state.message, /新的通过验证/);
+    observer.stop();
+  });
+}
