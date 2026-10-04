@@ -82,6 +82,7 @@ function fixture(blockedPhase) {
     persistSessionContextCompression: noop, finishPetSupervision: noop,
     scheduleChatAutoFollow: noop, syncChatAutoFollowUi: noop, currentChatSessionId: () => '',
     syncInterjectionUi: noop, activatePendingAgentHandoff: async () => {}, scheduleQueuedTurnDispatch: noop,
+    settleAgentInteractionForRun: noop,
     findActiveRunByRunId(id) {
       for (const [sessionId, entry] of context.state.activeRuns) {
         if (entry.runCtx.runId === id) return { sessionId, entry };

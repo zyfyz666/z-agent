@@ -1063,6 +1063,13 @@ body.is-mac .sidebar-brand-name-mac { display: inline; }
   animation: session-spin 0.7s linear infinite;
 }
 .session-item.running .session-title-shell { color: var(--accent); }
+.session-interaction-status {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
 @keyframes session-spin { to { transform: rotate(360deg); } }
 
 .session-loading {

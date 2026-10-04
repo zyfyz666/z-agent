@@ -714,6 +714,9 @@ function canStartRun() {
 function pauseUiForSession(sessionId) {
   const entry = state.activeRuns.get(sessionId);
   if (entry) entry.runCtx.ui = false;
+  if (String(state.currentSession?.id || '') === String(sessionId || '')) {
+    suspendAgentInteractionPanel();
+  }
 }
 
 function bindActiveRunUi(sessionId) {
@@ -1544,6 +1547,9 @@ async function listRecoveredYanCoreTurns() {
 async function applyExternalSessionChange(detail = {}) {
   const currentId = state.currentSession?.id || null;
   await refreshSessions();
+  if (detail.id && !state.sessions.some(session => session.id === detail.id)) {
+    settleAgentInteractionsForSession(detail.id);
+  }
 
   if (!currentId || detail.id !== currentId) return;
   const summary = state.sessions.find(session => session.id === currentId);
@@ -1552,6 +1558,7 @@ async function applyExternalSessionChange(detail = {}) {
     state.composerDrafts.delete(String(currentId));
     state.queuedTurns.delete(String(currentId));
     state.currentSession = null;
+    syncAgentInteractionPanel();
     syncPetFocusedSession(null);
     restoreComposerDraftForSession('');
     clearMessages();
@@ -1910,8 +1917,10 @@ async function performSessionDeletionFromSidebar(id) {
   await clearYanCoreQueuedIntentsForThread(id, 'session_removed');
   state.composerDrafts.delete(String(id));
   state.queuedTurns.delete(String(id));
+  settleAgentInteractionsForSession(id);
   if (state.currentSession?.id === id) {
     state.currentSession = null;
+    syncAgentInteractionPanel();
     restoreComposerDraftForSession('');
     clearMessages();
   }
@@ -1980,6 +1989,7 @@ function renderSessionList() {
   const renderSessionRow = (session, { pinnedSection = false } = {}) => {
     const running = isSessionRunning(session.id);
     const dead = session.workspaceMissing === true;
+    const interactionStatus = agentInteractionStatusForSession(session.id);
     return `
       <div class="session-item ${pinnedSection ? 'pinned-session-item' : ''} ${state.currentSession && session.id === state.currentSession.id ? 'active' : ''} ${running ? 'running' : ''} ${session.pinned ? 'pinned' : ''} ${dead ? 'is-dead-workspace' : ''}" data-id="${escapeAttr(session.id)}"${dead ? ' title="该任务所在的工作区已被删除"' : ''}>
         ${running ? '<span class="session-spinner"></span>' : ''}
@@ -1989,6 +1999,7 @@ function renderSessionList() {
             <span class="session-title-copy" aria-hidden="true">${escapeHtml(displaySessionTitle(session.title))}</span>
           </span>
         </span>
+        ${interactionStatus ? `<span class="session-interaction-status" role="status">${interactionStatus}</span>` : ''}
         <button type="button" class="session-more-btn" data-session-menu-toggle="${escapeAttr(session.id)}" aria-label="任务操作" aria-expanded="false">⋯</button>
       </div>`;
   };
@@ -2247,6 +2258,7 @@ async function createOrActivateNewSession() {
   catch (error) {
     if (loadToken !== sessionLoadToken) return null;
     observerPendingSessionId = ''; renderWdMonitor();
+    syncAgentInteractionPanel({ resume: true });
     showSessionLoading('无法创建新对话');
     return null;
   }
@@ -2254,10 +2266,12 @@ async function createOrActivateNewSession() {
   observerPendingSessionId = '';
   if (!s) {
     renderWdMonitor();
+    syncAgentInteractionPanel({ resume: true });
     showSessionLoading('无法创建新对话');
     return null;
   }
   state.currentSession = s;
+  syncAgentInteractionPanel({ resume: true });
   renderModelBadge();
   renderWdMonitor(s);
   syncAgentBrowserVisibility();
@@ -2285,6 +2299,7 @@ async function loadSession(id) {
   if (summary?.workspaceMissing) {
     observerPendingSessionId = ''; renderWdMonitor();
     await confirmDeadWorkspaceCleanup(summary);
+    if (loadToken === sessionLoadToken) syncAgentInteractionPanel({ resume: true });
     return;
   }
   const previousSessionId = String(state.currentSession?.id || '');
@@ -2303,6 +2318,7 @@ async function loadSession(id) {
   catch (error) {
     if (loadToken !== sessionLoadToken) return;
     observerPendingSessionId = ''; renderWdMonitor();
+    syncAgentInteractionPanel({ resume: true });
     showSessionLoading('任务打开失败');
     return;
   }
@@ -2310,11 +2326,13 @@ async function loadSession(id) {
   observerPendingSessionId = '';
   if (!s) {
     renderWdMonitor();
+    syncAgentInteractionPanel({ resume: true });
     showSessionLoading('任务打开失败');
     return;
   }
   markSessionLoadBaseline(s);
   state.currentSession = s;
+  syncAgentInteractionPanel({ resume: true });
   renderModelBadge();
   renderWdMonitor(s);
   syncAgentBrowserVisibility();
@@ -6468,6 +6486,7 @@ function reconcileRunFromCoreTerminal(runId, event) {
   runCtx.coreReconciled = true;
   runCtx.shouldAbort = true;
   runCtx.detachOpenCodeListeners?.();
+  settleAgentInteractionForRun(runCtx);
   const reconciledError = new Error('Core 已完成任务对账，忽略迟到的 OpenCode 收尾结果。');
   reconciledError.code = 'YAN_CORE_RECONCILED';
   const rejectCompletion = runCtx.rejectCompletion;
@@ -6527,12 +6546,7 @@ function abortSessionById(sessionId) {
       updateSendState();
     }
   }
-  if (contexts.includes(agentPermissionRequest?.runCtx)) {
-    settleAgentPermission('deny');
-  }
-  if (contexts.includes(agentQuestionRequest?.runCtx)) {
-    settleAgentQuestion({ cancelled: true }, { silent: true });
-  }
+  for (const context of contexts) settleAgentInteractionForRun(context, { permissionDecision: 'deny' });
   if (runCtx.runId && window.yan.cancelImageGeneration) {
     window.yan.cancelImageGeneration(runCtx.runId).catch(() => {});
   }
@@ -8906,11 +8920,17 @@ async function requireOpenCodeInteractionReply(result, runCtx, label) {
 
 const SHELL_PERMISSION_ACTIONS = new Set(['bash', 'shell', 'command']);
 
+function isOpenCodeInteractionRequestActive(runCtx, kind, requestId) {
+  return !!runCtx && !runCtx.shouldAbort && !runCtx.coreSettled && !runCtx.agentInteractionsClosed
+    && !runCtx.openCodeSettledInteractions?.has(`${kind}:${requestId}`);
+}
+
 async function handleOpenCodePermission(runCtx, event) {
   const data = event?.data || event?.properties || {};
   const requestId = String(data.id || data.requestID || '');
   if (!requestId || runCtx.openCodeHandledRequests.has(`permission:${requestId}`)) return;
   runCtx.openCodeHandledRequests.add(`permission:${requestId}`);
+  if (!isOpenCodeInteractionRequestActive(runCtx, 'permission', requestId)) return;
   const action = String(data.action || data.permission || 'tool');
   const actionKey = action.trim().toLowerCase();
   const resources = Array.isArray(data.resources) ? data.resources : (Array.isArray(data.patterns) ? data.patterns : []);
@@ -8930,6 +8950,7 @@ async function handleOpenCodePermission(runCtx, event) {
     } catch (error) {
       console.warn('[opencode-permission-risk]', error);
     }
+    if (!isOpenCodeInteractionRequestActive(runCtx, 'permission', requestId)) return;
     if (risk?.requiresApproval || risk?.level === 'high') {
       const { decision } = await requestAgentPermission({
         requestId,
@@ -8971,6 +8992,7 @@ async function handleOpenCodePermission(runCtx, event) {
     if (!decision) return;
     reply = decision === 'deny' ? 'reject' : decision;
   }
+  if (!isOpenCodeInteractionRequestActive(runCtx, 'permission', requestId)) return;
   let result;
   try {
     result = await api.openCodeReplyPermission({
@@ -8989,6 +9011,7 @@ async function handleOpenCodeQuestion(runCtx, event) {
   const requestId = String(data.id || data.requestID || '');
   if (!requestId || runCtx.openCodeHandledRequests.has(`question:${requestId}`)) return;
   runCtx.openCodeHandledRequests.add(`question:${requestId}`);
+  if (!isOpenCodeInteractionRequestActive(runCtx, 'question', requestId)) return;
   const questions = Array.isArray(data.questions) ? data.questions : [];
   if (!questions.length) {
     let emptyResult;
@@ -9010,7 +9033,7 @@ async function handleOpenCodeQuestion(runCtx, event) {
     questions,
     sessionId: runCtx.sessionId
   }, runCtx);
-  if (response?.cancelled) return;
+  if (response?.cancelled || !isOpenCodeInteractionRequestActive(runCtx, 'question', requestId)) return;
   let result;
   try {
     result = await api.openCodeReplyQuestion({
@@ -9714,10 +9737,12 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
     if (!runCtx.replayingHistory) void handleOpenCodePermission(runCtx, event);
   } else if (event.type === 'permission.v2.replied' || event.type === 'permission.replied') {
     const requestId = String(data.requestID || data.id || '');
-    if (requestId) runCtx.openCodeHandledRequests.add(`permission:${requestId}`);
-    if (requestId && agentPermissionRequest?.runCtx === runCtx && agentPermissionRequest.requestId === requestId) {
-      settleAgentPermission(null, { silent: true });
+    if (requestId) {
+      runCtx.openCodeHandledRequests.add(`permission:${requestId}`);
+      (runCtx.openCodeSettledInteractions ||= new Set()).add(`permission:${requestId}`);
     }
+    const request = findAgentInteractionRequest('permission', runCtx, requestId);
+    if (request) settleAgentPermission(null, { silent: true, request });
   } else if (event.type === 'question.v2.asked' || event.type === 'question.asked') {
     if (!runCtx.replayingHistory) void handleOpenCodeQuestion(runCtx, event);
   } else if (
@@ -9727,10 +9752,12 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
     || event.type === 'question.rejected'
   ) {
     const requestId = String(data.requestID || data.id || '');
-    if (requestId) runCtx.openCodeHandledRequests.add(`question:${requestId}`);
-    if (requestId && agentQuestionRequest?.runCtx === runCtx && agentQuestionRequest.requestId === requestId) {
-      settleAgentQuestion({ cancelled: true }, { silent: true });
+    if (requestId) {
+      runCtx.openCodeHandledRequests.add(`question:${requestId}`);
+      (runCtx.openCodeSettledInteractions ||= new Set()).add(`question:${requestId}`);
     }
+    const request = findAgentInteractionRequest('question', runCtx, requestId);
+    if (request) settleAgentQuestion({ cancelled: true }, { silent: true, request });
   }
   const petEvent = mapOpenCodeEventToPet(event, runCtx);
   if (!deferEffects) {
@@ -10213,6 +10240,7 @@ async function persistResumedOpenCodeRun(session, runCtx, result) {
 }
 
 async function persistResumedOpenCodeRunOnce(session, runCtx, result) {
+  settleAgentInteractionForRun(runCtx);
   const runId = String(runCtx?.runId || result?.runId || '');
   if (runId && (session.messages || []).some(message => message?.agentRun?.runId === runId)) {
     return;
@@ -10890,6 +10918,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
       finishPetSupervision(runCtx, 'error', taskErr || '任务执行出错');
     }
   } finally {
+    settleAgentInteractionForRun(runCtx);
     const terminalStatus = runCtx.shouldAbort || runCtx.finalStatus === 'interrupted' || runCtx.agentState.status === 'interrupted'
       ? 'paused'
       : (runCtx.finalStatus === 'done' || runCtx.agentState.status === 'done' ? 'completed' : 'error');
@@ -11192,13 +11221,138 @@ function finalizeAgentRun(content, status, activeRun, bodyEl, error, runCtx) {
 
 let agentPermissionRequest = null;
 let agentQuestionRequest = null;
+const agentInteractionQueues = new Map();
+let agentInteractionPanelSuspended = false;
+let agentInteractionDisplayVersion = 0;
 
-function settleAgentInteractionForRun(runCtx) {
-  if (agentPermissionRequest?.runCtx === runCtx) {
-    settleAgentPermission(null, { silent: true });
+function agentInteractionStatusForSession(sessionId) {
+  const request = agentInteractionQueues.get(String(sessionId || ''))?.[0];
+  return request ? (request.kind === 'question' ? '待回答' : '待确认') : '';
+}
+
+function isAgentInteractionVisible(request) {
+  return !!request && !request.settled && !agentInteractionPanelSuspended
+    && request.sessionId === String(state.currentSession?.id || '')
+    && (request === agentQuestionRequest || request === agentPermissionRequest);
+}
+
+function findAgentInteractionRequest(kind, runCtx, requestId) {
+  if (!runCtx || !requestId) return null;
+  const queue = agentInteractionQueues.get(String(runCtx.sessionId || '')) || [];
+  return queue.find(request => request.kind === kind && request.runCtx === runCtx
+    && request.requestId === String(requestId)) || null;
+}
+
+function captureAgentInteractionPanelState() {
+  const request = agentQuestionRequest || agentPermissionRequest;
+  if (!request) return;
+  request.collapsed = $('#agentPermissionPanel')?.classList.contains('collapsed') === true;
+  if (request.kind === 'question') {
+    const draft = request.drafts[request.currentIndex];
+    const input = $('#agentQuestionCustomInput');
+    if (draft && input) draft.custom = String(input.value || '');
+    if (draft) {
+      draft.customExpanded = $('#agentQuestionCustomToggle')?.getAttribute('aria-expanded') === 'true';
+      draft.scrollTop = $('#agentQuestionFields')?.scrollTop || 0;
+    }
+    clearTimeout(request.autoAdvanceTimer);
+    request.autoAdvanceTimer = null;
+  } else if (request.visionRelay?.show) {
+    request.visionRelayChecked = $('#agentPermissionVisionRelayCheck')?.checked ?? request.visionRelayChecked;
   }
-  if (agentQuestionRequest?.runCtx === runCtx) {
-    settleAgentQuestion({ cancelled: true }, { silent: true });
+}
+
+function hideAgentInteractionPanel() {
+  captureAgentInteractionPanelState();
+  agentInteractionDisplayVersion++;
+  agentQuestionRequest = null;
+  agentPermissionRequest = null;
+  resetAgentPermissionPanel();
+  syncBrowserFocusPromptStatus();
+}
+
+function suspendAgentInteractionPanel() {
+  agentInteractionPanelSuspended = true;
+  hideAgentInteractionPanel();
+}
+
+function syncAgentInteractionPanel({ resume = false } = {}) {
+  if (resume) agentInteractionPanelSuspended = false;
+  const sessionId = String(state.currentSession?.id || '');
+  const request = !agentInteractionPanelSuspended && sessionId
+    ? agentInteractionQueues.get(sessionId)?.[0] || null : null;
+  if (request === (agentQuestionRequest || agentPermissionRequest)) return;
+  hideAgentInteractionPanel();
+  if (!request) return;
+  if (request.kind === 'question') {
+    agentQuestionRequest = request;
+    renderAgentQuestionPanel(request);
+  } else {
+    agentPermissionRequest = request;
+    renderAgentPermissionPanel(request);
+  }
+}
+
+function enqueueAgentInteraction(kind, details, runCtx) {
+  const declaredSessionId = String(details.sessionId || '').trim();
+  const runSessionId = String(runCtx?.sessionId || '').trim();
+  const sessionId = declaredSessionId || runSessionId || (!runCtx ? String(state.currentSession?.id || '') : '');
+  const requestId = String(details.requestId || '');
+  const cancelled = kind === 'question'
+    ? { answers: [], reject: false, cancelled: true } : { decision: null, useVisionRelay: false };
+  if (!sessionId || (runCtx && !runSessionId)
+    || (declaredSessionId && runSessionId && declaredSessionId !== runSessionId)
+    || (runCtx && !isOpenCodeInteractionRequestActive(runCtx, kind, requestId))) {
+    return Promise.resolve(cancelled);
+  }
+  const queue = agentInteractionQueues.get(sessionId) || [];
+  const existing = requestId && queue.find(request => request.kind === kind
+    && request.runCtx === runCtx && request.requestId === requestId);
+  if (existing) return existing.promise;
+  const request = {
+    ...details, kind, sessionId, requestId, runCtx,
+    runId: String(runCtx?.runId || ''), settled: false, collapsed: false,
+    currentIndex: 0,
+    drafts: (details.questions || []).map(() => ({ selected: [], custom: '', customExpanded: false, scrollTop: 0 })),
+    visionRelayChecked: details.visionRelay?.checked !== false
+  };
+  request.promise = new Promise(resolve => { request.resolve = resolve; });
+  queue.push(request);
+  agentInteractionQueues.set(sessionId, queue);
+  syncAgentInteractionPanel();
+  renderSessionList();
+  return request.promise;
+}
+
+function completeAgentInteraction(request, response) {
+  if (!request || request.settled) return;
+  if (request === agentQuestionRequest || request === agentPermissionRequest) hideAgentInteractionPanel();
+  clearTimeout(request.autoAdvanceTimer);
+  request.settled = true;
+  const remaining = (agentInteractionQueues.get(request.sessionId) || []).filter(item => item !== request);
+  if (remaining.length) agentInteractionQueues.set(request.sessionId, remaining);
+  else agentInteractionQueues.delete(request.sessionId);
+  request.resolve(response);
+  syncAgentInteractionPanel();
+  renderSessionList();
+}
+
+function settleAgentInteractionForRun(runCtx, { permissionDecision = null } = {}) {
+  if (!runCtx) return;
+  runCtx.agentInteractionsClosed = true;
+  const requests = [...(agentInteractionQueues.get(String(runCtx.sessionId || '')) || [])];
+  for (const request of requests) {
+    if (request.runCtx !== runCtx) continue;
+    if (request.kind === 'question') settleAgentQuestion({ cancelled: true }, { silent: true, request });
+    else settleAgentPermission(permissionDecision, { silent: true, request });
+  }
+}
+
+function settleAgentInteractionsForSession(sessionId) {
+  const requests = [...(agentInteractionQueues.get(String(sessionId || '')) || [])];
+  for (const request of requests) {
+    if (request.kind === 'question') settleAgentQuestion({ cancelled: true }, { silent: true, request });
+    else settleAgentPermission(null, { silent: true, request });
   }
 }
 
@@ -11214,11 +11368,14 @@ function resetAgentPermissionPanel() {
   const questionPrev = $('#agentQuestionHeaderPrev');
   const questionNext = $('#agentQuestionHeaderNext');
   panel?.classList.add('hidden');
+  $('#chatMainColumn')?.classList.remove('permission-pending');
   $('#chatMainColumn')?.classList.remove('question-pending');
   panel?.classList.remove('collapsed');
   if (panel) {
     delete panel.dataset.mode;
     delete panel.dataset.state;
+    delete panel.dataset.sessionId;
+    delete panel.dataset.requestId;
     for (const property of [
       '--agent-permission-bottom',
       '--agent-permission-max-height',
@@ -11333,13 +11490,19 @@ function positionAgentPermissionPanel() {
   panel.style.setProperty('--agent-permission-max-height', `${availableHeight}px`);
 }
 
-function settleAgentPermission(decision, { silent = false } = {}) {
-  const request = agentPermissionRequest;
-  agentPermissionRequest = null;
-  $('#chatMainColumn')?.classList.remove('permission-pending');
-  request?.resolve(decision, { silent });
-  resetAgentPermissionPanel();
-  syncBrowserFocusPromptStatus();
+function settleAgentPermission(decision, { silent = false, request = null } = {}) {
+  const target = request || agentPermissionRequest;
+  if (!target || target.kind !== 'permission' || target.settled) return;
+  if (!request && !isAgentInteractionVisible(target)) return;
+  if (isAgentInteractionVisible(target)) captureAgentInteractionPanelState();
+  if (!silent) {
+    if (decision === 'always') toast('已记住并允许这类操作');
+    else if (decision === 'once') toast('已允许本次操作');
+    else if (decision === 'deny') toast('已拒绝操作，Agent 将尝试其他方式');
+  }
+  completeAgentInteraction(target, {
+    decision, useVisionRelay: target.visionRelay?.show ? target.visionRelayChecked === true : false
+  });
 }
 
 function normalizeAgentQuestionOptions(question) {
@@ -11423,8 +11586,15 @@ function syncAgentQuestionButtons() {
 function renderAgentQuestionStep({ focus = true } = {}) {
   const request = agentQuestionRequest;
   const fields = $('#agentQuestionFields');
-  if (!request || !fields) return;
+  if (!isAgentInteractionVisible(request) || !fields) return;
   const questionIndex = request.currentIndex;
+  const renderVersion = request.renderVersion = (request.renderVersion || 0) + 1;
+  const displayVersion = agentInteractionDisplayVersion;
+  const isCurrentStep = () => isAgentInteractionVisible(request)
+    && request.currentIndex === questionIndex && request.renderVersion === renderVersion
+    && agentInteractionDisplayVersion === displayVersion;
+  clearTimeout(request.autoAdvanceTimer);
+  request.autoAdvanceTimer = null;
   const question = request.questions[questionIndex] || {};
   const draft = request.drafts[questionIndex];
   const options = normalizeAgentQuestionOptions(question);
@@ -11486,6 +11656,7 @@ function renderAgentQuestionStep({ focus = true } = {}) {
       optionArrow.className = 'agent-question-option-arrow';
       optionArrow.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
       input.addEventListener('change', () => {
+        if (!isCurrentStep()) return;
         if (question.multiple) {
           draft.selected = Array.from(optionGroup.querySelectorAll('input:checked')).map(control => control.value);
         } else {
@@ -11497,7 +11668,11 @@ function renderAgentQuestionStep({ focus = true } = {}) {
         clearAgentQuestionError();
         updateAgentQuestionNote(item, options, draft);
         if (input.checked) {
-          window.setTimeout(() => advanceAgentQuestion(), 90);
+          clearTimeout(request.autoAdvanceTimer);
+          request.autoAdvanceTimer = window.setTimeout(() => {
+            request.autoAdvanceTimer = null;
+            if (isCurrentStep()) advanceAgentQuestion();
+          }, 90);
         }
       });
       label.append(input, optionIndexBadge, optionCopy, optionArrow);
@@ -11518,27 +11693,30 @@ function renderAgentQuestionStep({ focus = true } = {}) {
   error.setAttribute('role', 'alert');
   item.appendChild(error);
   fields.append(item);
-  fields.onscroll = syncAgentQuestionScrollFade;
+  fields.onscroll = () => {
+    if (!isCurrentStep()) return;
+    draft.scrollTop = fields.scrollTop;
+    syncAgentQuestionScrollFade();
+  };
   const customReply = $('#agentQuestionCustomReply');
   const customInput = $('#agentQuestionCustomInput');
   const customField = $('#agentQuestionCustomField');
   const customToggle = $('#agentQuestionCustomToggle');
   customReply?.classList.remove('hidden');
-  customField?.classList.add('hidden');
-  customToggle?.setAttribute('aria-expanded', 'false');
+  const customExpanded = draft.customExpanded || !!draft.custom || !options.length;
+  customField?.classList.toggle('hidden', !customExpanded);
+  customToggle?.setAttribute('aria-expanded', String(customExpanded));
   if (customInput) {
     customInput.value = draft.custom || '';
     customInput.placeholder = options.length ? '否，并告诉 Z 应该如何做不同' : '请输入你的回答';
   }
-  if (!options.length) {
-    customField?.classList.remove('hidden');
-    customToggle?.setAttribute('aria-expanded', 'true');
-  }
   syncAgentQuestionButtons();
   requestAnimationFrame(() => {
+    if (!isCurrentStep()) return;
+    fields.scrollTop = draft.scrollTop || 0;
     positionAgentPermissionPanel();
     syncAgentQuestionScrollFade();
-    if (focus) {
+    if (focus && !request.collapsed) {
       fields.querySelector('input')?.focus({ preventScroll: true });
       if (!fields.querySelector('input')) $('#agentQuestionCustomInput')?.focus({ preventScroll: true });
     }
@@ -11557,7 +11735,7 @@ function collectAgentQuestionAnswers({ fallback = false } = {}) {
 
 function advanceAgentQuestion() {
   const request = agentQuestionRequest;
-  if (!request) return;
+  if (!isAgentInteractionVisible(request)) return;
   const answer = agentQuestionDraftAnswer(
     request.questions[request.currentIndex],
     request.drafts[request.currentIndex]
@@ -11577,7 +11755,7 @@ function advanceAgentQuestion() {
 
 function skipAgentQuestion() {
   const request = agentQuestionRequest;
-  if (!request) return;
+  if (!isAgentInteractionVisible(request)) return;
   const current = request.questions[request.currentIndex];
   const draft = request.drafts[request.currentIndex];
   if (!agentQuestionDraftAnswer(current, draft).length) {
@@ -11593,158 +11771,139 @@ function skipAgentQuestion() {
 
 function retreatAgentQuestion() {
   const request = agentQuestionRequest;
-  if (!request || request.currentIndex <= 0) return;
+  if (!isAgentInteractionVisible(request) || request.currentIndex <= 0) return;
   request.currentIndex -= 1;
   clearAgentQuestionError();
   renderAgentQuestionStep();
 }
 
-function settleAgentQuestion(result = {}, { silent = false } = {}) {
-  const request = agentQuestionRequest;
-  if (!request) return;
-  agentQuestionRequest = null;
-  $('#chatMainColumn')?.classList.remove('permission-pending');
-  $('#chatMainColumn')?.classList.remove('question-pending');
-  request.resolve({
+function settleAgentQuestion(result = {}, { silent = false, request = null } = {}) {
+  const target = request || agentQuestionRequest;
+  if (!target || target.kind !== 'question' || target.settled) return;
+  if (!request && !isAgentInteractionVisible(target)) return;
+  completeAgentInteraction(target, {
     answers: Array.isArray(result.answers) ? result.answers : [],
     reject: result.reject === true,
     cancelled: result.cancelled === true
   });
   if (!silent && result.reject === true) toast('已拒绝问题，Agent 将继续处理');
-  resetAgentPermissionPanel();
-  syncBrowserFocusPromptStatus();
 }
 
 function requestAgentQuestion({ requestId = '', questions = [], sessionId }, runCtx) {
-  return new Promise(resolve => {
-    if (agentPermissionRequest) settleAgentPermission('deny', { silent: true });
-    if (agentQuestionRequest) settleAgentQuestion({ cancelled: true }, { silent: true });
-    const panel = $('#agentPermissionPanel');
-    const titleEl = $('#agentPermissionTitle');
-    const descriptionEl = $('#agentPermissionDescription');
-    const fields = $('#agentQuestionFields');
-    const detailEl = $('#agentPermissionDetail');
-    const alwaysButton = $('#agentPermissionAlways');
-    const onceButton = $('#agentPermissionOnce');
-    const denyButton = $('#agentPermissionDeny');
-    if (!panel || !titleEl || !descriptionEl || !fields || !detailEl || !onceButton || !denyButton) {
-      resolve({
-        answers: questions.map(question => agentQuestionSkipAnswer(question)),
-        reject: false,
-        cancelled: false
-      });
-      return;
-    }
-    titleEl.textContent = '等待你的回答';
-    descriptionEl.textContent = '';
-    descriptionEl.classList.add('hidden');
-    fields.classList.remove('hidden');
-    detailEl.classList.add('hidden');
-    alwaysButton?.classList.remove('primary-btn', 'secondary-btn');
-    alwaysButton?.classList.add('ghost-btn');
-    onceButton.classList.remove('secondary-btn');
-    onceButton.classList.add('primary-btn');
-    panel.dataset.mode = 'question';
-    panel.dataset.state = 'ready';
-    const composerWidth = $('#composer')?.getBoundingClientRect().width;
-    if (composerWidth > 0) panel.style.setProperty('--agent-question-width', `${Math.round(composerWidth)}px`);
-    panel.classList.remove('hidden', 'collapsed');
-    $('#agentPermissionToggle')?.setAttribute('aria-expanded', 'true');
-    $('#chatMainColumn')?.classList.add('permission-pending');
-    $('#chatMainColumn')?.classList.add('question-pending');
-    positionAgentPermissionPanel();
-    if (browserFocusMode) setBrowserFocusComposerMode('expanded');
-    syncBrowserFocusPromptStatus();
-    agentQuestionRequest = {
-      resolve,
-      runCtx,
-      sessionId,
-      requestId: String(requestId || ''),
-      questions,
-      currentIndex: 0,
-      drafts: questions.map(() => ({ selected: [], custom: '' }))
-    };
-    renderAgentQuestionStep();
-  });
+  return enqueueAgentInteraction('question', { requestId, questions, sessionId }, runCtx);
+}
+
+function renderAgentQuestionPanel(request) {
+  const panel = $('#agentPermissionPanel');
+  const titleEl = $('#agentPermissionTitle');
+  const descriptionEl = $('#agentPermissionDescription');
+  const fields = $('#agentQuestionFields');
+  const detailEl = $('#agentPermissionDetail');
+  const alwaysButton = $('#agentPermissionAlways');
+  const onceButton = $('#agentPermissionOnce');
+  const denyButton = $('#agentPermissionDeny');
+  if (!panel || !titleEl || !descriptionEl || !fields || !detailEl || !onceButton || !denyButton) {
+    settleAgentQuestion({ answers: request.questions.map(agentQuestionSkipAnswer) }, { request, silent: true });
+    return;
+  }
+  titleEl.textContent = '等待你的回答';
+  descriptionEl.textContent = '';
+  descriptionEl.classList.add('hidden');
+  fields.classList.remove('hidden');
+  detailEl.classList.add('hidden');
+  alwaysButton?.classList.remove('primary-btn', 'secondary-btn');
+  alwaysButton?.classList.add('ghost-btn');
+  onceButton.classList.remove('secondary-btn');
+  onceButton.classList.add('primary-btn');
+  panel.dataset.mode = 'question';
+  panel.dataset.state = 'ready';
+  panel.dataset.sessionId = request.sessionId;
+  panel.dataset.requestId = request.requestId;
+  const composerWidth = $('#composer')?.getBoundingClientRect().width;
+  if (composerWidth > 0) panel.style.setProperty('--agent-question-width', `${Math.round(composerWidth)}px`);
+  panel.classList.remove('hidden');
+  panel.classList.toggle('collapsed', request.collapsed);
+  $('#agentPermissionToggle')?.setAttribute('aria-expanded', String(!request.collapsed));
+  $('#chatMainColumn')?.classList.add('permission-pending', 'question-pending');
+  positionAgentPermissionPanel();
+  if (browserFocusMode) setBrowserFocusComposerMode('expanded');
+  syncBrowserFocusPromptStatus();
+  renderAgentQuestionStep();
 }
 
 function requestAgentPermission({ requestId = '', title, description, detail, sessionId, allowAlways = true, visionRelay = null }, runCtx) {
-  return new Promise((resolve) => {
-    if (agentQuestionRequest) settleAgentQuestion({ cancelled: true }, { silent: true });
-    if (agentPermissionRequest) settleAgentPermission('deny', { silent: true });
-    const panel = $('#agentPermissionPanel');
-    const titleEl = $('#agentPermissionTitle');
-    const descriptionEl = $('#agentPermissionDescription');
-    const detailEl = $('#agentPermissionDetail');
-    const alwaysButton = $('#agentPermissionAlways');
-    const onceButton = $('#agentPermissionOnce');
-    const denyButton = $('#agentPermissionDeny');
-    const questionFields = $('#agentQuestionFields');
-    const visionRelayOption = $('#agentPermissionVisionRelayOption');
-    const visionRelayCheck = $('#agentPermissionVisionRelayCheck');
-    const visionRelayDesc = $('#agentPermissionVisionRelayDesc');
-    if (!panel || !titleEl || !descriptionEl || !detailEl) {
-      resolve({ decision: 'deny', useVisionRelay: false });
-      return;
-    }
-    titleEl.textContent = title || '权限确认';
-    descriptionEl.textContent = description || 'Agent 请求执行受限操作，是否允许：';
-    detailEl.textContent = detail || '(empty)';
-    detailEl.classList.remove('hidden');
-    questionFields?.classList.add('hidden');
-    questionFields?.replaceChildren();
-    onceButton && (onceButton.textContent = '本次允许');
-    denyButton && (denyButton.textContent = '拒绝');
-    panel.dataset.mode = 'permission';
-    alwaysButton?.classList.toggle('hidden', allowAlways === false);
+  return enqueueAgentInteraction('permission', {
+    requestId, title, description, detail, sessionId, allowAlways,
+    visionRelay: visionRelay ? { ...visionRelay } : null
+  }, runCtx);
+}
 
-    const showVisionRelay = !!visionRelay?.show;
-    visionRelayOption?.classList.toggle('hidden', !showVisionRelay);
-    if (showVisionRelay && visionRelayCheck) {
-      visionRelayCheck.checked = visionRelay.checked !== false;
-      visionRelayCheck.disabled = visionRelay.readOnly === true;
-      if (visionRelayDesc && visionRelay.description) {
-        visionRelayDesc.textContent = visionRelay.description;
-      }
-    }
-
-    panel.classList.remove('hidden', 'collapsed');
-    $('#agentPermissionToggle')?.setAttribute('aria-expanded', 'true');
-    $('#chatMainColumn')?.classList.add('permission-pending');
-    if (browserFocusMode) setBrowserFocusComposerMode('expanded');
-    syncBrowserFocusPromptStatus();
-    agentPermissionRequest = {
-      resolve: (decision, extras = {}) => {
-        const useVisionRelay = showVisionRelay ? (visionRelayCheck?.checked ?? false) : false;
-        const { silent = false } = extras;
-        if (!silent) {
-          if (decision === 'always') {
-            toast('已记住并允许这类操作');
-          } else if (decision === 'once') {
-            toast('已允许本次操作');
-          } else if (decision === 'deny') {
-            toast('已拒绝操作，Agent 将尝试其他方式');
-          }
-        }
-        resolve({ decision, useVisionRelay });
-      },
-      runCtx,
-      sessionId,
-      requestId: String(requestId || '')
-    };
-    requestAnimationFrame(positionAgentPermissionPanel);
+function renderAgentPermissionPanel(request) {
+  const panel = $('#agentPermissionPanel');
+  const titleEl = $('#agentPermissionTitle');
+  const descriptionEl = $('#agentPermissionDescription');
+  const detailEl = $('#agentPermissionDetail');
+  const alwaysButton = $('#agentPermissionAlways');
+  const onceButton = $('#agentPermissionOnce');
+  const denyButton = $('#agentPermissionDeny');
+  const questionFields = $('#agentQuestionFields');
+  const visionRelayOption = $('#agentPermissionVisionRelayOption');
+  const visionRelayCheck = $('#agentPermissionVisionRelayCheck');
+  const visionRelayDesc = $('#agentPermissionVisionRelayDesc');
+  if (!panel || !titleEl || !descriptionEl || !detailEl) {
+    settleAgentPermission('deny', { request, silent: true });
+    return;
+  }
+  titleEl.textContent = request.title || '权限确认';
+  descriptionEl.textContent = request.description || 'Agent 请求执行受限操作，是否允许：';
+  descriptionEl.classList.remove('hidden');
+  detailEl.textContent = request.detail || '(empty)';
+  detailEl.classList.remove('hidden');
+  questionFields?.classList.add('hidden');
+  questionFields?.replaceChildren();
+  onceButton && (onceButton.textContent = '本次允许');
+  denyButton && (denyButton.textContent = '拒绝');
+  panel.dataset.mode = 'permission';
+  panel.dataset.sessionId = request.sessionId;
+  panel.dataset.requestId = request.requestId;
+  alwaysButton?.classList.toggle('hidden', request.allowAlways === false);
+  const showVisionRelay = !!request.visionRelay?.show;
+  visionRelayOption?.classList.toggle('hidden', !showVisionRelay);
+  if (showVisionRelay && visionRelayCheck) {
+    visionRelayCheck.checked = request.visionRelayChecked;
+    visionRelayCheck.disabled = request.visionRelay.readOnly === true;
+    if (visionRelayDesc) visionRelayDesc.textContent = request.visionRelay.description || '';
+  }
+  panel.classList.remove('hidden');
+  panel.classList.toggle('collapsed', request.collapsed);
+  $('#agentPermissionToggle')?.setAttribute('aria-expanded', String(!request.collapsed));
+  $('#chatMainColumn')?.classList.add('permission-pending');
+  if (browserFocusMode) setBrowserFocusComposerMode('expanded');
+  syncBrowserFocusPromptStatus();
+  const displayVersion = agentInteractionDisplayVersion;
+  requestAnimationFrame(() => {
+    if (isAgentInteractionVisible(request) && displayVersion === agentInteractionDisplayVersion) positionAgentPermissionPanel();
   });
 }
 
 async function handleSessionAgentCommand(detail = {}) {
   const requestId = String(detail.requestId || '');
   if (!requestId) return;
+  const sourceSessionId = String(detail.sourceSessionId || '').trim();
+  if (!sourceSessionId) {
+    return api.sessionAgentCommandResult({
+      requestId, approved: false,
+      error: '任务来源无效，无法请求跨工作区授权。',
+      code: 'SESSION_HANDOFF_INVALID_SOURCE'
+    });
+  }
   const sourceWorkspace = String(detail.sourceWorkspace || '(blank)');
   const targetWorkspace = String(detail.targetWorkspace || '');
   const reason = String(detail.reason || '').trim();
   let decision = 'deny';
   try {
     ({ decision } = await requestAgentPermission({
+      requestId,
       title: '进入其他工作区任务',
       description: 'Agent 请求进入目标工作区；如已有任务将返回最新任务，否则创建新任务，是否允许：',
       detail: [
@@ -11752,9 +11911,9 @@ async function handleSessionAgentCommand(detail = {}) {
         `目标工作区：${targetWorkspace}`,
         reason ? `原因：${reason}` : ''
       ].filter(Boolean).join('\n'),
-      sessionId: String(detail.sourceSessionId || ''),
+      sessionId: sourceSessionId,
       allowAlways: false
-    }, getRunCtx(String(detail.sourceSessionId || ''))));
+    }, getRunCtx(sourceSessionId)));
   } catch (error) {
     console.error('[session-agent-approval]', error);
   }
@@ -11821,16 +11980,19 @@ function bindAgentPermissionPanel() {
   });
   $('#agentQuestionCustomToggle')?.addEventListener('click', event => {
     event.stopPropagation();
+    const request = agentQuestionRequest;
+    if (!isAgentInteractionVisible(request)) return;
     const field = $('#agentQuestionCustomField');
     const toggle = $('#agentQuestionCustomToggle');
     if (!field || !toggle) return;
     const open = field.classList.toggle('hidden') === false;
+    request.drafts[request.currentIndex].customExpanded = open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open) $('#agentQuestionCustomInput')?.focus({ preventScroll: true });
   });
   $('#agentQuestionCustomInput')?.addEventListener('input', event => {
     const request = agentQuestionRequest;
-    if (!request) return;
+    if (!isAgentInteractionVisible(request)) return;
     const draft = request.drafts[request.currentIndex];
     draft.custom = String(event.target.value || '');
     if (draft.custom.trim()) draft.selected = [];
@@ -11843,8 +12005,10 @@ function bindAgentPermissionPanel() {
   });
   $('#agentPermissionToggle')?.addEventListener('click', () => {
     const panel = $('#agentPermissionPanel');
-    if (!panel) return;
+    const request = agentQuestionRequest || agentPermissionRequest;
+    if (!panel || !isAgentInteractionVisible(request)) return;
     const collapsed = panel.classList.toggle('collapsed');
+    request.collapsed = collapsed;
     $('#agentPermissionToggle')?.setAttribute('aria-expanded', String(!collapsed));
   });
   $('#agentPermissionToggle')?.addEventListener('keydown', event => {
@@ -11870,6 +12034,11 @@ function bindAgentPermissionPanel() {
   bindQuestionHeaderAction('#agentQuestionHeaderPrev', () => retreatAgentQuestion());
   bindQuestionHeaderAction('#agentQuestionHeaderNext', () => advanceAgentQuestion());
   bindQuestionHeaderAction('#agentQuestionHeaderClose', () => skipAgentQuestion());
+  $('#agentPermissionVisionRelayCheck')?.addEventListener('change', event => {
+    if (isAgentInteractionVisible(agentPermissionRequest)) {
+      agentPermissionRequest.visionRelayChecked = event.target.checked === true;
+    }
+  });
   window.addEventListener('resize', positionAgentPermissionPanel);
 }
 
@@ -22257,12 +22426,13 @@ async function selectAccessMode(mode, { closeMenu = true } = {}) {
     if (closeMenu) setAccessModeMenuOpen(false);
     return;
   }
+  const pendingPermission = isAgentInteractionVisible(agentPermissionRequest) ? agentPermissionRequest : null;
   state.config = await api.setConfig({ agent: { accessMode: mode } });
   for (const entry of state.activeRuns.values()) {
     if (entry?.runCtx) entry.runCtx.accessMode = mode;
   }
-  if (mode === 'full' && agentPermissionRequest) {
-    settleAgentPermission('always');
+  if (mode === 'full' && pendingPermission && !pendingPermission.settled) {
+    settleAgentPermission('always', { request: pendingPermission, silent: !isAgentInteractionVisible(pendingPermission) });
   }
   renderAccessModeControl();
   if (closeMenu) setAccessModeMenuOpen(false);
@@ -22607,9 +22777,17 @@ async function applySessionWorkspace(workspace) {
     && (normalized ? String(session.workspace || '').trim() === normalized : session.workspaceKind === 'default')
   ));
   if (reusable && isBlankNewChat(targetSession) && !getComposerText().trim()) {
+    const selectionToken = sessionLoadToken;
     if (state.currentSession?.id) pauseUiForSession(state.currentSession.id);
-    const removed = await api.deleteSession(targetSession.id);
+    let removed;
+    try { removed = await api.deleteSession(targetSession.id); }
+    finally {
+      if (selectionToken === sessionLoadToken && state.currentSession?.id === targetSession.id) {
+        syncAgentInteractionPanel({ resume: true });
+      }
+    }
     if (removed?.ok) {
+      settleAgentInteractionsForSession(targetSession.id);
       state.sessions = state.sessions.filter(session => session.id !== targetSession.id);
       await loadSession(reusable.id);
       toast(normalized ? '工作区已更新' : '已使用自动任务文件夹');

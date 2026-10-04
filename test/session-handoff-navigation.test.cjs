@@ -61,7 +61,7 @@ function fixture() {
     'renderRightSidebarReview', 'updateTaskBar', 'updateSendState', 'renderSessionList',
     'renderWdMonitor', 'renderWdMonitorLoading', 'renderModelBadge', 'syncSessionOpenCodeIdAfterRun',
     'attachAgentRunChangeSummary', 'persistSessionContextCompression',
-    'syncChatAutoFollowUi', 'finishPetSupervision'
+    'syncChatAutoFollowUi', 'finishPetSupervision', 'syncAgentInteractionPanel', 'settleAgentInteractionForRun'
   ]) context[name] = () => {};
   vm.createContext(context);
   for (const code of [
