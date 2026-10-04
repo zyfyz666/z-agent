@@ -109,6 +109,8 @@ const state = {
 
 const WORKSPACE_SIDEBAR_META_KEY = 'yan.workspace-sidebar-meta.v1';
 const WORKSPACE_COLLAPSED_KEY = 'yan.workspace-sidebar-collapsed.v1';
+const RECENT_COLLAPSED_KEY = 'z.recent-sessions-collapsed.v1';
+const RECENT_SESSION_PAGE_SIZE = 10;
 
 function loadWorkspaceSidebarMeta() {
   try {
@@ -138,6 +140,9 @@ function saveCollapsedWorkspaceGroups() {
 
 let workspaceSidebarMeta = loadWorkspaceSidebarMeta();
 let collapsedWorkspaceGroups = loadCollapsedWorkspaceGroups();
+let recentSessionsCollapsed = false;
+try { recentSessionsCollapsed = window.localStorage.getItem(RECENT_COLLAPSED_KEY) === 'true'; } catch {}
+let recentSessionLimit = RECENT_SESSION_PAGE_SIZE;
 
 const MAX_CONCURRENT_RUNS = 3;
 const pendingAgentHandoffs = new Map();
@@ -1767,16 +1772,21 @@ function bindGenericConfirmDialog() {
 }
 
 let sidebarContextMenu = null;
+let sidebarContextMenuAnchor = null;
 
-function closeSidebarContextMenu() {
+function closeSidebarContextMenu({ restoreFocus = false } = {}) {
+  const anchor = sidebarContextMenuAnchor;
   sidebarContextMenu?.remove();
   sidebarContextMenu = null;
+  sidebarContextMenuAnchor = null;
+  anchor?.setAttribute('aria-expanded', 'false');
   document.querySelectorAll('[data-workspace-menu-toggle], [data-session-menu-toggle]').forEach(button => {
     button.setAttribute('aria-expanded', 'false');
   });
+  if (restoreFocus && anchor?.isConnected) anchor.focus();
 }
 
-function openSidebarContextMenu(anchor, items) {
+function openSidebarContextMenu(anchor, items, position = null) {
   closeSidebarContextMenu();
   const menu = document.createElement('div');
   menu.className = 'sidebar-context-menu';
@@ -1784,28 +1794,45 @@ function openSidebarContextMenu(anchor, items) {
   items.forEach(item => {
     const button = document.createElement('button');
     button.type = 'button';
+    button.setAttribute('role', 'menuitem');
     button.className = `sidebar-context-menu-item${item.danger ? ' danger' : ''}`;
     button.innerHTML = `${item.icon || ''}<span>${escapeHtml(item.label)}</span>`;
     button.addEventListener('click', async event => {
       event.stopPropagation();
       closeSidebarContextMenu();
-      await item.onSelect?.();
+      try { await item.onSelect?.(); }
+      catch (error) { toast(error?.message || '操作失败，请重试'); }
     });
     menu.appendChild(button);
   });
   document.body.appendChild(menu);
   sidebarContextMenu = menu;
+  sidebarContextMenuAnchor = anchor;
   anchor.setAttribute('aria-expanded', 'true');
 
   const rect = anchor.getBoundingClientRect();
   const menuRect = menu.getBoundingClientRect();
-  const left = Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, rect.right - menuRect.width));
+  const preferredLeft = position ? position.clientX : rect.right - menuRect.width;
+  const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, preferredLeft));
   const below = rect.bottom + 5;
-  const top = below + menuRect.height <= window.innerHeight - 8
+  const preferredTop = position ? position.clientY : below + menuRect.height <= window.innerHeight - 8
     ? below
     : Math.max(8, rect.top - menuRect.height - 5);
+  const top = Math.max(8, Math.min(window.innerHeight - menuRect.height - 8, preferredTop));
   menu.style.left = `${Math.round(left)}px`;
   menu.style.top = `${Math.round(top)}px`;
+  menu.addEventListener('keydown', event => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Escape') { closeSidebarContextMenu({ restoreFocus: true }); return; }
+    const buttons = [...menu.querySelectorAll('button')];
+    const index = buttons.indexOf(document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+      : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  });
+  requestAnimationFrame(() => { if (sidebarContextMenu === menu) menu.querySelector('button')?.focus(); });
 }
 
 document.addEventListener('pointerdown', event => {
@@ -1813,6 +1840,26 @@ document.addEventListener('pointerdown', event => {
   closeSidebarContextMenu();
 });
 window.addEventListener('resize', closeSidebarContextMenu);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && sidebarContextMenu) closeSidebarContextMenu({ restoreFocus: true });
+});
+
+function openSessionSidebarMenu(anchor, sessionId, position) {
+  const session = state.sessions.find(item => item.id === sessionId);
+  if (!session) return;
+  openSidebarContextMenu(anchor, [{
+    label: '重命名',
+    icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/></svg>',
+    onSelect: () => openRenameTaskDialog(session)
+  }, {
+    label: session.pinned ? '取消置顶任务' : '置顶任务',
+    icon: ICONS.pin,
+    onSelect: () => toggleSessionPinnedFromSidebar(session)
+  }, {
+    label: '移除任务', icon: ICONS.trash, danger: true,
+    onSelect: () => deleteSessionFromSidebar(sessionId)
+  }], position);
+}
 
 let sessionTitleResizeObserver = null;
 let sessionTitleMeasureFrame = 0;
@@ -1958,6 +2005,10 @@ function renderSessionList() {
   const pinnedSessions = state.sessions
     .filter(session => !!session.pinned)
     .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+  const recentSessions = state.sessions
+    .filter(session => session.pinned || !workspaceSidebarMeta[workspaceGroupKey(session)]?.hidden)
+    .slice().sort((a, b) => (Number(b.updatedAt) || Number(b.createdAt) || 0)
+      - (Number(a.updatedAt) || Number(a.createdAt) || 0));
 
   state.sessions.forEach(session => {
     const workspace = session.workspaceKind === 'default' ? '' : String(session.workspace || '').trim();
@@ -1989,12 +2040,12 @@ function renderSessionList() {
     return;
   }
 
-  const renderSessionRow = (session, { pinnedSection = false } = {}) => {
+  const renderSessionRow = (session, { pinnedSection = false, recentSection = false } = {}) => {
     const running = isSessionRunning(session.id);
     const dead = session.workspaceMissing === true;
     const interactionStatus = agentInteractionStatusForSession(session.id);
     return `
-      <div class="session-item ${pinnedSection ? 'pinned-session-item' : ''} ${state.currentSession && session.id === state.currentSession.id ? 'active' : ''} ${running ? 'running' : ''} ${session.pinned ? 'pinned' : ''} ${dead ? 'is-dead-workspace' : ''}" data-id="${escapeAttr(session.id)}"${dead ? ' title="该任务所在的工作区已被删除"' : ''}>
+      <div class="session-item ${pinnedSection ? 'pinned-session-item' : ''} ${recentSection ? 'recent-session-item' : ''} ${state.currentSession && session.id === state.currentSession.id ? 'active' : ''} ${running ? 'running' : ''} ${session.pinned ? 'pinned' : ''} ${dead ? 'is-dead-workspace' : ''}" data-id="${escapeAttr(session.id)}" tabindex="0" role="button"${dead ? ' title="该任务所在的工作区已被删除"' : ''}>
         ${running ? '<span class="session-spinner"></span>' : ''}
         <span class="session-title-shell">
           <span class="session-title-track">
@@ -2011,6 +2062,19 @@ function renderSessionList() {
     ? `<section class="sidebar-list-section pinned-section">
         <div class="sidebar-list-section-label">置顶</div>
         <div class="pinned-session-list">${pinnedSessions.map(session => renderSessionRow(session, { pinnedSection: true })).join('')}</div>
+      </section>`
+    : '';
+
+  const recentMarkup = recentSessions.length
+    ? `<section class="sidebar-list-section recent-section">
+        <button type="button" class="sidebar-list-section-header recent-section-toggle" data-recent-action="toggle" aria-expanded="${!recentSessionsCollapsed}" aria-controls="recentSessionList" title="按最近更新时间排列">
+          <span class="sidebar-list-section-label">最近</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="${recentSessionsCollapsed ? 'm9 5 7 7-7 7' : 'm5 9 7 7 7-7'}"/></svg>
+        </button>
+        <div id="recentSessionList" class="recent-session-list"${recentSessionsCollapsed ? ' hidden' : ''}>
+          ${recentSessions.slice(0, recentSessionLimit).map(session => renderSessionRow(session, { recentSection: true })).join('')}
+          ${recentSessions.length > recentSessionLimit ? '<button type="button" class="recent-show-more" data-recent-action="more">显示更多</button>' : ''}
+        </div>
       </section>`
     : '';
 
@@ -2053,8 +2117,26 @@ function renderSessionList() {
       </section>`
     : '';
 
-  list.innerHTML = pinnedMarkup + projectsMarkup;
+  list.innerHTML = pinnedMarkup + recentMarkup + projectsMarkup;
   trackSessionTitleOverflow(list);
+
+  list.querySelectorAll('[data-recent-action]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const action = button.dataset.recentAction;
+      if (action === 'more') recentSessionLimit += RECENT_SESSION_PAGE_SIZE;
+      else {
+        recentSessionsCollapsed = !recentSessionsCollapsed;
+        try { window.localStorage.setItem(RECENT_COLLAPSED_KEY, String(recentSessionsCollapsed)); } catch {}
+      }
+      const scrollTop = list.scrollTop;
+      renderSessionList();
+      list.scrollTop = scrollTop;
+      const replacement = list.querySelector(`[data-recent-action="${action}"]`)
+        || list.querySelector('[data-recent-action="toggle"]');
+      replacement?.focus({ preventScroll: true });
+    });
+  });
 
   list.querySelectorAll('[data-project-view-action]').forEach(button => {
     button.addEventListener('click', event => {
@@ -2146,23 +2228,26 @@ function renderSessionList() {
   list.querySelectorAll('[data-session-menu-toggle]').forEach(button => {
     button.addEventListener('click', event => {
       event.stopPropagation();
-      const id = button.dataset.sessionMenuToggle || '';
-      const session = state.sessions.find(item => item.id === id);
-      if (!session) return;
-      openSidebarContextMenu(button, [{
-        label: session.pinned ? '取消置顶任务' : '置顶任务',
-        icon: ICONS.pin,
-        onSelect: () => toggleSessionPinnedFromSidebar(session)
-      }, {
-        label: '移除任务',
-        icon: ICONS.trash,
-        danger: true,
-        onSelect: () => deleteSessionFromSidebar(id)
-      }]);
+      openSessionSidebarMenu(button, button.dataset.sessionMenuToggle || '');
     });
   });
 
   list.querySelectorAll('.session-item').forEach(el => {
+    el.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openSessionSidebarMenu(el, el.dataset.id, event);
+    });
+    el.addEventListener('keydown', event => {
+      if (event.target !== el) return;
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        event.preventDefault();
+        openSessionSidebarMenu(el, el.dataset.id);
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        el.click();
+      }
+    });
     el.addEventListener('click', async (e) => {
       if (e.target.closest('[data-session-menu-toggle]')) return;
       switchSidebarNav('tasks');
@@ -2384,8 +2469,9 @@ async function persistCurrentSession(session) {
     const firstUser = session.messages.find(m => m.role === 'user');
     if (firstUser) {
       const title = deriveTitle(firstUser.content);
-      session.title = title;
-      await api.renameSession(session.id, title);
+      const renamed = await api.renameSession(session.id, title, { automatic: true });
+      if (!renamed?.title) throw new Error('对话名称保存失败');
+      session.title = renamed.title;
       if (state.currentSession?.id === session.id) syncPetFocusedSession(session);
     }
   }
@@ -23049,15 +23135,18 @@ async function toggleCurrentTaskPinned() {
 }
 
 let renameTaskSessionId = null;
+let renameTaskDialogVersion = 0;
+let renameTaskSaving = false;
 
-function openRenameTaskDialog() {
-  const session = state.currentSession;
+function openRenameTaskDialog(session = state.currentSession) {
   if (!session) return;
+  const version = ++renameTaskDialogVersion;
   renameTaskSessionId = session.id;
   const input = $('#renameTaskInput');
   input.value = displaySessionTitle(session.title);
   $('#renameTaskModal').classList.remove('hidden');
   requestAnimationFrame(() => {
+    if (renameTaskDialogVersion !== version || renameTaskSessionId !== session.id) return;
     input.focus();
     input.select();
   });
@@ -23070,28 +23159,35 @@ function closeRenameTaskDialog() {
 
 async function confirmTaskRename() {
   const id = renameTaskSessionId;
+  const version = renameTaskDialogVersion;
   const title = String($('#renameTaskInput')?.value || '').trim();
-  if (!id) return;
+  if (!id || renameTaskSaving) return;
   if (!title) {
     toast('任务名称不能为空');
     $('#renameTaskInput')?.focus();
     return;
   }
-  const updated = await api.renameSession(id, title);
-  if (!updated) {
-    toast('重命名失败');
-    return;
+  renameTaskSaving = true;
+  $('#renameTaskConfirm').disabled = true;
+  try {
+    const updated = await api.renameSession(id, title);
+    if (!updated?.title || updated?.ok === false) throw new Error(updated?.error || '重命名失败');
+    const records = new Set([state.currentSession, state.sessions.find(session => session.id === id),
+      state.activeRuns.get(id)?.sessionRef, state.queuedTurns.get(id)?.sessionRef]);
+    for (const record of records) {
+      if (record?.id === id) record.title = updated.title;
+    }
+    if (state.currentSession?.id === id) syncPetFocusedSession(state.currentSession);
+    if (renameTaskDialogVersion === version && renameTaskSessionId === id) closeRenameTaskDialog();
+    await refreshSessions();
+    updateTaskBar();
+    toast('任务已重命名');
+  } catch (error) {
+    toast(error?.message || '重命名失败');
+  } finally {
+    renameTaskSaving = false;
+    $('#renameTaskConfirm').disabled = false;
   }
-  if (state.currentSession?.id === id) {
-    state.currentSession.title = updated.title;
-    syncPetFocusedSession(state.currentSession);
-  }
-  const summary = state.sessions.find(session => session.id === id);
-  if (summary) summary.title = updated.title;
-  closeRenameTaskDialog();
-  await refreshSessions();
-  updateTaskBar();
-  toast('任务已重命名');
 }
 
 function bindTaskActions() {

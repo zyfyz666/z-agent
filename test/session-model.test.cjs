@@ -12,6 +12,7 @@ const { taskWorkspaceRoot, ensureTaskWorkspace } = require('../lib/task-workspac
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
 const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
+const { isDefaultSessionTitle } = require('../lib/session-policy');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -54,6 +55,7 @@ function fixture(t) {
     } }, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
+    isDefaultSessionTitle,
     MODEL_PROVIDERS: providers,
     loadConfig: () => structuredClone(config),
     saveConfig() { throw new Error('session model changes must not write global config'); },
@@ -106,6 +108,7 @@ function fixture(t) {
     section('async function setSessionModelRecord(', "ipcMain.handle('session:messages',"),
     section("ipcMain.handle('session:save',", '// 会话级工作区'),
     section("ipcMain.handle('session:set-workspace',", "ipcMain.handle('session:rename',"),
+    section("ipcMain.handle('session:rename',", "ipcMain.handle('session:set-pinned',"),
     section('function getOpenCodeRuntimeConfig(', 'function getOpenCodeCapabilityContext('),
     section('const manualContextCompressions =', "ipcMain.handle('opencode:start-run',")
   ]) vm.runInContext(code, context);
@@ -123,6 +126,7 @@ function fixture(t) {
     editConfig: operation => operation(config),
     set: (id, modelSelection) => handlers.get('session:model-set')(null, { id, modelSelection }),
     save: session => handlers.get('session:save')(null, structuredClone(session)),
+    rename: (id, title, options = {}) => handlers.get('session:rename')(null, { id, title, ...options }),
     workspace: (id, workspace) => handlers.get('session:set-workspace')(null, { id, workspace, activate: false }),
     start: request => handlers.get('opencode:start-run')(null, request),
     compress: id => handlers.get('opencode:compress-session')(null, { yanSessionId: id }),
@@ -203,6 +207,95 @@ test('a stale message save queued while model selection writes cannot undo the s
   await Promise.all([change, save]);
   assert.equal(f.disk(a.id).modelSelection.modelId, 'model-b');
   assert.equal(f.disk(a.id).messages[0].content, 'keep this message');
+});
+
+for (const tailOnly of [false, true]) {
+  test(`renaming a background task survives a stale ${tailOnly ? 'paged' : 'full'} run save without losing messages`, async t => {
+    const f = fixture(t);
+    const background = await f.create();
+    const visible = await f.create();
+    await f.rename(background.id, 'Original background title');
+    await f.rename(visible.id, 'Visible task');
+    await f.save({ ...background, messages: [
+      { role: 'user', content: 'Older request' }, { role: 'assistant', content: 'Older response' },
+      { role: 'user', content: 'Current request' }
+    ] });
+    // Real IPC transfers independent objects. Do not accidentally share the
+    // cached main-process object with this simulated long-running renderer.
+    const staleRun = structuredClone(await f.read(background.id));
+    f.context.openCodeActiveRuns.set('background-run', { yanSessionId: background.id });
+    const visibleBefore = f.disk(visible.id);
+    await f.rename(background.id, 'Renamed from sidebar');
+    staleRun.messages.push({ role: 'assistant', content: 'Completed after rename' });
+    if (tailOnly) Object.assign(staleRun, {
+      messages: staleRun.messages.slice(2), messagesTruncated: true, messagesStart: 2, totalMessages: 3
+    });
+    const saved = await f.save(staleRun);
+    assert.equal(saved.title, 'Renamed from sidebar');
+    assert.equal(f.disk(background.id).title, 'Renamed from sidebar');
+    assert.deepEqual(f.disk(background.id).messages.map(message => message.content), [
+      'Older request', 'Older response', 'Current request', 'Completed after rename'
+    ]);
+    assert.deepEqual(f.disk(visible.id), visibleBefore);
+    assert.equal(f.context.openCodeActiveRuns.has('background-run'), true, 'Renaming does not cancel the task');
+  });
+}
+
+for (const renameFirst of [false, true]) {
+  test(`${renameFirst ? 'rename then stale save' : 'message save then rename'} serialize without reverting either change`, async t => {
+    const f = fixture(t);
+    const session = await f.create();
+    const stale = structuredClone(session);
+    stale.messages.push({ role: 'user', content: 'Save this request' });
+    const gate = f.pauseWrite();
+    const first = renameFirst ? f.rename(session.id, 'User chosen title') : f.save(stale);
+    await gate.entered;
+    const second = renameFirst ? f.save(stale) : f.rename(session.id, 'User chosen title');
+    gate.release();
+    await Promise.all([first, second]);
+    assert.equal(f.disk(session.id).title, 'User chosen title');
+    assert.equal(f.disk(session.id).messages[0].content, 'Save this request');
+  });
+}
+
+test('first-turn automatic naming still works and later automatic attempts retain the established name', async t => {
+  const f = fixture(t);
+  for (const placeholder of ['', '新对话', 'New chat']) {
+    const session = await f.create();
+    f.seed({ ...session, title: placeholder });
+    const renamed = await f.rename(session.id, 'Derived from the first request', { automatic: true });
+    assert.equal(renamed.title, 'Derived from the first request');
+    // This is the renderer order: automatic rename first, then ordinary save.
+    await f.save({ ...session, messages: [{ role: 'user', content: 'The first request' }] });
+    const before = f.disk(session.id);
+    const ignored = await f.rename(session.id, 'A late automatic suggestion', { automatic: true });
+    assert.equal(ignored.title, 'Derived from the first request');
+    assert.deepEqual(f.disk(session.id), before, 'Skipped automatic naming does not reorder recent tasks');
+  }
+});
+
+test('an automatic rename queued behind a manual rename returns the user title and cannot overwrite it', async t => {
+  const f = fixture(t);
+  const session = await f.create();
+  const gate = f.pauseWrite();
+  const manual = f.rename(session.id, 'My deliberate title');
+  await gate.entered;
+  const automatic = f.rename(session.id, 'Derived from a stale blank snapshot', { automatic: true });
+  gate.release();
+  await manual;
+  assert.equal((await automatic).title, 'My deliberate title');
+  await f.save({ ...session, messages: [{ role: 'user', content: 'First request' }] });
+  assert.equal(f.disk(session.id).title, 'My deliberate title');
+  assert.equal((await f.rename(session.id, 'Another explicit name')).title, 'Another explicit name');
+});
+
+test('saving a new record without an existing title keeps its supplied title', async t => {
+  const f = fixture(t);
+  const session = await f.create();
+  const imported = { ...session, id: 'sess_imported_title', title: 'Imported conversation' };
+  const saved = await f.save(imported);
+  assert.equal(saved.title, 'Imported conversation');
+  assert.equal(f.disk(imported.id).title, 'Imported conversation');
 });
 
 for (const writer of ['workspace', 'rename', 'pin', 'messages']) {

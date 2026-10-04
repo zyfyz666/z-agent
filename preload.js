@@ -112,7 +112,7 @@ contextBridge.exposeInMainWorld('yan', {
   rewindSession: (boundary) => ipcRenderer.invoke('session:rewind', boundary),
   restoreSessionRewind: (request) => ipcRenderer.invoke('session:rewind-restore', request),
   saveSession: (session) => ipcRenderer.invoke('session:save', session),
-  renameSession: (id, title) => ipcRenderer.invoke('session:rename', { id, title }),
+  renameSession: (id, title, options = {}) => ipcRenderer.invoke('session:rename', { id, title, automatic: options.automatic === true }),
   setSessionPinned: (id, pinned) => ipcRenderer.invoke('session:set-pinned', { id, pinned }),
   setSessionWorkspace: (id, workspace, activate = true) => ipcRenderer.invoke('session:set-workspace', { id, workspace, activate }),
   activateWorkspace: (workspace) => ipcRenderer.invoke('workspace:activate', workspace),

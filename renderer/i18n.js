@@ -2,6 +2,8 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installYanI18n(global) {
   const ZH_EN = Object.freeze({
+    '最近': 'Recent', '按最近更新时间排列': 'Sorted by last updated', '显示更多': 'Show more',
+    '重命名': 'Rename', '操作失败，请重试': 'Action failed. Try again.', '对话名称保存失败': 'Could not save conversation name',
     '回退到这里': 'Rewind to here', '对话回退': 'Conversation rewind',
     '回退对话': 'Rewind conversation', '恢复对话': 'Restore conversation', '撤回并编辑': 'Rewind and edit',
     '回退到这里；保留这条消息，当前文件不变': 'Rewind through this message; current files stay unchanged',

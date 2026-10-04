@@ -46,7 +46,8 @@ const {
 const {
   evaluateSessionDeletion,
   findReusableBlankSession,
-  isBlankUnassignedNewChat
+  isBlankUnassignedNewChat,
+  isDefaultSessionTitle
 } = require('./lib/session-policy');
 const {
   contentToText,
@@ -7243,13 +7244,16 @@ async function createOrReuseSessionRecord() {
   }
 }
 
-async function renameSessionRecord(id, title) {
+async function renameSessionRecord(id, title, options = {}) {
   return withSessionWrite(id, async () => {
     const p = sessionPath(id);
     if (!p || !fs.existsSync(p)) return null;
     // 走带缓存读取,命中时免去一次整会话 JSON.parse
     const data = await readSessionRecord(id, { sessionLocked: true });
     if (!data) return null;
+    // A first-turn save may have captured the placeholder before the user
+    // renamed this task. Decide under the write lock, using the current title.
+    if (options.automatic === true && !isDefaultSessionTitle(data.title)) return data;
     const nextTitle = String(title || '').trim().slice(0, 80);
     if (!nextTitle) return null;
     data.title = nextTitle;
@@ -7440,7 +7444,11 @@ ipcMain.handle('session:save', async (_e, session) => {
     // The renderer may hold only the newest slice of the conversation (loaded
     // through session:get with a message limit). Re-attach the older messages
     // from the stored record so a tail save can never truncate the history.
-    let persisted = { ...session, modelSelection: stored?.modelSelection
+    // Titles are changed by session:rename (including the first-turn automatic
+    // title). A background run can still hold the old title in its snapshot;
+    // saving its new messages must not undo a rename made from the sidebar.
+    let persisted = { ...session, title: stored?.title ?? session.title,
+      modelSelection: stored?.modelSelection
       || initialSessionModelSelection({ ...session, modelSelection: undefined }) };
     if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
       if (stored && Array.isArray(stored.messages)) {
@@ -7498,8 +7506,8 @@ ipcMain.handle('session:set-workspace', async (_e, { id, workspace, activate = t
   });
 });
 
-ipcMain.handle('session:rename', async (_e, { id, title }) => {
-  return renameSessionRecord(id, title);
+ipcMain.handle('session:rename', async (_e, { id, title, automatic } = {}) => {
+  return renameSessionRecord(id, title, { automatic: automatic === true });
 });
 
 ipcMain.handle('session:set-pinned', async (_e, { id, pinned }) => {
