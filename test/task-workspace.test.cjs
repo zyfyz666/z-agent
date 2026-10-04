@@ -13,6 +13,7 @@ const {
 } = require('../lib/task-workspace');
 const { findReusableBlankSession } = require('../lib/session-policy');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
+const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -36,6 +37,9 @@ function fixture(t) {
   const context = vm.createContext({
     fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
+    sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue,
+    loadConfig: () => ({ agentModel: { providerId: '', supplierId: '', modelId: '', modelType: 'text' } }),
+    composerConnections: () => [],
     isSafeSessionId: id => /^sess_[A-Za-z0-9_-]{4,160}$/.test(String(id || '')),
     sessionPath: id => /^sess_[A-Za-z0-9_-]{4,160}$/.test(String(id || '')) ? path.join(sessionsDir, `${id}.json`) : null,
     ensureDirs() {},
@@ -158,6 +162,7 @@ test('stale saves preserve authoritative directories and the hidden history pref
 
 test('start-run uses the persisted task folder even when the renderer sends blank or another folder', async t => {
   const f = fixture(t);
+  f.context.applySessionModelToRunConfig = () => ({ providerId: 'fixture', supplierId: 'official', modelId: 'fixture' });
   const session = await f.create();
   for (const supplied of ['', path.join(f.root, 'wrong-project')]) {
     f.context.request = { yanSessionId: session.id, workspace: supplied };

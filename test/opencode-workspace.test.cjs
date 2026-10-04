@@ -77,3 +77,15 @@ test('legacy directory fallback cannot turn disabled or plan-mode writes into ap
     assert.equal(actionFor(guardedRules, permission), 'ask');
   }
 });
+
+test('cross-directory work uses the current access policy instead of forcing a handoff', () => {
+  const full = turnContextSystem({ workspace, hasUserWorkspace: true, workspaceKind: 'default', accessMode: 'full' });
+  assert.match(full, /Full Access already authorizes external-directory access/);
+  assert.match(full, /respecting explicit read\/write denials and plan mode/);
+  assert.match(full, /Do not ask for another workspace or create a handoff/);
+  for (const accessMode of ['request', 'delegate']) {
+    const guarded = turnContextSystem({ workspace, hasUserWorkspace: true, accessMode });
+    assert.match(guarded, /normal file tool permission flow and wait for approval/);
+    assert.doesNotMatch(guarded, /Full Access already authorizes/);
+  }
+});

@@ -57,6 +57,7 @@ const {
   sameWorkspace
 } = require('./lib/session-handoff');
 const { taskWorkspaceRoot, ensureTaskWorkspace, legacyRuntimeWorkspace } = require('./lib/task-workspace');
+const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('./lib/session-model');
 const { pruneYanagentEvidence } = require('./lib/yanagent-evidence');
 const skillRegistry = require('./lib/skill-registry');
 const codeGraphRuntime = require('./lib/codegraph-runtime');
@@ -5510,6 +5511,15 @@ ipcMain.handle('provider:delete-supplier', (_e, { providerId, supplierId } = {})
   return { ok: true, config: publicConfig(cfg) };
 });
 
+const pendingProviderConfigurations = new Map();
+const pendingConnectionSaves = new Map();
+
+function providerConfigurationSnapshot(cfg, providerId, supplierId) {
+  const supplier = cfg.api?.providerSuppliers?.[providerId]?.find(item => item.id === supplierId);
+  const connection = cfg.api?.connections?.find(item => item.providerId === providerId && item.supplierId === supplierId);
+  return JSON.stringify({ supplier, connection });
+}
+
 async function applyProviderConfiguration({
   providerId,
   supplierId,
@@ -5538,16 +5548,10 @@ async function applyProviderConfiguration({
     || (nextVideoGenerationUrl && !/^https?:\/\//i.test(nextVideoGenerationUrl))) {
     return { error: '图片/视频 POST URL 必须以 http:// 或 https:// 开头' };
   }
-  const cfg = loadConfig();
+  let cfg = loadConfig();
   ensureProviderConfigs(cfg);
-  const previousAgent = normalizeAgentModelSelection(cfg);
-  const previousAgentConnection = getProviderConnectionForSupplier(
-    cfg,
-    previousAgent.providerId,
-    previousAgent.supplierId
-  );
   const selectedSupplierId = String(supplierId || cfg.api.providerActiveSupplierIds?.[providerId] || 'official').trim();
-  const suppliers = cfg.api.providerSuppliers[providerId] || [];
+  let suppliers = cfg.api.providerSuppliers[providerId] || [];
   let supplier = suppliers.find(item => item.id === selectedSupplierId);
   if (!supplier) return { error: '供应商不存在' };
   // The UI intentionally does not echo stored secrets back into the form.
@@ -5556,82 +5560,111 @@ async function applyProviderConfiguration({
   if (!key && supplier.apiKey) key = supplier.apiKey;
   const effectiveApiFormat = normalizeApiFormat(apiFormat || provider.apiFormat || 'openai');
   const catalogApiFormat = effectiveApiFormat === 'anthropic' ? 'anthropic' : 'openai';
-  let models = provider.models;
-  if (provider.custom) {
-    const customModelId = String(modelId || '').trim();
-    if (!customModelId) return { error: '请填写模型 ID' };
-    const customModelName = String(modelName || customModelId).trim() || customModelId;
-    models = [{ id: customModelId, name: customModelName, modelType: 'text', source: 'custom' }];
-  } else if (provider.dynamicModels) {
-    if (!key) {
-      models = [];
-    } else {
-      try {
-        models = await fetchRemoteModelCatalog({ baseUrl: nextBaseUrl, apiKey: key, apiFormat: catalogApiFormat });
-      } catch (error) {
-        return { error: `模型列表同步失败：${error.message}` };
+  const initialSnapshot = providerConfigurationSnapshot(cfg, providerId, selectedSupplierId);
+  const requestKey = JSON.stringify([providerId, selectedSupplierId]);
+  const requestToken = Symbol('provider-configuration');
+  pendingProviderConfigurations.set(requestKey, requestToken);
+  try {
+    let models = provider.models;
+    let catalogError = null;
+    if (provider.custom) {
+      const customModelId = String(modelId || '').trim();
+      if (!customModelId) return { error: '请填写模型 ID' };
+      const customModelName = String(modelName || customModelId).trim() || customModelId;
+      models = [{ id: customModelId, name: customModelName, modelType: 'text', source: 'custom' }];
+    } else if (provider.dynamicModels) {
+      if (!key) {
+        models = [];
+      } else {
+        try {
+          models = await fetchRemoteModelCatalog({ baseUrl: nextBaseUrl, apiKey: key, apiFormat: catalogApiFormat });
+        } catch (error) {
+          catalogError = error;
+        }
       }
     }
-  }
-  supplier = normalizeProviderSupplier({
-    ...supplier,
-    id: selectedSupplierId,
-    name: String(supplierName || supplier.name || (selectedSupplierId === 'official' ? '官方' : '新供应商')).trim(),
-    baseUrl: nextBaseUrl,
-    apiKey: key,
-    imageGenerationUrl: nextImageGenerationUrl,
-    imageEditUrl: nextImageEditUrl,
-    videoGenerationUrl: nextVideoGenerationUrl,
-    workspaceId: providerId === 'qwen' ? String(workspaceId || '').trim() : ''
-  }, provider, selectedSupplierId);
-  supplier.models = normalizeRemoteModels(models);
-  cfg.api.providerSuppliers[providerId] = suppliers.map(item => item.id === selectedSupplierId ? supplier : item);
-  cfg.api.providerActiveSupplierIds[providerId] = selectedSupplierId;
-  syncActiveProviderSupplier(cfg, providerId, supplier);
-  if (providerId.startsWith('conn-')) {
-    // Keep the dynamic registry entry (name/preset/manual model) in sync with
-    // the supplier the connection just wrote.
-    const connection = (cfg.api.connections || []).find(item => item.providerId === providerId);
-    if (connection) {
-      connection.manualModelId = provider.custom ? String(modelId || '').trim() : '';
+    // Model discovery yields to other settings writes. Commit only this
+    // supplier's edit against the latest config, never the pre-request snapshot.
+    // A newer save, removal, or external edit of this supplier supersedes us.
+    cfg = loadConfig();
+    ensureProviderConfigs(cfg);
+    if (pendingProviderConfigurations.get(requestKey) !== requestToken
+        || providerConfigurationSnapshot(cfg, providerId, selectedSupplierId) !== initialSnapshot) {
+      return { error: '连接在保存期间已更改，请重新打开后重试。', code: 'PROVIDER_CONFIG_CHANGED' };
     }
-    syncConnectionProviders(cfg);
-  }
-  if (!cfg.providerModels) cfg.providerModels = {};
-  if (provider.dynamicModels) cfg.providerModels[providerId] = models;
-  const keepExistingAgent = !!(
-    previousAgent.providerId
-    && previousAgent.modelId
-    && previousAgentConnection.apiKey
-  );
-  if (keepExistingAgent) {
-    const previousModels = getProviderModels(cfg, previousAgent.providerId, previousAgent.supplierId);
-    const previousModel = previousModels.find(model => model.id === previousAgent.modelId && getModelType(previousAgent.providerId, model) === 'text');
-    if (previousModel) {
-      const connection = getProviderConnectionForSupplier(cfg, previousAgent.providerId, previousAgent.supplierId);
-      if (previousAgent.providerId === providerId && previousAgent.supplierId) {
-        cfg.api.providerActiveSupplierIds[providerId] = previousAgent.supplierId;
+    if (catalogError) return { error: `模型列表同步失败：${catalogError.message}` };
+    suppliers = cfg.api.providerSuppliers[providerId] || [];
+    supplier = suppliers.find(item => item.id === selectedSupplierId);
+    const previousAgent = normalizeAgentModelSelection(cfg);
+    const previousAgentConnection = getProviderConnectionForSupplier(
+      cfg,
+      previousAgent.providerId,
+      previousAgent.supplierId
+    );
+    supplier = normalizeProviderSupplier({
+      ...supplier,
+      id: selectedSupplierId,
+      name: String(supplierName || supplier.name || (selectedSupplierId === 'official' ? '官方' : '新供应商')).trim(),
+      baseUrl: nextBaseUrl,
+      apiKey: key,
+      imageGenerationUrl: nextImageGenerationUrl,
+      imageEditUrl: nextImageEditUrl,
+      videoGenerationUrl: nextVideoGenerationUrl,
+      workspaceId: providerId === 'qwen' ? String(workspaceId || '').trim() : ''
+    }, provider, selectedSupplierId);
+    supplier.models = normalizeRemoteModels(models);
+    cfg.api.providerSuppliers[providerId] = suppliers.map(item => item.id === selectedSupplierId ? supplier : item);
+    cfg.api.providerActiveSupplierIds[providerId] = selectedSupplierId;
+    syncActiveProviderSupplier(cfg, providerId, supplier);
+    if (providerId.startsWith('conn-')) {
+      // Keep the dynamic registry entry (name/preset/manual model) in sync with
+      // the supplier the connection just wrote.
+      const connection = (cfg.api.connections || []).find(item => item.providerId === providerId);
+      if (connection) {
+        connection.manualModelId = provider.custom ? String(modelId || '').trim() : '';
       }
-      cfg.api.provider = previousAgent.providerId;
-      cfg.api.baseUrl = connection.baseUrl;
-      cfg.api.apiKey = connection.apiKey;
-      cfg.api.model = previousModel.id;
-      cfg.models = previousModels;
+      syncConnectionProviders(cfg);
+    }
+    if (!cfg.providerModels) cfg.providerModels = {};
+    if (provider.dynamicModels) cfg.providerModels[providerId] = models;
+    const keepExistingAgent = !!(
+      previousAgent.providerId
+      && previousAgent.modelId
+      && previousAgentConnection.apiKey
+    );
+    if (keepExistingAgent) {
+      const previousModels = getProviderModels(cfg, previousAgent.providerId, previousAgent.supplierId);
+      const previousModel = previousModels.find(model => model.id === previousAgent.modelId && getModelType(previousAgent.providerId, model) === 'text');
+      if (previousModel) {
+        const connection = getProviderConnectionForSupplier(cfg, previousAgent.providerId, previousAgent.supplierId);
+        if (previousAgent.providerId === providerId && previousAgent.supplierId) {
+          cfg.api.providerActiveSupplierIds[providerId] = previousAgent.supplierId;
+        }
+        cfg.api.provider = previousAgent.providerId;
+        cfg.api.baseUrl = connection.baseUrl;
+        cfg.api.apiKey = connection.apiKey;
+        cfg.api.model = previousModel.id;
+        cfg.models = previousModels;
+      } else {
+        applyProviderSelection(cfg, providerId, key, selectedSupplierId);
+      }
     } else {
       applyProviderSelection(cfg, providerId, key, selectedSupplierId);
     }
-  } else {
-    applyProviderSelection(cfg, providerId, key, selectedSupplierId);
+    saveConfig(cfg);
+    publishModelState(cfg);
+    return {
+      ok: true,
+      config: publicConfig(cfg),
+      providerId,
+      supplierId: selectedSupplierId,
+      modelCount: getProviderModels(cfg, providerId, selectedSupplierId).length
+    };
+  } finally {
+    if (pendingProviderConfigurations.get(requestKey) === requestToken) {
+      pendingProviderConfigurations.delete(requestKey);
+    }
   }
-  saveConfig(cfg);
-  publishModelState(cfg);
-  return {
-    ok: true,
-    config: publicConfig(cfg),
-    providerId,
-    supplierId: selectedSupplierId,
-    modelCount: getProviderModels(cfg, providerId, selectedSupplierId).length
-  };
 }
 
 ipcMain.handle('provider:configure', (_e, payload = {}) => applyProviderConfiguration(payload));
@@ -5828,44 +5861,62 @@ ipcMain.handle('connections:save', async (_e, payload = {}) => {
   syncConnectionProviders(cfg);
   saveConfig(cfg);
 
-  const result = await applyProviderConfiguration({
-    providerId: connection.providerId,
-    supplierId: connection.supplierId,
-    supplierName: name,
-    apiKey: payload.apiKey,
-    baseUrl: payload.baseUrl,
-    imageGenerationUrl: payload.imageGenerationUrl,
-    imageEditUrl: payload.imageEditUrl,
-    videoGenerationUrl: payload.videoGenerationUrl,
-    providerName: name,
-    modelId: manualModelId || undefined,
-    modelName: manualModelId || undefined,
-    apiFormat: resolveConnectionApiFormat(connection, name, String(payload.baseUrl || ''))
-  });
-  if (!result?.ok && created) {
-    // A brand-new connection that cannot be validated is rolled back so the
-    // list never shows a half-configured ghost entry.
-    const rollback = loadConfig();
-    rollback.api.connections = (rollback.api.connections || []).filter(item => item.id !== connection.id);
-    delete rollback.api.providerSuppliers[connection.providerId];
-    delete rollback.api.providerActiveSupplierIds?.[connection.providerId];
-    delete rollback.api.providerConfigs?.[connection.providerId];
-    delete rollback.api.apiKeys?.[connection.providerId];
-    delete rollback.providerModels?.[connection.providerId];
-    delete MODEL_PROVIDERS[connection.providerId];
-    saveConfig(rollback);
-    return result;
+  // Retain ownership through the caller's await and rollback as well as the
+  // catalog request itself; another save can start in that microtask gap.
+  const saveKey = JSON.stringify([connection.providerId, connection.supplierId]);
+  const saveToken = Symbol('connection-save');
+  ensureProviderConfigs(cfg);
+  const createdSnapshot = providerConfigurationSnapshot(cfg, connection.providerId, connection.supplierId);
+  pendingConnectionSaves.set(saveKey, saveToken);
+  try {
+    const result = await applyProviderConfiguration({
+      providerId: connection.providerId,
+      supplierId: connection.supplierId,
+      supplierName: name,
+      apiKey: payload.apiKey,
+      baseUrl: payload.baseUrl,
+      imageGenerationUrl: payload.imageGenerationUrl,
+      imageEditUrl: payload.imageEditUrl,
+      videoGenerationUrl: payload.videoGenerationUrl,
+      providerName: name,
+      modelId: manualModelId || undefined,
+      modelName: manualModelId || undefined,
+      apiFormat: resolveConnectionApiFormat(connection, name, String(payload.baseUrl || ''))
+    });
+    if (!result?.ok && created && result?.code !== 'PROVIDER_CONFIG_CHANGED') {
+      // A brand-new connection that cannot be validated is rolled back so the
+      // list never shows a half-configured ghost entry. An obsolete request
+      // cannot roll back a connection that another save has since edited.
+      const rollback = loadConfig();
+      ensureProviderConfigs(rollback);
+      if (pendingConnectionSaves.get(saveKey) !== saveToken
+          || pendingProviderConfigurations.has(saveKey)
+          || providerConfigurationSnapshot(rollback, connection.providerId, connection.supplierId) !== createdSnapshot) {
+        return { error: '连接在保存期间已更改，请重新打开后重试。', code: 'PROVIDER_CONFIG_CHANGED' };
+      }
+      rollback.api.connections = (rollback.api.connections || []).filter(item => item.id !== connection.id);
+      delete rollback.api.providerSuppliers[connection.providerId];
+      delete rollback.api.providerActiveSupplierIds?.[connection.providerId];
+      delete rollback.api.providerConfigs?.[connection.providerId];
+      delete rollback.api.apiKeys?.[connection.providerId];
+      delete rollback.providerModels?.[connection.providerId];
+      delete MODEL_PROVIDERS[connection.providerId];
+      saveConfig(rollback);
+      return result;
+    }
+    if (!result?.ok) return result;
+    const finalConfig = result.config;
+    const summary = connectionSummary(finalConfig, connection);
+    return {
+      ok: true,
+      modelCount: summary?.modelCount || 0,
+      supplementalModelCount: summary?.supplementalModelCount || 0,
+      totalModelCount: summary?.totalModelCount || 0,
+      connection: summary
+    };
+  } finally {
+    if (pendingConnectionSaves.get(saveKey) === saveToken) pendingConnectionSaves.delete(saveKey);
   }
-  if (!result?.ok) return result;
-  const finalConfig = result.config;
-  const summary = connectionSummary(finalConfig, connection);
-  return {
-    ok: true,
-    modelCount: summary?.modelCount || 0,
-    supplementalModelCount: summary?.supplementalModelCount || 0,
-    totalModelCount: summary?.totalModelCount || 0,
-    connection: summary
-  };
 });
 
 ipcMain.handle('connections:delete', (_e, { id } = {}) => {
@@ -6753,6 +6804,42 @@ function invalidateSessionRecordCache(id) {
 }
 
 const sessionWorkspaceAssignments = new Map();
+const withSessionWrite = createSessionWriteQueue();
+
+function initialSessionModelSelection(session) {
+  const cfg = loadConfig();
+  const candidates = composerConnections(cfg).flatMap(connection => connection.models.map(model => ({
+    providerId: connection.providerId, supplierId: connection.supplierId, modelId: model.id
+  })));
+  return inferSessionModelSelection(session, cfg.agentModel, candidates);
+}
+
+function resolveSessionModelSelection(cfg, requested) {
+  const selection = sessionModelSnapshot(requested);
+  const fail = () => {
+    const error = new Error(`此对话的模型“${selection?.name || selection?.modelId || '未选择'}”或供应商已不可用，请为此对话重新选择模型。`);
+    error.code = 'SESSION_MODEL_UNAVAILABLE';
+    throw error;
+  };
+  if (!selection?.providerId || !selection.supplierId || !selection.modelId) return fail();
+  const supplier = cfg.api?.providerSuppliers?.[selection.providerId]?.find(item => item.id === selection.supplierId);
+  if (!MODEL_PROVIDERS[selection.providerId] || !supplier || !isConfiguredSupplier(cfg, selection.providerId, supplier)) return fail();
+  const model = getProviderModels(cfg, selection.providerId, selection.supplierId)
+    .find(item => item.id === selection.modelId && getModelType(selection.providerId, item) === 'text');
+  if (!model) return fail();
+  return sessionModelSnapshot({ ...selection, name: model.name || model.id, capabilities: model.capabilities || {} });
+}
+
+function applySessionModelToRunConfig(cfg, requested) {
+  const selection = resolveSessionModelSelection(cfg, requested);
+  const connection = getProviderConnectionForSupplier(cfg, selection.providerId, selection.supplierId);
+  cfg.agentModel = selection;
+  cfg.api = { ...cfg.api, provider: selection.providerId, model: selection.modelId,
+    baseUrl: connection.baseUrl, apiKey: connection.apiKey,
+    providerActiveSupplierIds: { ...cfg.api.providerActiveSupplierIds, [selection.providerId]: selection.supplierId } };
+  cfg.models = getProviderModels(cfg, selection.providerId, selection.supplierId);
+  return selection;
+}
 
 async function ensureStoredSessionWorkspace(session) {
   if (!session || !isSafeSessionId(session.id)) return session;
@@ -6775,6 +6862,7 @@ async function ensureStoredSessionWorkspace(session) {
 }
 
 async function readSessionRecord(id, options = {}) {
+  if (!options.sessionLocked) return withSessionWrite(id, () => readSessionRecord(id, { ...options, sessionLocked: true }));
   const key = String(id || '');
   const file = sessionPath(key);
   if (!file || !fs.existsSync(file)) return null;
@@ -6790,6 +6878,13 @@ async function readSessionRecord(id, options = {}) {
   }
   if (!String(data.workspace || '').trim() || !['default', 'selected'].includes(data.workspaceKind)) {
     data = await ensureStoredSessionWorkspace(data);
+    stat = await fsp.stat(file);
+    needsSanitizing = true;
+  }
+  if (!sessionModelSnapshot(data.modelSelection)) {
+    data = { ...data, modelSelection: initialSessionModelSelection(data) };
+    await writeSessionFileAtomic(file, JSON.stringify(data, null, 2));
+    await refreshSessionSummaryCache(key, data);
     stat = await fsp.stat(file);
     needsSanitizing = true;
   }
@@ -6911,6 +7006,7 @@ async function createFreshSessionRecord(options = {}) {
     workspace: normalizeWorkspacePath(options.workspace),
     createdAt: Date.now(), updatedAt: Date.now()
   };
+  session.modelSelection = initialSessionModelSelection(session);
   if (options.parentSessionId) session.parentSessionId = String(options.parentSessionId);
   if (options.handoff) session.handoff = options.handoff;
   Object.assign(session, await ensureTaskWorkspace(session, { root: defaultTasksRoot }));
@@ -7025,34 +7121,38 @@ async function createOrReuseSessionRecord() {
 }
 
 async function renameSessionRecord(id, title) {
-  const p = sessionPath(id);
-  if (!p || !fs.existsSync(p)) return null;
-  // 走带缓存读取,命中时免去一次整会话 JSON.parse
-  const data = await readSessionRecord(id);
-  if (!data) return null;
-  const nextTitle = String(title || '').trim().slice(0, 80);
-  if (!nextTitle) return null;
-  data.title = nextTitle;
-  data.updatedAt = Date.now();
-  await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
-  await refreshSessionSummaryCache(id, data);
-  return data;
+  return withSessionWrite(id, async () => {
+    const p = sessionPath(id);
+    if (!p || !fs.existsSync(p)) return null;
+    // 走带缓存读取,命中时免去一次整会话 JSON.parse
+    const data = await readSessionRecord(id, { sessionLocked: true });
+    if (!data) return null;
+    const nextTitle = String(title || '').trim().slice(0, 80);
+    if (!nextTitle) return null;
+    data.title = nextTitle;
+    data.updatedAt = Date.now();
+    await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
+    await refreshSessionSummaryCache(id, data);
+    return data;
+  });
 }
 
 async function setSessionPinnedRecord(id, pinned) {
-  const p = sessionPath(id);
-  if (!p || !fs.existsSync(p)) return null;
-  const data = await readSessionRecord(id);
-  if (!data) return null;
-  data.pinned = !!pinned;
-  data.updatedAt = Date.now();
-  await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
-  await refreshSessionSummaryCache(id, data);
-  return data;
+  return withSessionWrite(id, async () => {
+    const p = sessionPath(id);
+    if (!p || !fs.existsSync(p)) return null;
+    const data = await readSessionRecord(id, { sessionLocked: true });
+    if (!data) return null;
+    data.pinned = !!pinned;
+    data.updatedAt = Date.now();
+    await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
+    await refreshSessionSummaryCache(id, data);
+    return data;
+  });
 }
 
 function deleteSessionRecord(id, options = {}) {
-  const operation = sessionDeleteQueue.then(async () => {
+  const operation = sessionDeleteQueue.then(() => withSessionWrite(id, async () => {
     if (!isSafeSessionId(id)) return { ok: false, code: 'invalid-session-id', error: '会话 ID 无效' };
     // 删除判定只需要标题与消息条数,读摘要即可,避免全量解析所有会话文件
     const sessions = await listSessionSummaries();
@@ -7091,7 +7191,7 @@ function deleteSessionRecord(id, options = {}) {
       console.warn('[yan-core] session deleted but Core Thread cleanup failed:', error?.message || error);
     }
     return { ok: true, id, replacedLast, replacementSession };
-  });
+  }));
   sessionDeleteQueue = operation.catch(() => {});
   return operation;
 }
@@ -7100,6 +7200,24 @@ ipcMain.handle('session:list', () => listSessionSummaries());
 
 ipcMain.handle('session:get', async (_e, id, options = {}) => {
   return readSessionRecord(id, { messageLimit: options?.messageLimit });
+});
+
+async function setSessionModelRecord(id, requested) {
+  if (!isSafeSessionId(id)) return { ok: false, error: '会话 ID 无效', code: 'invalid-session-id' };
+  return withSessionWrite(id, async () => {
+    const stored = await readSessionRecord(id, { sessionLocked: true });
+    if (!stored) return { ok: false, error: '会话不存在', code: 'session-not-found' };
+    const modelSelection = resolveSessionModelSelection(loadConfig(), requested);
+    const data = { ...stored, modelSelection, updatedAt: Date.now() };
+    await writeSessionFileAtomic(sessionPath(id), JSON.stringify(data, null, 2));
+    await refreshSessionSummaryCache(id, data);
+    return { ok: true, id, modelSelection };
+  });
+}
+
+ipcMain.handle('session:model-set', async (_e, { id, modelSelection } = {}) => {
+  try { return await setSessionModelRecord(id, modelSelection); }
+  catch (error) { return { ok: false, error: error.message, code: error.code || 'session-model-save-failed' }; }
 });
 
 ipcMain.handle('session:messages', async (_e, { id, offset, limit, fromEnd = false } = {}) => {
@@ -7154,6 +7272,7 @@ async function refreshSessionSummaryCache(id, data) {
   try {
     const file = sessionPath(id);
     const stat = await fsp.stat(file);
+    touchSessionRecordCache(id, data, stat);
     sessionSummaryCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, summary: toSessionSummary(data) });
   } catch { /* 缓存留在失效状态,下次 list 自动重建 */ }
 }
@@ -7173,61 +7292,66 @@ ipcMain.handle('session:save', async (_e, session) => {
   if (!session || !isSafeSessionId(session.id)) {
     return { ok: false, error: '会话 ID 无效', code: 'invalid-session-id' };
   }
-  ensureDirs();
-  const stored = await readSessionRecord(session.id);
-  // The renderer may hold only the newest slice of the conversation (loaded
-  // through session:get with a message limit). Re-attach the older messages
-  // from the stored record so a tail save can never truncate the history.
-  let persisted = session;
-  if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
-    if (stored && Array.isArray(stored.messages)) {
-      const head = stored.messages.slice(0, session.messagesStart);
-      persisted = {
-        ...session,
-        messages: [...head, ...(Array.isArray(session.messages) ? session.messages : [])]
-      };
-      delete persisted.messagesTruncated;
-      delete persisted.messagesStart;
-      delete persisted.totalMessages;
+  return withSessionWrite(session.id, async () => {
+    ensureDirs();
+    const stored = await readSessionRecord(session.id, { sessionLocked: true });
+    // The renderer may hold only the newest slice of the conversation (loaded
+    // through session:get with a message limit). Re-attach the older messages
+    // from the stored record so a tail save can never truncate the history.
+    let persisted = { ...session, modelSelection: stored?.modelSelection
+      || initialSessionModelSelection({ ...session, modelSelection: undefined }) };
+    if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
+      if (stored && Array.isArray(stored.messages)) {
+        const head = stored.messages.slice(0, session.messagesStart);
+        persisted = {
+          ...persisted,
+          messages: [...head, ...(Array.isArray(session.messages) ? session.messages : [])]
+        };
+        delete persisted.messagesTruncated;
+        delete persisted.messagesStart;
+        delete persisted.totalMessages;
+      }
     }
-  }
-  Object.assign(persisted, await ensureTaskWorkspace(persisted, {
-    root: defaultTasksRoot, dataDirectory: dataDir, previousSession: stored
-  }));
-  sanitizeSessionReviewSummaries(persisted);
-  pruneSessionRuntimeBookkeeping(persisted);
-  persisted.updatedAt = Date.now();
-  const file = sessionPath(persisted.id);
-  await writeSessionFileAtomic(file, JSON.stringify(persisted, null, 2));
-  try {
-    const stat = await fsp.stat(file);
-    touchSessionRecordCache(persisted.id, persisted, stat);
-    await refreshSessionSummaryCache(persisted.id, persisted);
-  } catch { invalidateSessionRecordCache(persisted.id); }
-  return persisted;
+    Object.assign(persisted, await ensureTaskWorkspace(persisted, {
+      root: defaultTasksRoot, dataDirectory: dataDir, previousSession: stored
+    }));
+    sanitizeSessionReviewSummaries(persisted);
+    pruneSessionRuntimeBookkeeping(persisted);
+    persisted.updatedAt = Date.now();
+    const file = sessionPath(persisted.id);
+    await writeSessionFileAtomic(file, JSON.stringify(persisted, null, 2));
+    try {
+      const stat = await fsp.stat(file);
+      touchSessionRecordCache(persisted.id, persisted, stat);
+      await refreshSessionSummaryCache(persisted.id, persisted);
+    } catch { invalidateSessionRecordCache(persisted.id); }
+    return persisted;
+  });
 });
 
 // 会话级工作区：存储在 session 对象中，而非全局 config，实现会话隔离
 
 ipcMain.handle('session:set-workspace', async (_e, { id, workspace, activate = true }) => {
-  const p = sessionPath(id);
-  if (!p || !fs.existsSync(p)) return null;
-  // 走缓存读取,避免为改一个字段而整包解析 45MB 会话
-  const data = await readSessionRecord(id);
-  if (!data) return null;
-  Object.assign(data, await ensureTaskWorkspace({ ...data, workspace: workspace || '' }, {
-    root: defaultTasksRoot, dataDirectory: dataDir
-  }));
-  data.updatedAt = Date.now();
-  await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
-  await refreshSessionSummaryCache(id, data);
-  if (activate !== false) {
-    activateWorkspace(data.workspace);
-  } else if (data.workspace) {
-    migrateMemoryToWorkspace(data.workspace);
-    ensureYanagent(data.workspace);
-  }
-  return data;
+  return withSessionWrite(id, async () => {
+    const p = sessionPath(id);
+    if (!p || !fs.existsSync(p)) return null;
+    // 走缓存读取,避免为改一个字段而整包解析 45MB 会话
+    const data = await readSessionRecord(id, { sessionLocked: true });
+    if (!data) return null;
+    Object.assign(data, await ensureTaskWorkspace({ ...data, workspace: workspace || '' }, {
+      root: defaultTasksRoot, dataDirectory: dataDir
+    }));
+    data.updatedAt = Date.now();
+    await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
+    await refreshSessionSummaryCache(id, data);
+    if (activate !== false) {
+      activateWorkspace(data.workspace);
+    } else if (data.workspace) {
+      migrateMemoryToWorkspace(data.workspace);
+      ensureYanagent(data.workspace);
+    }
+    return data;
+  });
 });
 
 ipcMain.handle('session:rename', async (_e, { id, title }) => {
@@ -9176,7 +9300,7 @@ ipcMain.handle('opencode:compress-session', async (_e, { yanSessionId } = {}) =>
       const session = await readSessionRecord(id);
       if (!session?.openCodeSessionId) return { ok: false, error: '还没有可压缩的上下文' };
       const cfg = loadConfig();
-      const selection = normalizeAgentModelSelection(cfg);
+      const selection = applySessionModelToRunConfig(cfg, session.modelSelection);
       if (selection.modelType !== 'text') return { ok: false, error: '请选择文本模型进行压缩' };
       const workspace = workspaceSandbox.normalizeWorkspace(session.workspace) || getNoWorkspaceAgentDirectory(id);
       const sidecar = await ensureOpenCodeSidecar(getOpenCodeRuntimeConfig(cfg));
@@ -9209,11 +9333,6 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     if (manualContextCompressions.has(String(request.yanSessionId || ''))) {
       return { ok: false, error: '上下文正在压缩，请完成后再开始工作' };
     }
-    const cfg = loadConfig();
-    const selection = normalizeAgentModelSelection(cfg);
-    if (selection.modelType !== 'text') {
-      return { ok: false, error: 'Z 内核只能启动文本或工具模型。' };
-    }
     if (openCodeActiveRuns.size + openCodeRunAdmissions.size >= MAX_CONCURRENT_AGENT_RUNS) {
       return { ok: false, error: `并发任务已达上限（${MAX_CONCURRENT_AGENT_RUNS}个），请稍后再试。` };
     }
@@ -9221,6 +9340,14 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     openCodeRunAdmissions.set(admittedRunId, String(request.yanSessionId || ''));
     admissionPending = true;
     const authoritativeSession = request.yanSessionId ? await readSessionRecord(request.yanSessionId) : null;
+    if (request.yanSessionId && !authoritativeSession && request.utility !== true) {
+      throw Object.assign(new Error('会话不存在，请重新打开对话。'), { code: 'session-not-found' });
+    }
+    const cfg = loadConfig();
+    const requestedModel = Object.prototype.hasOwnProperty.call(request, 'modelSelection')
+      ? request.modelSelection : (authoritativeSession?.modelSelection || (request.utility === true ? null : cfg.agentModel));
+    const selection = applySessionModelToRunConfig(cfg, requestedModel);
+    request.modelSelection = selection;
     // The persisted conversation owns its directory. A stale renderer must
     // not erase it, borrow another task's folder, or fall back to private storage.
     const runWorkspaceSession = authoritativeSession || {
@@ -9774,7 +9901,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     openCodeActiveRuns.delete(runId);
     refreshAgentRuntimeActivity();
     console.error('[opencode] start-run failed:', error);
-    return { ok: false, error: error instanceof Error && error.message ? error.message : openCodeErrorDetail(error) };
+    return { ok: false, error: error instanceof Error && error.message ? error.message : openCodeErrorDetail(error), code: error?.code };
   }
 });
 
@@ -9975,6 +10102,64 @@ async function cancelOpenCodeRun(runId) {
     coreTurn: coreResult.turn || yanCore.getTurn(key)
   };
 }
+
+const openCodeSteeringRequests = new Map();
+
+function steerOpenCodeRun(payload = {}) {
+  const runId = String(payload.runId || '').trim();
+  const yanSessionId = String(payload.yanSessionId || '').trim();
+  const requestId = String(payload.requestId || '').trim();
+  const text = String(payload.text || '').trim();
+  const identity = { runId, yanSessionId, requestId };
+  const failure = (error, code = 'STEERING_UNAVAILABLE') => ({ ...identity, ok: false, delivered: false, error, code });
+  if (!runId || !yanSessionId || !requestId || !text) {
+    return Promise.resolve(failure('缺少任务、会话、消息 ID 或引导内容。', 'INVALID_STEERING_REQUEST'));
+  }
+  const key = JSON.stringify([runId, yanSessionId, requestId]);
+  const fingerprint = crypto.createHash('sha256').update(text).digest('hex');
+  const previous = openCodeSteeringRequests.get(key);
+  if (previous) {
+    return previous.fingerprint === fingerprint ? previous.promise
+      : Promise.resolve(failure('同一消息 ID 不能发送不同的引导内容。', 'STEERING_REQUEST_CONFLICT'));
+  }
+  const active = openCodeActiveRuns.get(runId);
+  const sidecar = openCodeSidecar;
+  if (!active || !sidecar) return Promise.resolve(failure('当前任务已经结束，引导未送达。', 'STEERING_STALE'));
+  if (String(active.yanSessionId || '') !== yanSessionId) {
+    return Promise.resolve(failure('该运行不属于当前会话，引导未送达。', 'STEERING_SESSION_MISMATCH'));
+  }
+  const isLive = () => openCodeActiveRuns.get(runId) === active && openCodeSidecar === sidecar
+    && !active.cancelRequested && !active.visionAbortController?.signal?.aborted && sidecar.hasRun(runId);
+  // Install the promise before the first delivery, so concurrent retries
+  // share a single direct injection instead of calling an auxiliary model.
+  const promise = Promise.resolve().then(async () => {
+    if (!isLive()) return failure('当前任务已结束或正在停止，引导未送达。', 'STEERING_STALE');
+    try {
+      const delivery = await sidecar.deliverInterjection(runId, {
+        kind: 'guidance', guidance: text, requestFinish: false, hardCancel: false, source: 'user'
+      });
+      if (!isLive()) return failure('引导发送期间任务已结束或停止，未确认送达。', 'STEERING_STALE');
+      if (delivery?.ok !== true || delivery.delivered !== true) {
+        return failure(delivery?.error || '内核未确认收到引导。', 'STEERING_DELIVERY_FAILED');
+      }
+      return { ...identity, ok: true, delivered: true, version: delivery.version, phase: delivery.phase };
+    } catch (error) {
+      return failure(error?.message || String(error), 'STEERING_DELIVERY_FAILED');
+    }
+  });
+  openCodeSteeringRequests.set(key, { runId, fingerprint, promise });
+  // Retain every live run's receipt. Old completed-run receipts can expire
+  // without allowing reinjection, since a completed run fails the live check.
+  if (openCodeSteeringRequests.size > 512) {
+    for (const [oldKey, entry] of openCodeSteeringRequests) {
+      if (openCodeSteeringRequests.size <= 512) break;
+      if (!openCodeActiveRuns.has(entry.runId)) openCodeSteeringRequests.delete(oldKey);
+    }
+  }
+  return promise;
+}
+
+ipcMain.handle('opencode:steer-run', (_event, payload = {}) => steerOpenCodeRun(payload));
 
 ipcMain.handle('opencode:interject', async (event, payload = {}) => {
   const runId = String(payload.runId || '');

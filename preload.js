@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('yan', {
   // Sessions
   listSessions: () => ipcRenderer.invoke('session:list'),
   getSession: (id, options = {}) => ipcRenderer.invoke('session:get', id, options),
+  setSessionModel: (id, modelSelection) => ipcRenderer.invoke('session:model-set', { id, modelSelection }),
   getSessionMessages: (id, offset = 0, limit = 40, options = {}) => ipcRenderer.invoke('session:messages', { id, offset, limit, fromEnd: options?.fromEnd === true }),
   createSession: (forceNew = false, workspace = '') => ipcRenderer.invoke('session:create', { forceNew, workspace }),
   saveSession: (session) => ipcRenderer.invoke('session:save', session),
@@ -281,6 +282,7 @@ contextBridge.exposeInMainWorld('yan', {
   yanCoreAckIntent: (intentId) => ipcRenderer.invoke('yan:core-ack-intent', intentId),
   yanCoreDeleteIntent: (intentId, reason = 'user_removed') => ipcRenderer.invoke('yan:core-delete-intent', { intentId, reason }),
   openCodeInterject: (payload) => ipcRenderer.invoke('opencode:interject', payload),
+  openCodeSteerRun: (payload) => ipcRenderer.invoke('opencode:steer-run', payload),
   openCodeCancelInterjection: (payload) => ipcRenderer.invoke('opencode:cancel-interjection', payload),
   readPlanFile: (targetPath) => ipcRenderer.invoke('plan:read-file', { path: targetPath }),
   downloadPlanFile: (targetPath) => ipcRenderer.invoke('plan:download-file', { path: targetPath }),

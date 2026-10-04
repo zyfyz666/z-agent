@@ -29,7 +29,7 @@ test('an older delayed conversation cannot replace the chosen chat or observer',
     'captureComposerDraftForSession', 'pauseUiForSession', 'showSessionLoading', 'markSessionLoadBaseline',
     'syncAgentBrowserVisibility', 'syncPetFocusedSession', 'restoreComposerDraftForSession', 'renderMessages',
     'setEmptyState', 'ensureEarlierMessagesBar', 'syncCurrentSessionAgentUi', 'showTyping',
-    'renderRightSidebarReview', 'updateTaskBar', 'updateSendState', 'renderSessionList']) context[name] = () => {};
+    'renderRightSidebarReview', 'updateTaskBar', 'updateSendState', 'renderSessionList', 'renderModelBadge']) context[name] = () => {};
   vm.createContext(context);
   vm.runInContext(renderer.slice(renderer.indexOf('async function loadSession(id)'), renderer.indexOf('async function saveCurrentSession(')), context);
   const b = context.loadSession('B');

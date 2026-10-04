@@ -102,3 +102,57 @@ test('read-denied sessions receive no project text', async t => {
   await plugin['experimental.chat.system.transform']({ sessionID: 'denied' }, output);
   assert.deepEqual(output.system, []);
 });
+
+test('external file tools defer to native permissions without loading external context', async t => {
+  const root = repo(t);
+  // A sibling with the same path prefix must still count as external.
+  const outside = `${root}-external`;
+  fs.mkdirSync(outside);
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, 'AGENTS.md'), 'EXTERNAL_RULE_MUST_WAIT_FOR_NATIVE_AUTHORIZATION');
+  fs.writeFileSync(path.join(outside, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+  const file = path.join(outside, 'sample.js');
+  const original = 'const value = 1;\n';
+  fs.writeFileSync(file, original);
+  const factory = (await import(pathToFileURL(path.resolve('lib/coding-environment-plugin.mjs')))).default;
+  for (const externalAction of ['allow', 'ask', 'deny']) {
+    const permissions = Object.freeze([
+      Object.freeze({ permission: 'read', pattern: '*', action: 'allow' }),
+      Object.freeze({ permission: 'edit', pattern: '*', action: externalAction === 'deny' ? 'deny' : 'allow' }),
+      Object.freeze({ permission: 'external_directory', pattern: '*', action: externalAction })
+    ]);
+    const plugin = await factory({ directory: root, client: { session: { get: async () => ({ data: { id: 'session', permission: permissions } }) } } });
+    const actions = [
+      ['read', { filePath: file }],
+      ['read', { path: path.relative(root, file) }],
+      ['edit', { filePath: file, oldString: '1', newString: '2' }],
+      ['write', { filePath: path.join(outside, 'new.js'), content: 'const added = true;' }],
+      ['apply_patch', { patchText: `*** Begin Patch\n*** Update File: ${file}\n*** Move to: ${path.join(outside, 'renamed.js')}\n@@\n-const value = 1;\n+const value = 2;\n*** Delete File: ${file}\n*** Add File: ${path.join(outside, 'new.js')}\n+const added = true;\n*** End Patch` }]
+    ];
+    for (const [tool, args] of actions) {
+      const input = { sessionID: 'session', callID: `${externalAction}-${tool}`, tool, args };
+      const before = { args: structuredClone(args) };
+      await plugin['tool.execute.before'](input, before);
+      assert.deepEqual(before.args, args, 'context discovery must not rewrite native arguments or authorize a tool');
+      const after = { output: 'Native tool result', metadata: {} };
+      await plugin['tool.execute.after'](input, after);
+      assert.deepEqual(after, { output: 'Native tool result', metadata: {} }, 'external results must not be replaced by workspace context errors');
+    }
+    assert.equal(fs.readFileSync(file, 'utf8'), original, 'the plugin only observes; native tools perform authorized operations');
+    assert.equal(permissions.at(-1).action, externalAction);
+  }
+});
+
+test('automatic context still rejects a workspace symlink escape', async t => {
+  const root = repo(t);
+  const outside = repo(t);
+  const link = path.join(root, 'linked-project');
+  fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+  const factory = (await import(pathToFileURL(path.resolve('lib/coding-environment-plugin.mjs')))).default;
+  const plugin = await factory({ directory: root, client: { session: { get: async () => ({ data: { id: 'session', permission: [{ permission: '*', pattern: '*', action: 'allow' }] } }) } } });
+  for (const filePath of [path.join(link, 'AGENTS.md'), path.join(link, 'new.js')]) {
+    await assert.rejects(plugin['tool.execute.before']({ sessionID: 'session', tool: 'read' }, { args: { filePath } }), /Symlink outside workspace/);
+  }
+  assert.throws(() => readProjectInstructions(root, outside), /Path outside workspace/,
+    'the scoped instruction reader must not become a general external-file reader');
+});

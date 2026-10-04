@@ -1239,7 +1239,7 @@ async function init() {
     try {
       state.config = await api.getConfig();
       const modelPickerOpen = $('#modelPickerDialog')?.open || !$('#modelQuickMenu')?.classList.contains('hidden');
-      if (modelPickerOpen) resetModelPickerDraft();
+      if (modelPickerOpen && !isModelPickerBusy()) resetModelPickerDraft();
       renderModelBadge();
       if (modelPickerOpen) {
         await refreshQuickModels();
@@ -1521,7 +1521,7 @@ async function hydrateQueuedTurns() {
         text: String(intent.prompt || ''),
         attachments: Array.isArray(intent.attachments) ? intent.attachments.map(item => ({ ...item })) : [],
         skillCalls: Array.isArray(intent.skillCalls) ? intent.skillCalls.map(item => ({ ...item })) : [],
-        modelSelection: intent.modelSelection && typeof intent.modelSelection === 'object' ? { ...intent.modelSelection } : getAgentModelSelection(),
+        modelSelection: intent.modelSelection && typeof intent.modelSelection === 'object' ? { ...intent.modelSelection } : getAgentModelSelection(session),
         queuedAt: Number(record.createdAt) || Date.now()
       });
     }
@@ -1570,12 +1570,17 @@ async function applyExternalSessionChange(detail = {}) {
   }
 
   // 只读标题/置顶/工作区等元数据,尾加载即可,不要整取会话
+  const selectionVersion = sessionModelSelectionVersions.get(currentId) || 0;
   const fresh = await api.getSession(currentId, { messageLimit: 1 });
-  if (!fresh) return;
+  if (!fresh || state.currentSession?.id !== currentId) return;
   state.currentSession.title = fresh.title;
   state.currentSession.pinned = !!fresh.pinned;
   state.currentSession.workspace = fresh.workspace || '';
   state.currentSession.workspaceKind = fresh.workspaceKind || 'selected';
+  if (fresh.modelSelection && (sessionModelSelectionVersions.get(currentId) || 0) === selectionVersion) {
+    state.currentSession.modelSelection = fresh.modelSelection;
+  }
+  renderModelBadge();
   syncAgentBrowserVisibility();
   state.currentSession.parentSessionId = fresh.parentSessionId || '';
   state.currentSession.handoff = fresh.handoff || null;
@@ -2210,7 +2215,7 @@ async function createOrActivateNewSession() {
   const loadToken = ++sessionLoadToken;
   observerPendingSessionId = '';
   cancelPromptOptimization({ announce: false });
-  closeModelPicker();
+  closeModelPicker({ force: true });
   closeReasoningPicker();
   switchSidebarNav('tasks');
   // A new task inherits the current task's home: a blank task stays blank, a
@@ -2253,6 +2258,7 @@ async function createOrActivateNewSession() {
     return null;
   }
   state.currentSession = s;
+  renderModelBadge();
   renderWdMonitor(s);
   syncAgentBrowserVisibility();
   syncPetFocusedSession(s);
@@ -2284,7 +2290,7 @@ async function loadSession(id) {
   const previousSessionId = String(state.currentSession?.id || '');
   const switchingSessions = Boolean(previousSessionId && previousSessionId !== String(id));
   if (switchingSessions) {
-    closeModelPicker();
+    closeModelPicker({ force: true });
     closeReasoningPicker();
     captureComposerDraftForSession(previousSessionId);
     pauseUiForSession(previousSessionId);
@@ -2309,6 +2315,7 @@ async function loadSession(id) {
   }
   markSessionLoadBaseline(s);
   state.currentSession = s;
+  renderModelBadge();
   renderWdMonitor(s);
   syncAgentBrowserVisibility();
   syncPetFocusedSession(s);
@@ -2333,7 +2340,18 @@ async function loadSession(id) {
   renderSessionList();
 }
 
+const sessionSaveQueues = new Map();
+
 async function saveCurrentSession(session = state.currentSession) {
+  if (!session?.id) return;
+  const previous = sessionSaveQueues.get(session.id) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => persistCurrentSession(session));
+  sessionSaveQueues.set(session.id, pending);
+  try { return await pending; }
+  finally { if (sessionSaveQueues.get(session.id) === pending) sessionSaveQueues.delete(session.id); }
+}
+
+async function persistCurrentSession(session) {
   if (!session) return;
   if ((!session.title || session.title === 'New chat' || session.title === '新对话') &&
       session.messages && session.messages.length) {
@@ -2346,6 +2364,7 @@ async function saveCurrentSession(session = state.currentSession) {
     }
   }
   const saved = await api.saveSession(buildSessionSavePayload(session));
+  if (saved?.ok === false || saved?.error) throw new Error(saved.error || '对话保存失败');
   if (saved?.id === session.id && saved.workspace) {
     session.workspace = saved.workspace;
     session.workspaceKind = saved.workspaceKind || 'selected';
@@ -2456,7 +2475,8 @@ function buildHistoryMessageElement(message, index) {
     message.duration,
     message.agentRun,
     message.skillCalls || message.skillCall,
-    message.mediaAssets?.length ? message.mediaAssets : message.media
+    message.mediaAssets?.length ? message.mediaAssets : message.media,
+    message.liveGuidance || null
   );
   if (message.role === 'user' && message.modelSwitchNotice) {
     appendModelSwitchNoticeElement(message.modelSwitchNotice, { animate: false });
@@ -3275,6 +3295,10 @@ async function selectMediaSourceImage(file) {
 async function applySelectedMediaModel() {
   const model = getSelectedMediaModel();
   if (!model) return null;
+  if (model.modelType === 'text') {
+    await selectSessionTextModel(model);
+    return model;
+  }
   const result = await api.setModelRole(model.providerId, model.id, model.modelType, model.supplierId || '');
   if (result?.error) throw new Error(result.error);
   state.config = result;
@@ -4778,7 +4802,7 @@ function normalizeSkillCalls(value) {
   }, []);
 }
 
-function appendMessage(role, content, attachments = [], animate = true, msgIndex = -1, ts = null, duration = null, agentRun = null, skillCalls = [], media = null) {
+function appendMessage(role, content, attachments = [], animate = true, msgIndex = -1, ts = null, duration = null, agentRun = null, skillCalls = [], media = null, liveGuidance = null) {
   const wrap = $('#messages');
   const el = document.createElement('div');
   el.className = `msg ${role}`;
@@ -4823,6 +4847,7 @@ function appendMessage(role, content, attachments = [], animate = true, msgIndex
   }
 
   el.innerHTML = avatar + bodyHtml + actionsHtml;
+  if (role === 'user' && liveGuidance) renderLiveGuidanceStatus(el, liveGuidance);
   wrap.appendChild(el);
   bindSkillLogoFallbacks(el);
 
@@ -5960,20 +5985,22 @@ async function optimizeComposerPrompt() {
   const original = input.value;
   if (promptOptimizationRun || isCurrentSessionExecutionActive() || !original.trim()) return;
 
-  const apiConfig = { ...(state.config?.api || {}) };
-  if (!String(apiConfig.baseUrl || '').trim() || !String(apiConfig.model || '').trim()) {
+  const targetSession = state.currentSession;
+  const modelSelection = normalizeModelSelectionSnapshot(getAgentModelSelection(targetSession));
+  if (!modelSelection.providerId || !modelSelection.modelId) {
     toast('请先配置并选择一个可用模型');
     return;
   }
 
   const operation = {
     id: `prompt_opt_${Date.now().toString(36)}`,
-    sessionId: state.currentSession?.id || '',
+    sessionId: targetSession?.id || '',
     original,
     cancelled: false,
-    runCtx: createRunCtx(`prompt-optimizer:${state.currentSession?.id || 'draft'}`, false, state.currentSession?.workspace || '')
+    runCtx: createRunCtx(`prompt-optimizer:${targetSession?.id || 'draft'}`, false, targetSession?.workspace || '')
   };
   operation.runCtx.utility = true;
+  setRunModelPresentation(operation.runCtx, modelSelection);
   promptOptimizationRun = operation;
   promptOptimizationUndo = null;
   setPromptOptimizationUi(operation, true);
@@ -5993,6 +6020,7 @@ async function optimizeComposerPrompt() {
     const optimizerSession = {
       id: operation.runCtx.sessionId,
       title: 'Z Prompt Optimizer',
+      modelSelection,
       workspace: operation.runCtx.workspace || state.config?.workspace || '',
       messages: [{
         role: 'user',
@@ -6061,12 +6089,13 @@ function syncConversationSubmitButton(button, options = {}) {
   const active = !!options.active;
   const stopping = active && !!options.stopping;
   const queueing = active && !stopping && !!options.queueing;
-  const iconState = active ? (stopping ? 'stopping' : (queueing ? 'queue' : 'stop')) : 'send';
-  const icon = active ? (stopping ? STOPPING_ICON : (queueing ? QUEUE_PLAY_ICON : STOP_ICON)) : SEND_ICON;
+  const steering = active && !stopping && !queueing && !!options.steering;
+  const iconState = active ? (stopping ? 'stopping' : (queueing ? 'queue' : (steering ? 'steer' : 'stop'))) : 'send';
+  const icon = active ? (stopping ? STOPPING_ICON : (queueing ? QUEUE_PLAY_ICON : (steering ? SEND_ICON : STOP_ICON))) : SEND_ICON;
   const disabled = active ? stopping : !!options.sendDisabled;
-  button.classList.toggle('stop-mode', active && !queueing);
+  button.classList.toggle('stop-mode', active && !queueing && !steering);
   button.classList.toggle('queue-mode', queueing);
-  button.classList.toggle('send-mode', !active);
+  button.classList.toggle('send-mode', !active || steering);
   button.classList.toggle('stopping-mode', stopping);
   if (button.dataset.iconState !== iconState) {
     button.innerHTML = icon;
@@ -6076,25 +6105,37 @@ function syncConversationSubmitButton(button, options = {}) {
   const title = active
     ? (stopping
         ? `正在${String(options.stopTitle || '停止')}`
-        : (queueing ? String(options.queueTitle || '排队发送') : String(options.stopTitle || '中止任务')))
+        : (queueing ? String(options.queueTitle || '排队发送') : (steering ? '引导当前任务' : String(options.stopTitle || '中止任务'))))
     : String(options.sendTitle || '发送');
   if (button.title !== title) button.title = title;
   if (button.getAttribute('aria-label') !== title) button.setAttribute('aria-label', title);
 }
 
 function updateSendState(composerText = getComposerText()) {
-  const runCtx = isCurrentSessionResponding() ? getRunCtx(state.currentSession?.id) : null;
+  const runCtx = getRunCtx(state.currentSession?.id);
   const hasText = composerHasText(composerText);
   const hasPayload = hasText || state.attachments.length > 0 || state.selectedSkills.length > 0 || state.selectedSubagents.length > 0;
+  const needsQueuedTurn = state.attachments.length > 0 || state.selectedSkills.length > 0 || state.selectedSubagents.length > 0;
   syncConversationSubmitButton(sendBtn, {
     active: !!runCtx,
     stopping: !!runCtx?.shouldAbort,
-    queueing: !!runCtx && hasPayload,
+    queueing: !!runCtx && hasPayload && needsQueuedTurn,
+    steering: !!runCtx && hasText && !needsQueuedTurn,
     sendDisabled: !!promptOptimizationRun || !hasPayload,
     sendTitle: '发送',
     queueTitle: state.queuedTurns.has(String(state.currentSession?.id || '')) ? '更新排队对话' : '排队发送',
     stopTitle: '中止任务'
   });
+  const queueButton = $('#queueTurnBtn');
+  if (queueButton) {
+    queueButton.classList.toggle('hidden', !runCtx);
+    queueButton.disabled = !runCtx || !!runCtx.shouldAbort || !hasPayload;
+  }
+  const stopButton = $('#stopRunBtn');
+  if (stopButton) {
+    stopButton.classList.toggle('hidden', !runCtx || !hasPayload);
+    stopButton.disabled = !runCtx || !!runCtx.shouldAbort;
+  }
   syncQueuedTurnUi();
   updatePromptOptimizerButton(composerText, hasText);
   syncBrowserFocusPromptStatus();
@@ -6102,16 +6143,19 @@ function updateSendState(composerText = getComposerText()) {
 }
 
 sendBtn.addEventListener('click', () => {
-  if (isCurrentSessionResponding()) {
+  if (isCurrentSessionExecutionActive()) {
     const hasPayload = composerHasText(getComposerText())
       || state.attachments.length > 0
       || state.selectedSkills.length > 0 || state.selectedSubagents.length > 0;
-    if (hasPayload) queueCurrentComposerTurn();
+    if (hasPayload) void sendMessage();
     else abortTask();
   } else {
     sendMessage();
   }
 });
+
+$('#queueTurnBtn')?.addEventListener('click', () => { queueCurrentComposerTurn(); });
+$('#stopRunBtn')?.addEventListener('click', abortTask);
 
 function createQueuedTurnId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -6162,6 +6206,70 @@ function validateQueuedModelPayload(text, attachments, modelSelection) {
   return true;
 }
 
+function renderLiveGuidanceStatus(element, guidance) {
+  if (!element || !guidance?.requestId) return;
+  element.dataset.guidanceRequestId = guidance.requestId;
+  let status = element.querySelector('.msg-live-guidance');
+  if (!status) {
+    status = document.createElement('div');
+    status.className = 'msg-live-guidance';
+    status.setAttribute('role', 'status');
+    element.querySelector('.msg-body')?.after(status);
+  }
+  status.dataset.status = guidance.status;
+  status.textContent = guidance.status === 'delivered' ? '已引导当前任务'
+    : guidance.status === 'failed' ? `未送达：${guidance.error || '请重试或排队发送'}`
+      : '引导待确认…';
+}
+
+function refreshLiveGuidanceStatus(session, message) {
+  if (state.currentSession?.id !== session.id) return;
+  const elements = $('#messages')?.querySelectorAll('.msg[data-guidance-request-id]') || [];
+  const element = [...elements].find(item => item.dataset.guidanceRequestId === message.liveGuidance.requestId);
+  renderLiveGuidanceStatus(element, message.liveGuidance);
+}
+
+async function steerCurrentComposerTurn() {
+  const selectedSession = state.currentSession;
+  const sessionId = String(selectedSession?.id || '');
+  const entry = state.activeRuns.get(sessionId);
+  const runCtx = entry?.runCtx;
+  const session = entry?.sessionRef || selectedSession;
+  const text = getComposerText().trim();
+  if (!sessionId || !runCtx?.runId || runCtx.shouldAbort || !text) return false;
+  if (state.attachments.length || state.selectedSkills.length || state.selectedSubagents.length) return false;
+  const runId = String(runCtx.runId);
+  const requestId = `guidance-${createQueuedTurnId()}`;
+  const message = { role: 'user', content: text, ts: Date.now(), liveGuidance: { requestId, runId, status: 'pending' } };
+  session.messages = session.messages || [];
+  session.messages.push(message);
+  if (state.currentSession?.id === sessionId) {
+    const assistant = getActiveAssistantElement(sessionId);
+    const element = appendMessage('user', text, [], true, session.messages.length - 1, message.ts, null, null, [], null, message.liveGuidance);
+    if (assistant) assistant.before(element);
+    clearComposerPayload();
+    updateSendState();
+  }
+  try {
+    await saveCurrentSession(session);
+    if (state.activeRuns.get(sessionId)?.runCtx !== runCtx || runCtx.shouldAbort) {
+      throw new Error('当前任务已停止或结束，指令已保留');
+    }
+    const result = await api.openCodeSteerRun({ runId, yanSessionId: sessionId, requestId, text });
+    if (!result?.ok || result.delivered !== true) throw new Error(result?.error || '当前任务未确认接收，请重试或排队发送');
+    message.liveGuidance.status = 'delivered';
+  } catch (error) {
+    message.liveGuidance.status = 'failed';
+    message.liveGuidance.error = String(error?.message || error || '引导失败');
+  }
+  refreshLiveGuidanceStatus(session, message);
+  try { await saveCurrentSession(session); }
+  catch (error) {
+    if (state.currentSession?.id === sessionId) toast(`引导记录保存失败：${error?.message || error}`);
+  }
+  return message.liveGuidance.status === 'delivered';
+}
+
 function queueCurrentComposerTurn() {
   const sessionId = String(state.currentSession?.id || '');
   const runCtx = getRunCtx(sessionId);
@@ -6173,7 +6281,7 @@ function queueCurrentComposerTurn() {
   const skillCalls = state.selectedSkills.map(normalizeComposerSkill);
   const subagentRoles = state.selectedSubagents.map(item => item.id);
   if (!text && !attachments.length && !skillCalls.length && !subagentRoles.length) return false;
-  const modelSelection = { ...getAgentModelSelection() };
+  const modelSelection = normalizeModelSelectionSnapshot(getAgentModelSelection(state.currentSession));
   if (!validateQueuedModelPayload(text, attachments, modelSelection)) return false;
   const queuedId = createQueuedTurnId();
   const queuedTurn = {
@@ -6271,8 +6379,7 @@ function dispatchRunCancel(runCtx, attempt = 1) {
 
 // Core 终态对账兜底：正常收尾由 opencode:completed 驱动。若内核侧 Turn 已经
 // 终结而收尾事件迟迟未送达（取消丢失、事件流死亡、内核假死），由 Core 事件在
-// 宽限期后解除会话占用，避免会话永久卡在"运行中"。对账不归档正文——若内核
-// 随后真正收尾，正常路径仍会归档；这里只负责恢复可用性。
+// 宽限期后触发收尾。先保存已收到的工作，再解除会话占用，避免新任务抢先写入。
 const CORE_TERMINAL_RECONCILE_DELAY_MS = 3000;
 const CORE_TERMINAL_RECONCILE_LABELS = {
   completed: '已完成',
@@ -6359,29 +6466,38 @@ function reconcileRunFromCoreTerminal(runId, event) {
   if (runCtx.coreSettled) return;
   runCtx.coreSettled = true;
   runCtx.coreReconciled = true;
+  runCtx.shouldAbort = true;
   runCtx.detachOpenCodeListeners?.();
   const reconciledError = new Error('Core 已完成任务对账，忽略迟到的 OpenCode 收尾结果。');
   reconciledError.code = 'YAN_CORE_RECONCILED';
-  runCtx.rejectCompletion?.(reconciledError);
+  const rejectCompletion = runCtx.rejectCompletion;
   runCtx.rejectCompletion = null;
   const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
   const turn = payload.turn && typeof payload.turn === 'object' ? payload.turn : {};
   const label = CORE_TERMINAL_RECONCILE_LABELS[String(turn.status || '')] || '已结束';
   upsertOpenCodeTimeline(runCtx, 'core-reconcile', {
     type: String(turn.status || '') === 'failed' ? 'error' : 'progress',
-    content: `Core 对账：任务在内核侧已${label}，但收尾事件未送达，已解除会话占用。`
+    content: `Core 对账：任务在内核侧已${label}，但收尾事件未送达，正在保存已收到的工作。`
   });
-  applyAbortRunUi(sessionId);
-  state.activeRuns.delete(String(sessionId));
-  syncChatAutoFollowUi(currentChatSessionId());
-  updateTaskBar();
   renderSessionList();
   if (state.currentSession?.id === sessionId) {
-    toast(`内核侧任务已${label}（收尾事件丢失），会话已恢复可用`);
+    showTyping(false);
+    updateSendState();
+    toast(`内核侧任务已${label}（收尾事件丢失），正在保存工作记录`);
   }
-  const queued = state.queuedTurns.get(String(sessionId));
-  if (queued) {
-    scheduleQueuedTurnDispatch(queued.sessionRef || state.sessions.find(item => String(item.id) === String(sessionId)));
+  if (rejectCompletion) {
+    // submitMessage owns the run until its snapshot is saved and finally runs.
+    rejectCompletion(reconciledError);
+  } else {
+    // Runs reattached after a renderer reload have no submitMessage promise.
+    // Their existing persistence path owns cleanup and queued-turn dispatch.
+    const session = entry.sessionRef || runCtx.sessionRef;
+    flushOpenCodeStreamDeltas(runCtx);
+    persistResumedOpenCodeRun(session, runCtx, {
+      status: 'interrupted',
+      openCodeSessionId: runCtx.openCodeSessionId || session.openCodeSessionId || '',
+      text: runCtx.partialContent || ''
+    }).catch(error => console.error('[opencode-sync] persist reconciled run failed:', error));
   }
 }
 
@@ -6880,27 +6996,25 @@ function getAgentModelConfigName(providerId = '', supplierId = '', cfg = state.c
   return String(supplier?.name || connection?.name || '').trim();
 }
 
-function getAgentModelSelection() {
-  const stored = state.config?.agentModel;
+function getAgentModelSelection(session = state.currentSession) {
+  const sessionSelection = session?.modelSelection;
+  const stored = sessionSelection || state.config?.agentModel;
   if (stored && String(stored.modelType || '') === 'text') {
-    const storedProvider = String(stored.providerId || state.config?.api?.provider || '');
-    const storedModelId = String(stored.modelId || stored.model || state.config?.api?.model || '');
-    const catalogModel = storedProvider === state.config?.api?.provider
-      ? (state.config?.models || []).find(item => item.id === storedModelId)
-      : null;
+    const storedProvider = String(stored.providerId || (sessionSelection ? '' : state.config?.api?.provider) || '');
+    const storedModelId = String(stored.modelId || stored.model || (sessionSelection ? '' : state.config?.api?.model) || '');
+    const supplierId = String(stored.supplierId || (sessionSelection ? '' : state.config?.api?.providerActiveSupplierIds?.[storedProvider]) || '');
+    const catalogModel = state.config?.api?.providerSuppliers?.[storedProvider]
+      ?.find(item => item.id === supplierId)?.models?.find(item => item.id === storedModelId);
     return {
       providerId: storedProvider,
-      supplierId: String(stored.supplierId || state.config?.api?.providerActiveSupplierIds?.[storedProvider] || ''),
+      supplierId,
       modelId: storedModelId,
       modelType: String(stored.modelType),
       name: String(stored.name || storedModelId),
-      configName: String(stored.configName || getAgentModelConfigName(
-        storedProvider,
-        stored.supplierId || state.config?.api?.providerActiveSupplierIds?.[storedProvider]
-      )),
-      capabilities: stored.capabilities && Object.keys(stored.capabilities).length
+      configName: String(stored.configName || (sessionSelection && !supplierId ? '' : getAgentModelConfigName(storedProvider, supplierId))),
+      capabilities: { ...(stored.capabilities && Object.keys(stored.capabilities).length
         ? stored.capabilities
-        : (catalogModel?.capabilities || {})
+        : (catalogModel?.capabilities || {})) }
     };
   }
   const modelId = String(state.config?.api?.model || '');
@@ -6919,6 +7033,34 @@ function getAgentModelSelection() {
   };
 }
 
+const sessionModelSelectionVersions = new Map();
+
+async function selectSessionTextModel(selection, session = state.currentSession) {
+  const target = session || await newSession();
+  if (!target?.id) throw new Error('没有可用会话');
+  const sessionId = String(target.id);
+  const version = (sessionModelSelectionVersions.get(sessionId) || 0) + 1;
+  sessionModelSelectionVersions.set(sessionId, version);
+  const requested = normalizeModelSelectionSnapshot({
+    ...selection,
+    modelId: selection.modelId || selection.id,
+    modelType: 'text'
+  });
+  const result = await api.setSessionModel(sessionId, requested);
+  if (!result?.ok || result.id !== sessionId || !result.modelSelection) {
+    throw new Error(result?.error || '对话模型保存失败');
+  }
+  if (sessionModelSelectionVersions.get(sessionId) !== version) return false;
+  const saved = normalizeModelSelectionSnapshot(result.modelSelection);
+  const records = new Set([target, state.currentSession, state.sessions.find(item => item.id === sessionId),
+    state.activeRuns.get(sessionId)?.sessionRef]);
+  for (const record of records) {
+    if (record?.id === sessionId) record.modelSelection = { ...saved, capabilities: { ...saved.capabilities } };
+  }
+  if (state.currentSession?.id === sessionId) renderModelBadge();
+  return true;
+}
+
 function normalizeModelSelectionSnapshot(selection = {}) {
   const source = selection && typeof selection === 'object' ? selection : {};
   const modelType = String(source.modelType || 'text').trim() || 'text';
@@ -6927,7 +7069,8 @@ function normalizeModelSelectionSnapshot(selection = {}) {
   const modelId = String(source.modelId || source.model || '').trim();
   const name = String(source.name || source.modelName || modelId || '').trim();
   const configName = String(source.configName || source.connectionName || '').trim();
-  return { providerId, supplierId, modelId, modelType, name, configName };
+  const capabilities = source.capabilities && typeof source.capabilities === 'object' ? { ...source.capabilities } : {};
+  return { providerId, supplierId, modelId, modelType, name, configName, capabilities };
 }
 
 function modelSelectionIdentity(selection = {}) {
@@ -7109,6 +7252,8 @@ function mountComposerToolbar() {
     document.querySelector('#accessModeWrap'),
     document.querySelector('#workModeIndicator'),
     document.querySelector('#modelPickerWrap'),
+    document.querySelector('#stopRunBtn'),
+    document.querySelector('#queueTurnBtn'),
     document.querySelector('#sendBtn')
   ];
   controls.forEach(control => {
@@ -7634,11 +7779,14 @@ composer.addEventListener('drop', async (e) => {
 // ============================================================
 async function sendMessage() {
   const text = input.value.trim();
+  syncComposerSkillsFromDom();
   syncComposerSubagentsFromDom();
   if (!text && state.attachments.length === 0 && state.selectedSkills.length === 0 && state.selectedSubagents.length === 0) return;
   if (isCurrentSessionExecutionActive()) {
     if (getRunCtx(state.currentSession?.id)?.shouldAbort) toast('上一任务正在完成中止清理，请稍候');
-    else queueCurrentComposerTurn();
+    else if (state.attachments.length || state.selectedSkills.length || state.selectedSubagents.length) {
+      if (queueCurrentComposerTurn()) toast('含附件、技能或子代理的消息已排队，将在当前任务完成后执行');
+    } else await steerCurrentComposerTurn();
     return;
   }
   const attachments = state.attachments.slice();
@@ -9700,7 +9848,20 @@ function openCodeResultToAgentRun(result, runCtx) {
     if (tool.name === "task") continue;
     if (!timeline.some(item => item.type === 'tool_call' && item.callId === tool.callId)) {
       timeline.push({ type: 'tool_call', stage: 'work', callId: tool.callId, name: tool.name, args: tool.args || {} });
-      timeline.push({ type: 'tool_result', stage: 'work', callId: tool.callId, name: tool.name, output: tool.output || '', ok: tool.ok });
+    }
+    const recordedResult = timeline.find(item => item.type === 'tool_result' && item.callId === tool.callId);
+    const toolInterrupted = tool.interrupted === true || tool.status === 'interrupted';
+    if (!recordedResult) {
+      timeline.push({ type: 'tool_result', stage: 'work', callId: tool.callId, name: tool.name, output: tool.output || '', ok: tool.ok,
+        ...(toolInterrupted ? { interrupted: true } : {}) });
+    } else {
+      // Cancellation may return a completed output after its final SSE event
+      // was missed. Preserve the fuller output whichever channel supplied it.
+      const returnedOutput = stringifyOpenCodeValue(tool.output);
+      if (returnedOutput.length > String(recordedResult.output || '').length) recordedResult.output = returnedOutput;
+      if (typeof tool.ok === 'boolean' && (recordedResult.ok !== true || tool.ok === true)) recordedResult.ok = tool.ok;
+      if (recordedResult.ok === true) delete recordedResult.interrupted;
+      else if (toolInterrupted) recordedResult.interrupted = true;
     }
   }
   const resultStage = summaryStarted ? 'summary' : 'work';
@@ -9708,7 +9869,10 @@ function openCodeResultToAgentRun(result, runCtx) {
     item.type === 'text'
     && (item.stage || 'work') === resultStage
     && String(item.content || '').trim() === resultText
-  ));
+  )) || ((result.status === 'interrupted' || runCtx.shouldAbort) && timeline
+    .filter(item => item.type === 'text')
+    .map(item => String(item.content || '').trim())
+    .filter(Boolean).join('\n\n') === resultText);
   if (resultText && !hasResultStageText) {
     timeline.push({
       type: 'text',
@@ -9738,13 +9902,15 @@ function openCodeResultToAgentRun(result, runCtx) {
     deletions: Number(rawReviewSummary?.deletions) || changes.reduce((sum, file) => sum + file.deletions, 0),
     files: changes
   };
-  const status = result.status === 'interrupted' ? 'interrupted' : (result.status === 'error' ? 'error' : 'done');
+  const status = runCtx.shouldAbort || result.status === 'interrupted' ? 'interrupted' : (result.status === 'error' ? 'error' : 'done');
   runCtx.agentState.status = status;
   runCtx.finalStatus = status;
   const watchdog = window.ZWdMonitor?.finish(result.watchdog || runCtx.activeAgentRun?.watchdog, status) || null;
   if (runCtx.activeAgentRun) runCtx.activeAgentRun.watchdog = watchdog;
-  runCtx.agentState.toolCallCount = result.toolCalls?.length || runCtx.agentState.toolCallCount || 0;
-  const resultTodos = Array.isArray(result.todos)
+  const toolCallCount = Math.max(result.toolCalls?.length || 0, runCtx.agentState.toolCallCount || 0,
+    timeline.filter(item => item.type === 'tool_call').length);
+  runCtx.agentState.toolCallCount = toolCallCount;
+  const resultTodos = Array.isArray(result.todos) && (result.todos.length || status !== 'interrupted')
     ? normalizeAgentTodos(result.todos)
     : normalizeAgentTodos(runCtx.agentState.todos);
   runCtx.agentState.todos = resultTodos;
@@ -9782,8 +9948,9 @@ function openCodeResultToAgentRun(result, runCtx) {
       ? Math.max(0, Number(runCtx.responseDurationMs))
       : null,
     iteration: timeline.filter(item => item.type === 'tool_call').length,
-    toolCallCount: result.toolCalls?.length || 0,
-    textContent: resultText || partialText || '',
+    toolCallCount,
+    textContent: resultText || partialText || (status === 'interrupted'
+      ? timeline.filter(item => item.type === 'text').map(item => String(item.content || '')).filter(Boolean).join('\n\n') : ''),
     thinkingContent: result.reasoning || '',
     timeline,
     subagents: runCtx.activeAgentRun.subagents || [],
@@ -9950,15 +10117,14 @@ async function rejectStartedOpenCodeRunIfAborted(runCtx, runId, cancelRun = api.
 
 function syncSessionOpenCodeIdAfterRun(session, agentRun) {
   if (!session || !agentRun) return;
-  if (agentRun.status === 'interrupted') {
-    session.openCodeSessionId = '';
-    return;
-  }
   if (agentRun.openCodeSessionId) session.openCodeSessionId = agentRun.openCodeSessionId;
 }
 
 async function runOpenCodeLoop(session, assistantEl, runCtx) {
-  const latestUserMessage = [...(session.messages || [])].reverse().find(message => message.role === 'user') || {};
+  const latestUserMessage = runCtx.requestMessage
+    || [...(session.messages || [])].reverse().find(message => message.role === 'user') || {};
+  const modelSelection = normalizeModelSelectionSnapshot(runCtx.modelSelection || latestUserMessage.modelSelection || getAgentModelSelection(session));
+  setRunModelPresentation(runCtx, modelSelection);
   runCtx.currentRequest = String(latestUserMessage.content || '').trim();
   runCtx.runId = runCtx.runId || createRendererRunId(session.id);
   const openCodeRunId = runCtx.runId;
@@ -9977,11 +10143,12 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         yanSessionId: session.id,
         openCodeSessionId: session.openCodeSessionId || '',
         title: session.title || latestUserMessage.content || 'Z task',
+        modelSelection,
         prompt: String(latestUserMessage.content || ''),
         attachments: latestUserMessage.attachments || [],
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
         subagentRoles: Array.isArray(latestUserMessage.subagentRoles) ? latestUserMessage.subagentRoles : [],
-        history: (session.messages || []).slice(0, -1).map(message => {
+        history: (runCtx.requestHistory || (session.messages || []).slice(0, -1)).map(message => {
           let mediaAssets = Array.isArray(message.mediaAssets)
             ? message.mediaAssets
             : extractMediaAssetsFromAgentRun(message.agentRun);
@@ -10068,7 +10235,8 @@ async function persistResumedOpenCodeRunOnce(session, runCtx, result) {
   await saveCurrentSession(session);
 
   const entry = state.activeRuns.get(session.id);
-  const assistantEl = entry?.assistantEl;
+  if (entry?.runCtx !== runCtx) return;
+  const assistantEl = entry.assistantEl;
   if (state.currentSession?.id === session.id) {
     state.currentSession = session;
     if (assistantEl) {
@@ -10086,12 +10254,13 @@ async function persistResumedOpenCodeRunOnce(session, runCtx, result) {
   state.activeRuns.delete(session.id);
   if (state.currentSession?.id === session.id) renderWdMonitor(session);
   syncChatAutoFollowUi(currentChatSessionId());
-  scheduleQueuedTurnDispatch(session);
   const petStatus = agentRun?.status === 'interrupted'
     ? 'paused'
     : (agentRun?.status === 'error' ? 'error' : 'completed');
   finishPetSupervision(runCtx, petStatus, petStatus === 'error' ? agentRun?.error : undefined);
   renderSessionList();
+  if (state.currentSession?.id === session.id) await activatePendingAgentHandoff(session.id);
+  scheduleQueuedTurnDispatch(session);
 }
 
 async function resumeOpenCodeRunFromDescriptor(session, descriptor) {
@@ -10351,12 +10520,12 @@ function findPersistedIntentSubmission(session, intentId) {
     const userMessage = messages[userIndex];
     if (userMessage?.role !== 'user' || String(userMessage.intentId || '').trim() !== targetIntentId) continue;
 
-    // Only pair with an assistant before the next user message. This keeps a
-    // later turn from being mistaken for the completion of this Intent.
+    // Live guidance belongs to this run. Only a separate user turn ends the
+    // search for the assistant completion of this Intent.
     let assistantMessage = null;
     for (let index = userIndex + 1; index < messages.length; index += 1) {
       const message = messages[index];
-      if (message?.role === 'user') break;
+      if (message?.role === 'user' && !message.liveGuidance) break;
       if (message?.role === 'assistant') {
         assistantMessage = message;
         break;
@@ -10513,7 +10682,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   const effectiveModelSelection = normalizeModelSelectionSnapshot(
     options.modelSelection
       || persistedSubmission?.userMessage?.modelSelection
-      || getAgentModelSelection()
+      || getAgentModelSelection(runSession)
   );
   const ui = state.currentSession?.id === runSession.id;
   const runCtx = createRunCtx(runSession.id, ui, runSession.workspace || '');
@@ -10547,11 +10716,18 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   };
   if (!userMsg.modelSelection) userMsg.modelSelection = effectiveModelSelection;
   if (intentId && !userMsg.intentId) userMsg.intentId = intentId;
+  runCtx.requestMessage = {
+    ...userMsg,
+    attachments: (userMsg.attachments || []).map(item => ({ ...item })),
+    skillCalls: (userMsg.skillCalls || []).map(item => ({ ...item })),
+    subagentRoles: [...(userMsg.subagentRoles || [])]
+  };
   runSession.messages = runSession.messages || [];
   if (!persistedSubmission?.userMessage) runSession.messages.push(userMsg);
   syncCurrentSessionAgentUi(runSession);
 
   const userMsgIndex = persistedSubmission?.userIndex ?? (runSession.messages.length - 1);
+  runCtx.requestHistory = runSession.messages.slice(0, userMsgIndex).map(message => ({ ...message }));
   if (ui && !persistedSubmission?.userMessage) {
     appendMessage('user', text, attachments, true, userMsgIndex, userMsg.ts, null, null, selectedSkillCalls);
     if (modelSwitchNotice) appendModelSwitchNoticeElement(modelSwitchNotice);
@@ -10637,21 +10813,22 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
     assistantEl = getActiveAssistantElement(runSession.id) || assistantEl;
     const ui = !!getActiveAssistantBody(runSession.id);
     if (err?.code === 'YAN_CORE_RECONCILED' || runCtx.coreReconciled) {
-      // Core already settled this Turn and released the run. A provider
-      // completion arriving afterwards must not append a second assistant
-      // message or overwrite the cancelled/failed outcome.
+      // Core has settled execution, so late provider completions are ignored.
+      // Keep ownership until the observed work is saved and finally releases it.
       taskOk = false;
       taskErr = err?.message || '任务已由 Z Core 对账结束';
       runCtx.agentState.status = 'interrupted';
       if (ui) showTyping(false);
+      await persistReconciledRunSnapshot(runSession, runCtx);
     } else if (err && (err.name === 'AbortError' || runCtx.shouldAbort)) {
-      runSession.openCodeSessionId = '';
+      if (runCtx.openCodeSessionId) runSession.openCodeSessionId = runCtx.openCodeSessionId;
       runCtx.agentState.status = 'interrupted';
       if (ui) showTyping(false);
       if (ui) {
         const taskDuration = Date.now() - taskStartTime;
         const messageTs = Date.now();
         const body = assistantEl.querySelector('.msg-body');
+        flushOpenCodeStreamDeltas(runCtx);
         const partialContent = runCtx.partialContent || collectAssistantText(body) || '';
         const agentRun = finalizeAgentRun(partialContent, 'interrupted', getActiveRun(runCtx), body, null, runCtx);
         await attachAgentRunChangeSummary(agentRun, runSession);
@@ -10669,6 +10846,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
         });
         await saveCurrentSession(runSession);
       } else {
+        flushOpenCodeStreamDeltas(runCtx);
         const partialContent = runCtx.partialContent || '';
         const agentRun = finalizeAgentRun(partialContent, 'interrupted', getActiveRun(runCtx), null, null, runCtx);
         await attachAgentRunChangeSummary(agentRun, runSession);
@@ -10728,7 +10906,8 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
         });
       } catch {}
     }
-    const liveBody = getActiveAssistantBody(runSession.id);
+    const ownsSessionRun = state.activeRuns.get(runSession.id)?.runCtx === runCtx;
+    const liveBody = ownsSessionRun ? getActiveAssistantBody(runSession.id) : null;
     if (liveBody) {
       const persistedRun = [...(runSession.messages || [])]
         .reverse()
@@ -10744,25 +10923,42 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
         toolCallCount: runCtx.agentState.toolCallCount || 0
       });
     }
-    scheduleChatAutoFollow(runSession.id);
-    state.activeRuns.delete(runSession.id);
-    syncChatAutoFollowUi(currentChatSessionId());
-    syncInterjectionUi();
-    renderSessionList();
-    if (state.currentSession?.id === runSession.id) {
-      if (state.currentSession !== runSession) {
-        state.currentSession = runSession;
-        renderMessages(runSession.messages || []);
-        setEmptyState((runSession.messages || []).length === 0);
+    if (ownsSessionRun) {
+      scheduleChatAutoFollow(runSession.id);
+      state.activeRuns.delete(runSession.id);
+      syncChatAutoFollowUi(currentChatSessionId());
+      syncInterjectionUi();
+      renderSessionList();
+      if (state.currentSession?.id === runSession.id) {
+        if (state.currentSession !== runSession) {
+          state.currentSession = runSession;
+          renderMessages(runSession.messages || []);
+          setEmptyState((runSession.messages || []).length === 0);
+        }
+        showTyping(false);
+        updateSendState();
+        syncCurrentSessionAgentUi(runSession);
       }
-      showTyping(false);
-      updateSendState();
-      syncCurrentSessionAgentUi(runSession);
+      await activatePendingAgentHandoff(runSession.id);
+      scheduleQueuedTurnDispatch(runSession);
     }
-    await activatePendingAgentHandoff(runSession.id);
-    scheduleQueuedTurnDispatch(runSession);
   }
   return { ok: taskOk, error: taskErr };
+}
+
+async function persistReconciledRunSnapshot(session, runCtx) {
+  const runId = String(runCtx.runId || '');
+  if ((session.messages || []).some(message => message.role === 'assistant' && message.agentRun?.runId === runId)) return;
+  flushOpenCodeStreamDeltas(runCtx);
+  const agentRun = finalizeAgentRun(runCtx.partialContent || '', 'interrupted', getActiveRun(runCtx), null, null, runCtx);
+  await attachAgentRunChangeSummary(agentRun, session);
+  syncSessionOpenCodeIdAfterRun(session, agentRun);
+  session.messages.push({ role: 'assistant', content: agentRun.textContent || '', ts: Date.now(), agentRun });
+  await saveCurrentSession(session);
+  if (state.currentSession?.id === session.id) {
+    renderMessages(session.messages);
+    setEmptyState(false);
+  }
 }
 
 function agentRunHasCollapsibleWork(agentRun) {
@@ -10974,6 +11170,7 @@ function finalizeAgentRun(content, status, activeRun, bodyEl, error, runCtx) {
     ...(activeRun || {}),
     watchdog: window.ZWdMonitor?.finish(activeRun?.watchdog, status) || null,
     runId: runCtx?.runId || activeRun?.runId || '',
+    openCodeSessionId: runCtx?.openCodeSessionId || activeRun?.openCodeSessionId || '',
     status,
     startedAt: runCtx?.startedAt || activeRun?.startedAt || Date.now(),
     completedAt: Date.now(),
@@ -11583,6 +11780,9 @@ async function activatePendingAgentHandoff(sourceSessionId) {
     const targetExists = state.sessions.some(session => session.id === targetSessionId);
     if (!targetExists) throw new Error('目标工作区任务不存在');
     await loadSession(targetSessionId);
+    // A failed or superseded load returns without throwing. Keep the handoff
+    // pending until the target conversation is actually selected.
+    if (state.currentSession?.id !== targetSessionId) return false;
     pendingAgentHandoffs.delete(sourceId);
     toast(detail.reused ? '已返回目标工作区最新任务' : '已进入新的工作区任务');
     return true;
@@ -12546,7 +12746,7 @@ function updateAgentTimelinePartElement(element, item, result, phase, presentati
     const variant = String(item.variant || '');
     if (variant === 'agent-loader') {
       if (previousState.variant !== variant) {
-        element.className = `agent-progress-note agent-loader-note${document.body?.classList.contains('is-mac') ? ' agent-loader-note-mac' : ''}`;
+        element.className = 'agent-progress-note agent-loader-note agent-loader-note-mac';
         element.setAttribute('role', 'status');
         element.setAttribute('aria-label', 'Agent 工作中');
         element.innerHTML = buildAgentLoaderMarkup();
@@ -13179,29 +13379,10 @@ function buildWorkNarrationElement(content) {
   return narration;
 }
 
-// Uiverse: Capybara loader by Novaxlo (MIT). Source: https://uiverse.io/Novaxlo/kind-snail-5
 function buildAgentLoaderMarkup() {
-  if (document.body?.classList.contains('is-mac')) {
-    return '<div class="mac-agent-loader" aria-hidden="true">'
-      + '<span class="mac-agent-loader-mark"><i></i><i></i><i></i><i></i></span>'
-      + '<span class="mac-agent-loader-label">正在工作</span>'
-      + '</div>';
-  }
-  return '<div class="capybaraloader" aria-hidden="true">'
-    + '<div class="capybara">'
-    + '<div class="capyhead">'
-    + '<div class="capyear"><div class="capyear2"></div></div>'
-    + '<div class="capyear"></div>'
-    + '<div class="capymouth"><div class="capylips"></div><div class="capylips"></div></div>'
-    + '<div class="capyeye"></div>'
-    + '<div class="capyeye"></div>'
-    + '</div>'
-    + '<div class="capyleg"></div>'
-    + '<div class="capyleg2"></div>'
-    + '<div class="capyleg2"></div>'
-    + '<div class="capy"></div>'
-    + '</div>'
-    + '<div class="loader"><div class="loaderline"></div></div>'
+  return '<div class="mac-agent-loader" aria-hidden="true">'
+    + '<span class="mac-agent-loader-mark"><i class="z-orbit-ring"></i><i class="z-orbit-arc"></i><i class="z-orbit-core"></i></span>'
+    + '<span class="mac-agent-loader-label">正在工作</span>'
     + '</div>';
 }
 
@@ -13248,7 +13429,7 @@ function buildProgressNoteElement(content, variant = '', item = {}) {
   const note = document.createElement(variant === 'stream-reconnect' ? 'details' : 'div');
   const value = String(content || '');
   if (variant === 'agent-loader') {
-    note.className = `agent-progress-note agent-loader-note${document.body?.classList.contains('is-mac') ? ' agent-loader-note-mac' : ''}`;
+    note.className = 'agent-progress-note agent-loader-note agent-loader-note-mac';
     note.setAttribute('role', 'status');
     note.setAttribute('aria-label', 'Agent 工作中');
     note.innerHTML = buildAgentLoaderMarkup();
@@ -13333,6 +13514,7 @@ function resolveAgentPresentationMode(modelId, explicitMode = '') {
 
 function setRunModelPresentation(runCtx, selection = {}) {
   if (!runCtx) return;
+  runCtx.modelSelection = normalizeModelSelectionSnapshot(selection);
   runCtx.providerId = String(selection.providerId || runCtx.providerId || '').trim();
   runCtx.supplierId = String(selection.supplierId || runCtx.supplierId || '').trim();
   runCtx.modelId = String(selection.modelId || selection.model || runCtx.modelId || '').trim();
@@ -17136,16 +17318,17 @@ async function generateTaskGitCommitMessage() {
   const input = $('#taskGitCommitMessageInput');
   const button = $('#taskGitGenerateMessageBtn');
   if (!input || !button || button.getAttribute('aria-busy') === 'true') return;
+  const targetSession = state.currentSession;
+  const selection = normalizeModelSelectionSnapshot(getAgentModelSelection(targetSession));
+  const workspace = currentGitWorkspace();
   button.setAttribute('aria-busy', 'true');
   button.disabled = true;
   try {
-    const workspace = currentGitWorkspace();
     const freshStatus = workspace
       ? await refreshTaskGitStatus({ quiet: true, force: true })
       : null;
     const status = freshStatus || taskGitState.status || {};
     const fallback = taskGitAutoCommitMessage(status);
-    const selection = getAgentModelSelection();
     const hasModel = !!String(selection.providerId || '').trim() && !!String(selection.modelId || '').trim();
     if (!workspace || !status?.isRepository || !hasModel) {
       input.value = fallback;
@@ -17187,11 +17370,13 @@ async function generateTaskGitCommitMessage() {
     const boundedChangePayload = changePayload.length > 60_000
       ? `${changePayload.slice(0, 60_000)}\n[diff truncated]`
       : changePayload;
-    const runCtx = createRunCtx(`git-commit-message:${state.currentSession?.id || 'draft'}`, false, currentGitWorkspace());
+    const runCtx = createRunCtx(`git-commit-message:${targetSession?.id || 'draft'}`, false, workspace);
     runCtx.utility = true;
+    setRunModelPresentation(runCtx, selection);
     const session = {
       id: runCtx.sessionId,
       title: 'Git Commit Message',
+      modelSelection: selection,
       workspace: runCtx.workspace,
       messages: [{
         role: 'user',
@@ -20828,8 +21013,9 @@ async function renderModelGrid(cfg) {
     return;
   }
 
-  const textProviderId = cfg.agentModel?.providerId || cfg.api?.provider || '';
-  const textModelId = cfg.agentModel?.modelId || cfg.api?.model || '';
+  const textSelection = getAgentModelSelection();
+  const textProviderId = textSelection.providerId;
+  const textModelId = textSelection.modelId;
   const groups = [
     { id: 'text', title: '文本' },
     { id: 'image', title: '生图' },
@@ -20842,7 +21028,7 @@ async function renderModelGrid(cfg) {
       const active = group.id === 'text'
         ? model.providerId === textProviderId
           && model.id === textModelId
-          && (!cfg.agentModel?.supplierId || cfg.agentModel.supplierId === model.supplierId)
+          && (!textSelection.supplierId || textSelection.supplierId === model.supplierId)
         : cfg.media?.[`${group.id}Provider`] === model.providerId
           && cfg.media?.[`${group.id}Model`] === model.id
           && (!cfg.media?.[`${group.id}SupplierId`] || cfg.media[`${group.id}SupplierId`] === model.supplierId);
@@ -20867,12 +21053,21 @@ async function renderModelGrid(cfg) {
 
   grid.querySelectorAll('.model-card').forEach(card => {
     card.addEventListener('click', async () => {
+      const targetSession = state.currentSession;
       const providerId = card.dataset.provider;
       const id = card.dataset.model;
       const modelType = card.dataset.modelType || 'text';
-      const nextConfig = await api.setModelRole(providerId, id, modelType, card.dataset.supplier || '');
-      if (nextConfig?.error) { toast(nextConfig.error); return; }
-      state.config = nextConfig;
+      if (modelType === 'text') {
+        try {
+          const model = models.find(item => item.providerId === providerId && item.id === id
+            && String(item.supplierId || '') === String(card.dataset.supplier || ''));
+          if (!await selectSessionTextModel(model || { providerId, id, supplierId: card.dataset.supplier }, targetSession)) return;
+        } catch (error) { toast(error?.message || '对话模型保存失败'); return; }
+      } else {
+        const nextConfig = await api.setModelRole(providerId, id, modelType, card.dataset.supplier || '');
+        if (nextConfig?.error) { toast(nextConfig.error); return; }
+        state.config = nextConfig;
+      }
       await renderModelGrid(state.config);
       renderModelBadge();
       const name = models.find(model => model.providerId === providerId && model.id === id)?.name || id;
@@ -20902,6 +21097,7 @@ function bindSubagentSettings() {
 // ============================================================
 let modelPickerRefreshSequence = 0;
 let modelPickerSaving = false;
+let modelPickerSaveOperation = null;
 let quickModelsCache = null;
 let modelQuickView = 'control';
 let modelQuickSaving = false;
@@ -21519,7 +21715,7 @@ function setModelQuickView(view = 'control', { focus = true } = {}) {
   }
 }
 
-function setModelQuickMenuOpen(open, { restoreFocus = false } = {}) {
+function setModelQuickMenuOpen(open, { restoreFocus = false, force = false } = {}) {
   const menu = $('#modelQuickMenu');
   const pill = $('#modelPill');
   if (!menu || !pill) return;
@@ -21538,7 +21734,7 @@ function setModelQuickMenuOpen(open, { restoreFocus = false } = {}) {
     void refreshQuickModels({ showLoading: true });
     return;
   }
-  if (isModelPickerBusy()) return;
+  if (isModelPickerBusy() && !force) return;
   menu.classList.add('hidden');
   menu.setAttribute('aria-hidden', 'true');
   menu.setAttribute('aria-busy', 'false');
@@ -21554,8 +21750,12 @@ async function openModelPicker() {
   setModelQuickMenuOpen(true);
 }
 
-function closeModelPicker({ restoreFocus = false } = {}) {
-  setModelQuickMenuOpen(false, { restoreFocus });
+function closeModelPicker({ restoreFocus = false, force = false } = {}) {
+  if (force) {
+    modelPickerSaveOperation = null;
+    modelPickerSaving = false;
+  }
+  setModelQuickMenuOpen(false, { restoreFocus, force });
   const dialog = $('#modelPickerDialog');
   if (dialog?.open) dialog.close();
 }
@@ -21575,13 +21775,14 @@ function closeReasoningPicker({ restoreFocus = false } = {}) {
 
 async function selectModelFromMenu(option) {
   if (!option || modelPickerSaving) return;
+  const targetSession = state.currentSession;
   const selectedModel = quickTextModels().find(model => (
     String(model.providerId || '') === String(option.dataset.modelPickerProvider || '')
     && String(model.supplierId || '') === String(option.dataset.modelPickerSupplier || '')
     && String(model.id || '') === String(option.dataset.modelPickerModel || '')
   ));
   if (!selectedModel) return;
-  const current = getAgentModelSelection();
+  const current = getAgentModelSelection(targetSession);
   const modelChanged = String(current.providerId || '') !== String(selectedModel.providerId || '')
     || String(current.supplierId || '') !== String(selectedModel.supplierId || '')
     || String(current.modelId || '') !== String(selectedModel.id || '');
@@ -21591,18 +21792,14 @@ async function selectModelFromMenu(option) {
     return;
   }
   setModelPickerMenuNotice();
+  const operation = Symbol('model-picker-save');
+  modelPickerSaveOperation = operation;
   modelPickerSaving = true;
   $('#modelQuickSupplier').disabled = true;
   option.setAttribute('aria-busy', 'true');
   try {
-    const nextConfig = await api.setModelRole(
-      selectedModel.providerId,
-      selectedModel.id,
-      'text',
-      selectedModel.supplierId || ''
-    );
-    if (nextConfig?.error) throw new Error(nextConfig.error);
-    state.config = nextConfig;
+    if (!await selectSessionTextModel(selectedModel, targetSession)) return;
+    if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
     modelPickerDraft.providerId = String(selectedModel.providerId || '');
     modelPickerDraft.supplierId = String(selectedModel.supplierId || '');
     modelPickerDraft.modelId = String(selectedModel.id || '');
@@ -21613,16 +21810,22 @@ async function selectModelFromMenu(option) {
     setModelPickerMenuNotice();
     requestAnimationFrame(() => $('#modelQuickModelRoute')?.focus({ preventScroll: true }));
   } catch (error) {
-    setModelPickerMenuNotice(`模型切换失败：${error?.message || error}`);
+    if (modelPickerSaveOperation === operation && state.currentSession?.id === targetSession?.id) {
+      setModelPickerMenuNotice(`模型切换失败：${error?.message || error}`);
+    }
   } finally {
-    modelPickerSaving = false;
     option.removeAttribute('aria-busy');
-    renderModelPickerChoices();
+    if (modelPickerSaveOperation === operation) {
+      modelPickerSaveOperation = null;
+      modelPickerSaving = false;
+      if (state.currentSession?.id === targetSession?.id) renderModelPickerChoices();
+    }
   }
 }
 
 async function saveModelPicker() {
   if (modelPickerSaving) return;
+  const targetSession = state.currentSession;
   const selectedModel = currentModelPickerModel();
   if (!selectedModel) {
     setModelPickerPage(0);
@@ -21632,27 +21835,24 @@ async function saveModelPicker() {
   const reasoningSpeed = REASONING_SPEED_UI[modelPickerDraft.reasoningSpeed]
     ? modelPickerDraft.reasoningSpeed
     : 'medium';
+  const operation = Symbol('model-picker-save');
+  modelPickerSaveOperation = operation;
   modelPickerSaving = true;
   setModelPickerNotice('正在保存模型与推理强度…', 'progress');
   renderModelPickerPage();
+  let completed = false;
   try {
-    const current = getAgentModelSelection();
+    const current = getAgentModelSelection(targetSession);
     const modelChanged = String(current.providerId || '') !== String(selectedModel.providerId || '')
       || String(current.supplierId || '') !== String(selectedModel.supplierId || '')
       || String(current.modelId || '') !== String(selectedModel.id || '');
     if (modelChanged) {
-      const nextConfig = await api.setModelRole(
-        selectedModel.providerId,
-        selectedModel.id,
-        'text',
-        selectedModel.supplierId || ''
-      );
-      if (nextConfig?.error) throw new Error(nextConfig.error);
-      state.config = nextConfig;
+      if (!await selectSessionTextModel(selectedModel, targetSession)) return;
     }
     if (reasoningSpeed !== getReasoningSpeedMode()) {
       await selectReasoningSpeed(reasoningSpeed, { notify: false });
     }
+    if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
     renderModelBadge();
     const next = $('#modelPickerNext');
     if (next) {
@@ -21661,14 +21861,25 @@ async function saveModelPicker() {
     }
     setModelPickerNotice();
     toast(`已切换到 ${selectedModel.name || selectedModel.id} · ${REASONING_SPEED_UI[reasoningSpeed].label}`);
+    completed = true;
     setTimeout(() => {
+      if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
+      modelPickerSaveOperation = null;
       modelPickerSaving = false;
       closeModelPicker({ restoreFocus: true });
     }, 120);
   } catch (error) {
+    if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
+    modelPickerSaveOperation = null;
     modelPickerSaving = false;
     renderModelPickerPage();
     setModelPickerNotice(`保存失败：${error?.message || error}`, 'error');
+  } finally {
+    if (!completed && modelPickerSaveOperation === operation) {
+      modelPickerSaveOperation = null;
+      modelPickerSaving = false;
+      if (state.currentSession?.id === targetSession?.id) renderModelPickerPage();
+    }
   }
 }
 
@@ -21749,8 +21960,9 @@ function getReasoningSpeedMode() {
 }
 
 function getReasoningSpeedBillingNote(mode) {
-  const provider = String(state.config?.api?.provider || '');
-  const model = String(state.config?.api?.model || '');
+  const selection = getAgentModelSelection();
+  const provider = selection.providerId;
+  const model = selection.modelId;
   if (model === 'kimi-k3') return 'Kimi K3 固定 Max · 档位仅调整 Agent 执行节奏';
   if (['high', 'xhigh', 'max'].includes(mode) && provider === 'moonshot' && model === 'kimi-k2.7-code') {
     return '将使用 Kimi K2.7 HighSpeed（价格更高）';
