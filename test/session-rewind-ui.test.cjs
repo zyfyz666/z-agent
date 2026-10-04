@@ -199,9 +199,9 @@ test('failed backend rewinds keep native and observer state intact', async () =>
   assert.equal(f.loads.length, 0);
 });
 
-test('withdraw and rewrite uses the exclusive boundary and restores attachments, skills, subagents while preserving the old draft in backup', async () => {
+test('normal user-message rewind opens an editable prompt with attachments, skills and subagents and preserves the old draft in backup', async () => {
   const f = fixture();
-  await f.context.rewindSessionFromMessage(f.element(0), { edit: true });
+  await f.context.rewindSessionFromMessage(f.element(0));
   assert.equal(f.calls[0].messageIndex, 60);
   assert.equal(f.calls[0].includeSelected, false);
   assert.equal(f.getComposer(), 'old prompt');
@@ -210,6 +210,72 @@ test('withdraw and rewrite uses the exclusive boundary and restores attachments,
   assert.equal(f.context.state.attachments[0].path, '/workspace/file.txt');
   assert.equal(f.context.selectedSkills[0].id, 'skill');
   assert.equal(f.context.selectedSubagents[0], 'reviewer');
+  assert.equal(f.confirmations[0].confirmLabel, '回退并编辑');
+  assert.match(f.confirmations[0].description, /输入框.*之前/);
+  f.context.setComposerText('A freely edited replacement');
+  assert.equal(f.getComposer(), 'A freely edited replacement');
+  assert.equal(f.sourceSession.messages[0].content, 'old prompt');
+});
+
+test('the explicit edit shortcut retains the same exclusive rewind behavior', async () => {
+  const f = fixture();
+  await f.context.rewindSessionFromMessage(f.element(0), { edit: true });
+  assert.equal(f.calls[0].includeSelected, false);
+  assert.equal(f.getComposer(), 'old prompt');
+});
+
+test('a pending user rewind preserves the edit until returning to its revision without changing another conversation draft', async () => {
+  const f = fixture();
+  const result = deferred(), entered = deferred();
+  f.setMutation(() => { entered.resolve(); return result.promise; });
+  const pending = f.context.rewindSessionFromMessage(f.element(0));
+  await entered.promise;
+  f.context.captureComposerDraftForSession('source');
+  f.context.state.currentSession = f.otherSession;
+  f.context.sessionLoadToken++;
+  f.context.setComposerText('Other conversation draft');
+  const rewound = { ...f.sourceSession, conversationRevision: 5, messages: [] };
+  result.resolve({ ok: true, session: rewound, backupSessionId: 'backup' });
+  await pending;
+  assert.equal(f.getComposer(), 'Other conversation draft');
+  assert.equal(f.context.restorePendingSessionRewindEdit(f.otherSession), false);
+  assert.equal(f.context.restorePendingSessionRewindEdit(f.sourceSession), false);
+  f.context.state.currentSession = rewound;
+  f.context.setComposerText(f.context.state.composerDrafts.get('source').text);
+  assert.equal(f.context.restorePendingSessionRewindEdit(rewound), true);
+  assert.equal(f.getComposer(), 'old prompt');
+  assert.equal(f.context.state.composerDrafts.get('backup').text, 'preserve my draft');
+  f.context.setComposerText('Edited after returning');
+  assert.equal(f.context.restorePendingSessionRewindEdit(rewound), false);
+  assert.equal(f.getComposer(), 'Edited after returning');
+});
+
+test('a newer conversation revision cannot resurrect an old pending edit', async () => {
+  const f = fixture();
+  f.context.state.currentSession = f.otherSession;
+  const result = { ok: true, session: { ...f.sourceSession, conversationRevision: 5 }, backupSessionId: 'backup' };
+  await f.context.applySessionRewindResult(result, f.sourceSession, 6, { editMessage: f.sourceSession.messages[0] });
+  const newer = { ...f.sourceSession, conversationRevision: 6 };
+  f.context.state.currentSession = newer;
+  assert.equal(f.context.restorePendingSessionRewindEdit(newer), false);
+  assert.equal(f.getComposer(), 'preserve my draft');
+});
+
+test('first-message rewind with a default title survives blank-chat cleanup while viewing another empty chat', async () => {
+  const rewound = { id: 'rewound', title: '新对话', messages: [], workspaceKind: 'default',
+    rewindState: { backupSessionId: 'backup' } };
+  const blank = { id: 'blank', title: '新对话', messageCount: 0, workspaceKind: 'default' };
+  const deleted = [];
+  const context = vm.createContext({ state: { currentSession: blank, sessions: [], composerDrafts: new Map(), queuedTurns: new Map() },
+    api: { listSessions: async () => [rewound, blank], deleteSession: async id => { deleted.push(id); return { ok: true }; } },
+    renderSessionList() {}, clearYanCoreQueuedIntentsForThread() {} });
+  vm.runInContext(section('function isDefaultSessionTitle(', 'function syncCurrentSessionWorkspace('), context);
+  vm.runInContext(section('async function refreshSessions(', '// Core IPC is optional'), context);
+  await context.refreshSessions();
+  assert.deepEqual(deleted, []);
+  assert.equal(context.isBlankNewChat(rewound), false);
+  assert.equal(context.isBlankUnassignedNewChat(blank), true);
+  assert.equal(context.state.sessions.length, 2);
 });
 
 test('restore selects the backend checkpoint using the current revision and preserves drafts', async () => {

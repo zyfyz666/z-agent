@@ -91,7 +91,12 @@ for (const grounded of [true, false]) test(`runtime invokes the independent obse
     assert.equal(result.watchdog.events[0].delivery, 'delivered');
     assert.equal(f.calls.deliveries, 1);
   } else {
-    assert.equal(result.watchdog.events.length, 0);
+    assert.equal(result.watchdog.events.length, 1);
+    assert.equal(result.watchdog.events[0].action, 'observe');
+    assert.equal(result.watchdog.events[0].delivery, 'not-needed');
+    assert.ok(result.watchdog.events[0].ts > 0);
+    assert.equal(result.watchdog.interventions, 0);
+    assert.equal(result.watchdog.observations, 1);
     assert.equal(f.calls.deliveries, 0);
   }
   assert.doesNotMatch(JSON.stringify(f.events), /observer-only/);

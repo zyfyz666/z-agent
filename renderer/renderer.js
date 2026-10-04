@@ -744,6 +744,8 @@ function bindActiveRunUi(sessionId) {
 
   const activeSnapshot = {
     ...runCtx.agentState,
+    runId: runCtx.runId,
+    guidanceTimelineKey: runCtx.activeAgentRun?.guidanceTimelineKey,
     status: runCtx.shouldAbort ? 'interrupted' : 'working',
     providerId: runCtx.providerId,
     modelId: runCtx.modelId,
@@ -1616,7 +1618,8 @@ function getSessionMessageCount(session) {
 }
 
 function isBlankNewChat(session) {
-  return !!session && isDefaultSessionTitle(session.title) && getSessionMessageCount(session) === 0;
+  return !!session && !session.rewindState?.backupSessionId
+    && isDefaultSessionTitle(session.title) && getSessionMessageCount(session) === 0;
 }
 
 function isBlankUnassignedNewChat(session) {
@@ -2427,6 +2430,7 @@ async function loadSession(id) {
   syncAgentBrowserVisibility();
   syncPetFocusedSession(s);
   if (!previousSessionId || switchingSessions) restoreComposerDraftForSession(s.id);
+  restorePendingSessionRewindEdit(s);
   // Render the target conversation as soon as the session data arrives; the
   // remaining workspace/review setup below must not delay the visible switch.
   renderMessages(s.messages || []);
@@ -2501,6 +2505,7 @@ function displaySessionTitle(title) {
 // Keep object identity across history prepends; a DOM index alone is not a
 // stable reference while older pages or a running reply are being added.
 const sessionForkSavedMessages = new WeakSet();
+const pendingSessionRewindEdits = new Map();
 const sessionForkRequests = new Map();
 const sessionRewindRequests = new Map();
 let sessionRewindActionSignature = '';
@@ -2552,6 +2557,7 @@ function sessionForkDisabledReason(session, target) {
 
 function syncMessageForkAction(element) {
   if (!element?.matches('.msg.user, .msg.assistant')) return;
+  if (element.classList.contains('agent-guidance-segment')) return;
   const target = sessionMessageForElement(element);
   let actions = element.querySelector(':scope > .msg-actions');
   if (!actions && !target) return;
@@ -2624,7 +2630,9 @@ function syncMessageRewindAction(element, target = sessionMessageForElement(elem
   }
   const reason = sessionRewindDisabledReason(state.currentSession, target);
   button.disabled = !!reason;
-  button.title = reason || '回退到这里；保留这条消息，当前文件不变';
+  button.title = reason || (target?.message.role === 'user'
+    ? '回退并编辑这条消息；后续对话会备份，当前文件不变'
+    : '回退到这里；保留这条回复，当前文件不变');
   button.setAttribute('aria-label', '回退到这里');
   button.setAttribute('aria-busy', String(sessionRewindRequests.has(state.currentSession?.id)));
   const edit = actions.querySelector('[data-act="edit"]');
@@ -2674,6 +2682,12 @@ function clearSessionRewindUiHistory(sessionId) {
 
 async function applySessionRewindResult(result, source, loadToken, { editMessage = null } = {}) {
   if (result?.ok === false || result?.session?.id !== source.id) throw new Error(result?.error || '对话回退失败，请重试');
+  if (editMessage) {
+    // Keep pending edits separate from ordinary drafts. Navigating away before
+    // the result arrives must not lose the prompt or overwrite another chat.
+    pendingSessionRewindEdits.set(source.id, { message: structuredClone(editMessage),
+      revision: Number(result.session.conversationRevision) || 0, backupSessionId: result.backupSessionId });
+  } else pendingSessionRewindEdits.delete(source.id);
   clearSessionRewindUiHistory(source.id);
   try { await refreshSessions(); } catch (error) { console.warn('[session-rewind] list refresh failed:', error); }
   // The old object deliberately keeps its old revision. Any delayed save or
@@ -2682,29 +2696,43 @@ async function applySessionRewindResult(result, source, loadToken, { editMessage
   if (loadToken === sessionLoadToken && state.currentSession?.id === source.id) {
     const resumeToken = sessionLoadToken + 1;
     await loadSession(source.id);
-    if (editMessage && sessionLoadToken === resumeToken && state.currentSession !== source
+    if (sessionLoadToken === resumeToken && state.currentSession !== source
         && state.currentSession?.id === source.id && !observerPendingSessionId) {
-      captureComposerDraftForSession(source.id);
-      const oldDraft = state.composerDrafts.get(source.id);
-      if (oldDraft && result.backupSessionId && !state.composerDrafts.has(result.backupSessionId)) {
-        state.composerDrafts.set(result.backupSessionId, oldDraft);
-      }
-      setComposerText(editMessage.content || '', { preserveSkills: false });
-      const skills = normalizeSkillCalls(editMessage.skillCalls || editMessage.skillCall).map(skill =>
-        installedSkillPickerItems().find(item => item.id === skill.id) || skill);
-      setComposerSkills(skills);
-      setComposerSubagents(editMessage.subagentRoles || editMessage.subagents || []);
-      state.attachments = (editMessage.attachments || []).map(item => ({ ...item }));
-      renderAttachments();
-      autoGrow();
-      captureComposerDraftForSession(source.id);
-      input.focus({ preventScroll: true });
-      setComposerCaretByTextOffset(getComposerText().length);
+      restorePendingSessionRewindEdit(state.currentSession);
     }
   } else {
     toast('对话历史已更新，可从任务列表重新打开');
   }
   return result.session;
+}
+
+function restorePendingSessionRewindEdit(session) {
+  const pending = pendingSessionRewindEdits.get(session?.id);
+  if (!pending || state.currentSession !== session) return false;
+  const revision = Number(session.conversationRevision) || 0;
+  if (revision !== pending.revision) {
+    if (revision > pending.revision) pendingSessionRewindEdits.delete(session.id);
+    return false;
+  }
+  captureComposerDraftForSession(session.id);
+  const oldDraft = state.composerDrafts.get(session.id);
+  if (oldDraft && pending.backupSessionId && !state.composerDrafts.has(pending.backupSessionId)) {
+    state.composerDrafts.set(pending.backupSessionId, oldDraft);
+  }
+  const message = pending.message;
+  setComposerText(message.content || '', { preserveSkills: false });
+  const skills = normalizeSkillCalls(message.skillCalls || message.skillCall).map(skill =>
+    installedSkillPickerItems().find(item => item.id === skill.id) || skill);
+  setComposerSkills(skills);
+  setComposerSubagents(message.subagentRoles || message.subagents || []);
+  state.attachments = (message.attachments || []).map(item => ({ ...item }));
+  renderAttachments();
+  autoGrow();
+  captureComposerDraftForSession(session.id);
+  pendingSessionRewindEdits.delete(session.id);
+  input.focus({ preventScroll: true });
+  setComposerCaretByTextOffset(getComposerText().length);
+  return true;
 }
 
 async function rewindSessionFromMessage(element, { edit = false } = {}) {
@@ -2713,6 +2741,9 @@ async function rewindSessionFromMessage(element, { edit = false } = {}) {
   if (!session || !target || !element.isConnected) return null;
   const reason = sessionRewindDisabledReason(session, target);
   if (reason) { toast(reason); return null; }
+  // Rewinding a prompt prepares a replacement, not a second copy of the old
+  // prompt. Reuse the exclusive boundary and editable composer restore path.
+  edit ||= target.message.role === 'user';
   if (edit && target.message.role !== 'user') return null;
   const loadToken = sessionLoadToken;
   const anchorText = messageForkAnchorText(target.message);
@@ -2723,11 +2754,11 @@ async function rewindSessionFromMessage(element, { edit = false } = {}) {
   updateSendState();
   try {
     const confirmed = await requestGenericConfirmation({
-      title: edit ? '撤回重写' : '回退对话',
+      title: edit ? '回退并编辑' : '回退对话',
       description: edit
         ? '将所选消息放回输入框，并回退到它之前。当前对话会先备份，可恢复；项目文件保持不变。'
         : `保留到第 ${target.messageIndex + 1} 条消息（含这条）。后续对话会备份，可恢复；项目文件保持不变。`,
-      confirmLabel: edit ? '撤回并编辑' : '回退到这里'
+      confirmLabel: edit ? '回退并编辑' : '回退到这里'
     });
     if (!confirmed) return null;
     if (loadToken !== sessionLoadToken || state.currentSession !== session) return null;
@@ -2984,6 +3015,8 @@ function buildHistoryMessageElement(message, index) {
   return element;
 }
 
+let renderingHistoryMessages = false;
+
 function scheduleHistoryPrepend(list, boundaryIndex) {
   const token = historyPrependToken;
   let chunkEnd = boundaryIndex;
@@ -2995,6 +3028,7 @@ function scheduleHistoryPrepend(list, boundaryIndex) {
     const sc = $('#chatScroll');
     const anchor = sc ? { height: sc.scrollHeight, top: sc.scrollTop } : null;
     suppressChatAutoScroll = true;
+    renderingHistoryMessages = true;
     try {
       // Anchor at the oldest rendered message, not the container's first
       // child: the earlier-messages bar (when present) must stay on top.
@@ -3007,8 +3041,10 @@ function scheduleHistoryPrepend(list, boundaryIndex) {
         wrap.insertBefore(fragment, first);
       }
     } finally {
+      renderingHistoryMessages = false;
       suppressChatAutoScroll = false;
     }
+    refreshGuidedHistoryDisplays();
     // Content was inserted above the viewport; shift scrollTop by the height
     // delta so whatever the user was looking at stays pixel-stable.
     if (sc && anchor) sc.scrollTop = anchor.top + (sc.scrollHeight - anchor.height);
@@ -3028,13 +3064,16 @@ function renderMessages(messages) {
   const list = Array.isArray(messages) ? messages : [];
   const immediateStart = Math.max(0, list.length - MESSAGE_RENDER_IMMEDIATE);
   suppressChatAutoScroll = true;
+  renderingHistoryMessages = true;
   try {
     clearMessages();
     for (let i = immediateStart; i < list.length; i++) buildHistoryMessageElement(list[i], i);
     renderTurnScaleNavigation();
   } finally {
+    renderingHistoryMessages = false;
     suppressChatAutoScroll = false;
   }
+  refreshGuidedHistoryDisplays();
   // 历史记录一次性渲染完成后再定位到底部，避免逐条消息触发平滑滚动。
   followSessionEntryBottom();
   if (immediateStart > 0) scheduleHistoryPrepend(list, immediateStart);
@@ -3224,6 +3263,7 @@ function prependRenderedHistory(page, startIndex) {
   const sc = $('#chatScroll');
   const anchor = sc ? { height: sc.scrollHeight, top: sc.scrollTop } : null;
   suppressChatAutoScroll = true;
+  renderingHistoryMessages = true;
   try {
     const oldest = wrap.querySelector('.msg');
     const builtBefore = wrap.children.length;
@@ -3234,8 +3274,10 @@ function prependRenderedHistory(page, startIndex) {
       wrap.insertBefore(fragment, oldest);
     }
   } finally {
+    renderingHistoryMessages = false;
     suppressChatAutoScroll = false;
   }
+  refreshGuidedHistoryDisplays();
   if (sc && anchor) sc.scrollTop = anchor.top + (sc.scrollHeight - anchor.height);
   invalidateConversationTurns();
   renderTurnScaleNavigation();
@@ -6704,8 +6746,8 @@ function validateQueuedModelPayload(text, attachments, modelSelection) {
 }
 
 function renderLiveGuidanceStatus(element, guidance) {
-  if (!element || !guidance?.requestId) return;
-  element.dataset.guidanceRequestId = guidance.requestId;
+  if (!element || (!guidance?.requestId && !guidance?.timelineKey)) return;
+  if (guidance.requestId) element.dataset.guidanceRequestId = guidance.requestId;
   let status = element.querySelector('.msg-live-guidance');
   if (!status) {
     status = document.createElement('div');
@@ -6738,12 +6780,12 @@ async function steerCurrentComposerTurn() {
   const runId = String(runCtx.runId);
   const requestId = `guidance-${createQueuedTurnId()}`;
   const message = { role: 'user', content: text, ts: Date.now(), liveGuidance: { requestId, runId, status: 'pending' } };
+  captureLiveGuidanceDisplayBoundary(runCtx, message);
   session.messages = session.messages || [];
   session.messages.push(message);
   if (state.currentSession?.id === sessionId) {
-    const assistant = getActiveAssistantElement(sessionId);
-    const element = appendMessage('user', text, [], true, session.messages.length - 1, message.ts, null, null, [], null, message.liveGuidance);
-    if (assistant) assistant.before(element);
+    appendMessage('user', text, [], true, session.messages.length - 1, message.ts, null, null, [], null, message.liveGuidance);
+    renderOpenCodeRunNow(runCtx);
     clearComposerPayload();
     updateSendState();
   }
@@ -9227,6 +9269,9 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function renderOpenCodeStreamDeltas(runCtx, body, agentRun) {
+  // Split views use sliced text. A full raw delta must never repaint the
+  // prefix above the user's guidance with content generated afterwards.
+  if (body?.dataset.guidanceSegmented === 'true') return false;
   const dirtyKeys = runCtx?.openCodeDirtyTimelineKeys;
   if (!body || !(dirtyKeys instanceof Set) || dirtyKeys.size === 0) return false;
   const activityBody = body.querySelector('.agent-activity-body');
@@ -9385,6 +9430,7 @@ function renderOpenCodeRunNow(runCtx) {
   const agentRun = {
     ...runCtx.activeAgentRun,
     status: runCtx.shouldAbort ? 'interrupted' : 'working',
+    runId: runCtx.runId,
     providerId: runCtx.providerId,
     modelId: runCtx.modelId,
     modelName: runCtx.modelName,
@@ -10443,6 +10489,8 @@ function openCodeResultToAgentRun(result, runCtx) {
   }
   return {
     runId: runCtx.runId,
+    guidanceTimelineKey: runCtx.activeAgentRun?.guidanceTimelineKey
+      || runCtx.sessionRef?.messages?.find(message => message.liveGuidance?.runId === runCtx.runId)?.liveGuidance?.timelineKey || '',
     watchdog,
     openCodeSessionId: result.openCodeSessionId || runCtx.openCodeSessionId || '',
     openCodeVersion: result.openCodeVersion || '1.18.11',
@@ -11719,6 +11767,8 @@ function finalizeAgentRun(content, status, activeRun, bodyEl, error, runCtx) {
     ...(activeRun || {}),
     watchdog: window.ZWdMonitor?.finish(activeRun?.watchdog, status) || null,
     runId: runCtx?.runId || activeRun?.runId || '',
+    guidanceTimelineKey: activeRun?.guidanceTimelineKey
+      || runCtx?.sessionRef?.messages?.find(message => message.liveGuidance?.runId === runCtx.runId)?.liveGuidance?.timelineKey || '',
     openCodeSessionId: runCtx?.openCodeSessionId || activeRun?.openCodeSessionId || '',
     status,
     startedAt: runCtx?.startedAt || activeRun?.startedAt || Date.now(),
@@ -12725,7 +12775,10 @@ function bindAgentWorkToggle(container) {
     const body = activity.closest('.msg-body');
     const renderState = body ? agentRunRenderState.get(body) : null;
     if (body && renderState) {
-      renderAgentRunBody(body, renderState.agentRun, renderState.fallbackContent);
+      // A segmented body's render state holds only its visible tail. Always
+      // toggle using the original run so earlier output is not split twice.
+      const original = guidanceRunViews.get(body) || renderState;
+      renderAgentRunBody(body, original.agentRun, original.fallbackContent);
     } else {
       syncAgentWorkVisibility(activity);
     }
@@ -12762,7 +12815,7 @@ function syncAgentWorkVisibility(header) {
   const scope = header.closest('.msg, .subagents-detail-body');
   const canToggle = header.dataset.workToggleAvailable === 'true';
   let toggle = scope?.querySelector('.msg-actions .agent-work-toggle') || null;
-  if (!toggle && scope && canToggle) {
+  if (!toggle && scope && canToggle && !scope.classList.contains('agent-guidance-segment')) {
     let actions = scope.querySelector(':scope > .msg-actions');
     if (!actions) {
       actions = document.createElement('div');
@@ -12868,7 +12921,9 @@ function renderAgentRunHeader(bodyEl, agentRun) {
   }
   header.hidden = false;
   syncAgentWorkVisibility(header);
-  syncAgentRunTicker(bodyEl, header, agentRun);
+  if (!bodyEl.parentElement?.classList.contains('agent-guidance-segment')) {
+    syncAgentRunTicker(bodyEl, header, agentRun);
+  }
 }
 
 function buildRunChangeSummaryElement(agentRun) {
@@ -13322,10 +13377,11 @@ function updateAgentTimelinePartElement(element, item, result, phase, presentati
     if (streaming) {
       agentElementRenderState.set(element, updateStreamingMarkdownElement(element, content, previousState));
     } else {
-      if (previousState.content !== content || previousState.streaming) {
-        element.innerHTML = renderMarkdown(content);
+      const markdown = window.ZGuidanceTimeline?.markdownContent(item) ?? content;
+      if (previousState.content !== content || previousState.markdown !== markdown || previousState.streaming) {
+        element.innerHTML = renderMarkdown(markdown);
       }
-      agentElementRenderState.set(element, { content, streaming: false });
+      agentElementRenderState.set(element, { content, markdown, streaming: false });
     }
     return;
   }
@@ -13855,14 +13911,119 @@ function syncAgentError(bodyEl, errorMessage, status = 'error') {
   return errorEl;
 }
 
-function renderAgentRunBody(bodyEl, agentRun, fallbackContent = '') {
+const guidanceRunViews = new WeakMap();
+
+function captureLiveGuidanceDisplayBoundary(runCtx, message) {
+  if (!window.ZGuidanceTimeline || !Array.isArray(runCtx.activeAgentRun?.timeline)) return;
+  flushOpenCodeStreamDeltas(runCtx);
+  const run = runCtx.activeAgentRun;
+  // This is a display identity, not a resumable run/permission handle. Keep
+  // it when a conversation is branched or rewound.
+  run.guidanceTimelineKey ||= runCtx.sessionRef?.messages?.find(item =>
+    item.liveGuidance?.runId === runCtx.runId)?.liveGuidance?.timelineKey
+    || `display-${message.liveGuidance.requestId}`;
+  message.liveGuidance.timelineKey = run.guidanceTimelineKey;
+  message.liveGuidance.displayBoundary = window.ZGuidanceTimeline.captureBoundary(run.timeline);
+}
+
+function refreshGuidedHistoryDisplays() {
+  const guidedRunIds = new Set((state.currentSession?.messages || [])
+    .filter(message => message.liveGuidance?.timelineKey).map(message => message.liveGuidance.runId));
+  for (const body of $$('#messages > .msg.assistant:not(.agent-guidance-segment) > .msg-body')) {
+    const view = guidanceRunViews.get(body);
+    if (view?.agentRun.guidanceTimelineKey || (view?.agentRun.runId && guidedRunIds.has(view.agentRun.runId))) {
+      renderAgentRunBody(body, view.agentRun, view.fallbackContent);
+    }
+  }
+}
+
+function renderGuidedAgentRun(bodyEl, agentRun, fallbackContent) {
+  const owner = bodyEl.parentElement;
+  const wrap = $('#messages');
+  if (!window.ZGuidanceTimeline || owner?.parentElement !== wrap || owner.classList.contains('agent-guidance-segment')) return false;
+  const session = state.currentSession;
+  const runId = agentRun.runId;
+  const key = agentRun.guidanceTimelineKey || session?.messages?.find(message =>
+    runId && message.liveGuidance?.runId === runId)?.liveGuidance?.timelineKey;
+  if (!key) return false;
+  const guideElements = new Map([...wrap.querySelectorAll(':scope > .msg.user')]
+    .map(element => [element._messageRecord, element]));
+  const guides = (session?.messages || []).map((message, index) => ({ message, index,
+    element: guideElements.get(message) }))
+    .filter(item => item.element && item.message.liveGuidance?.timelineKey === key
+      && item.message.liveGuidance?.displayBoundary?.version === 1);
+  if (!guides.length) return false;
+  const view = guidanceRunViews.get(bodyEl);
+  const raw = Array.isArray(agentRun.timeline) ? agentRun.timeline : [];
+  const revision = Number(agentRun.uiTimelineRevision) || 0;
+  const boundaries = guides.map(item => item.message.liveGuidance.displayBoundary);
+  const prior = view.projection;
+  const same = prior?.raw === raw && prior.revision === revision && prior.status === agentRun.status
+    && prior.boundaries.length === boundaries.length && boundaries.every((boundary, index) => boundary === prior.boundaries[index]);
+  const segments = same ? prior.segments : window.ZGuidanceTimeline.projectTimeline(raw, boundaries);
+  view.projection = { raw, revision, status: agentRun.status, boundaries, segments };
+  view.prefixes ||= new Map();
+  bodyEl.dataset.guidanceSegmented = 'true';
+  const tail = segments[segments.length - 1];
+  const text = raw.some(item => item.type === 'text') ? '' : fallbackContent;
+  renderAgentRunBody(bodyEl, { ...agentRun, timeline: tail, textContent: text }, text, { guidanceSlice: true });
+  // Run statistics and the work toggle belong to the entire run, including
+  // work that is now displayed before a guidance message.
+  renderAgentRunHeader(bodyEl, agentRun);
+  const header = ensureAgentActivity(bodyEl);
+  const renderWork = header.dataset.workExpanded === 'true';
+  const activePrefixKeys = new Set();
+  for (let index = 0; index < guides.length; index++) {
+    const guide = guides[index];
+    const boundary = guide.message.liveGuidance.displayBoundary;
+    activePrefixKeys.add(boundary);
+    let prefix = view.prefixes.get(boundary);
+    if (!prefix) {
+      prefix = document.createElement('div');
+      prefix.className = 'msg assistant agent-guidance-segment';
+      prefix.dataset.sessionId = session.id;
+      const body = document.createElement('div');
+      body.className = 'msg-body agent-output';
+      prefix.appendChild(body);
+      view.prefixes.set(boundary, prefix);
+    }
+    const timeline = segments[index];
+    prefix.hidden = !timeline.some(item => item.type !== 'tool_result' && (renderWork || item.stage === 'summary'));
+    renderAgentRunBody(prefix.firstElementChild, {
+      ...agentRun, timeline, textContent: '',
+      error: '', planFile: null, changeSummary: null, guidanceTimelineKey: ''
+    }, '', { guidanceSlice: true, workExpanded: renderWork });
+    wrap.insertBefore(prefix, owner);
+    // Reuse the original stored user node, including its message identity,
+    // actions and pending/delivered state. Do not invent assistant messages.
+    guide.element.dataset.msgIndex = String(guide.index);
+    wrap.insertBefore(guide.element, owner);
+  }
+  for (const [boundary, prefix] of view.prefixes) {
+    if (!activePrefixKeys.has(boundary)) { prefix.remove(); view.prefixes.delete(boundary); }
+  }
+  invalidateConversationTurns();
+  return true;
+}
+
+function renderAgentRunBody(bodyEl, agentRun, fallbackContent = '', options = {}) {
   if (!bodyEl) return;
+  if (!options.guidanceSlice) {
+    const view = guidanceRunViews.get(bodyEl) || {};
+    Object.assign(view, { agentRun, fallbackContent });
+    guidanceRunViews.set(bodyEl, view);
+    if (!renderingHistoryMessages && renderGuidedAgentRun(bodyEl, agentRun, fallbackContent)) return;
+  }
   window.YanSubagentWorkflow.migrate(agentRun);
   if (bodyEl.dataset.agentOutputInitialized !== 'true') {
     bodyEl.replaceChildren();
     bodyEl.dataset.agentOutputInitialized = 'true';
   }
   const header = ensureAgentActivity(bodyEl);
+  if (typeof options.workExpanded === 'boolean') {
+    header.dataset.workToggleTouched = 'true';
+    header.dataset.workExpanded = String(options.workExpanded);
+  }
   const activityBody = header.querySelector('.agent-activity-body');
   const fallbackAgreement = extractDeliveryAgreement(fallbackContent || agentRun.textContent || '');
   const rawTimeline = Array.isArray(agentRun.timeline) ? agentRun.timeline : [];
@@ -13919,7 +14080,7 @@ function renderAgentRunBody(bodyEl, agentRun, fallbackContent = '') {
     bodyEl.querySelector(':scope > .run-change-summary')?.remove();
     bodyEl.querySelector(':scope > .run-plan-summary')?.remove();
   }
-  const terminalMessage = agentRun.status === 'interrupted'
+  const terminalMessage = bodyEl.parentElement?.classList.contains('agent-guidance-segment') ? '' : agentRun.status === 'interrupted'
     ? (agentRun.recoveredAfterRestart
       ? '应用退出导致运行中断，以上为从运行日志恢复的内容'
       : '用户手动中止输出')

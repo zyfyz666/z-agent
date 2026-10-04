@@ -3594,6 +3594,9 @@ body.is-mac .welcome-logo-mac { display: block; filter: none; }
 }
 .msg + .msg { margin-top: 28px; }
 .msg.assistant { flex-direction: column; gap: 0; }
+.agent-guidance-segment[hidden],
+.agent-guidance-segment .agent-run-summary,
+.agent-guidance-segment > .msg-actions { display: none; }
 @keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .model-switch-notice {
   width: 100%;

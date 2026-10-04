@@ -42,8 +42,8 @@ function fixture() {
     getRunCtx: id => context.state.activeRuns.get(id)?.runCtx,
     isCurrentSessionExecutionActive: () => context.state.activeRuns.has(context.state.currentSession.id),
     createQueuedTurnId: () => `request-${++sequence}`,
-    getActiveAssistantElement: () => ({ before: element => shown.push(element) }),
-    appendMessage: (_role, content) => ({ content }),
+    captureLiveGuidanceDisplayBoundary() {}, renderOpenCodeRunNow() {},
+    appendMessage: (_role, content) => { const element = { content }; shown.push(element); return element; },
     clearComposerPayload() { cleared.push(context.state.currentSession.id); drafts[context.state.currentSession.id] = ''; },
     updateSendState() {}, refreshLiveGuidanceStatus() {},
     syncComposerSkillsFromDom() {}, syncComposerSubagentsFromDom() {},
@@ -80,6 +80,34 @@ test('running Send persists pending guidance before directly delivering it to th
   await pending;
   assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.status, 'delivered');
   assert.equal(f.a.messages[0].content, 'Original request');
+});
+
+test('guidance captures flushed text at send time and reuses its display identity after resuming', () => {
+  const context = vm.createContext({
+    window: { ZGuidanceTimeline: require('../renderer/guidance-timeline') },
+    flushOpenCodeStreamDeltas(run) { run.activeAgentRun.timeline[0].content += ' just received'; }
+  });
+  vm.runInContext(section('function captureLiveGuidanceDisplayBoundary(', 'function refreshGuidedHistoryDisplays('), context);
+  const run = { runId: 'run-a', activeAgentRun: { timeline: [{ type: 'text', openCodeKey: 'text:a', content: 'Earlier' }] },
+    sessionRef: { messages: [{ role: 'user', liveGuidance: { runId: 'run-a', timelineKey: 'display-original' } }] } };
+  const message = { liveGuidance: { requestId: 'guide-after-reload', runId: 'run-a' } };
+  context.captureLiveGuidanceDisplayBoundary(run, message);
+  assert.equal(message.liveGuidance.timelineKey, 'display-original');
+  assert.equal(run.activeAgentRun.guidanceTimelineKey, 'display-original');
+  assert.equal(message.liveGuidance.displayBoundary.textLengths['text:a'], 'Earlier just received'.length);
+  run.activeAgentRun.timeline[0].content += ' later';
+  assert.equal(message.liveGuidance.displayBoundary.textLengths['text:a'], 'Earlier just received'.length);
+});
+
+test('detached guidance keeps its status badge without restoring runtime request handles', () => {
+  const status = { dataset: {}, textContent: '' };
+  const element = { dataset: {}, querySelector: () => status };
+  const context = vm.createContext({});
+  vm.runInContext(section('function renderLiveGuidanceStatus(', 'function refreshLiveGuidanceStatus('), context);
+  context.renderLiveGuidanceStatus(element, { timelineKey: 'display-history', status: 'delivered' });
+  assert.equal(status.textContent, '已引导当前任务');
+  assert.equal(status.dataset.status, 'delivered');
+  assert.equal(element.dataset.guidanceRequestId, undefined);
 });
 
 test('mounting the composer keeps explicit Stop and Queue controls before removing the old action container', () => {

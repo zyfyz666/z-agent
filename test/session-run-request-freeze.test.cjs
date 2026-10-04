@@ -69,6 +69,7 @@ function fixture() {
     getComposerText: () => composerText,
     createQueuedTurnId: () => 'guidance-during-save',
     getActiveAssistantElement: () => null,
+    captureLiveGuidanceDisplayBoundary() {}, renderOpenCodeRunNow() {},
     clearComposerPayload: () => { composerText = ''; },
     refreshLiveGuidanceStatus() {}, toast() {}
   });

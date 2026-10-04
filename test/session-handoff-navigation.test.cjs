@@ -56,7 +56,7 @@ function fixture() {
     'cancelPromptOptimization', 'closeModelPicker', 'closeReasoningPicker',
     'captureComposerDraftForSession', 'pauseUiForSession', 'showSessionLoading',
     'markSessionLoadBaseline', 'markSessionForkMessagesSaved', 'syncAgentBrowserVisibility', 'syncPetFocusedSession',
-    'restoreComposerDraftForSession', 'renderMessages', 'setEmptyState',
+    'restoreComposerDraftForSession', 'restorePendingSessionRewindEdit', 'renderMessages', 'setEmptyState',
     'ensureEarlierMessagesBar', 'syncCurrentSessionAgentUi', 'showTyping',
     'renderRightSidebarReview', 'updateTaskBar', 'updateSendState', 'renderSessionList',
     'renderWdMonitor', 'renderWdMonitorLoading', 'renderModelBadge', 'syncSessionOpenCodeIdAfterRun',

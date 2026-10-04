@@ -9,16 +9,16 @@
   const MAX_EVENTS = 30;
   const PHASES = new Set(['waiting', 'observing', 'disabled', 'completed', 'error']);
   const OUTCOMES = new Set(['completed', 'interrupted', 'error']);
-  const DELIVERIES = new Set(['pending', 'delivered', 'failed', 'queued']);
+  const DELIVERIES = new Set(['pending', 'delivered', 'failed', 'queued', 'not-needed']);
   const RULES = Object.freeze({
     R1_loop: '重复操作',
     R2_saturation: '探索趋于饱和',
     R3_stale_strategy: '策略长期未变',
     R4_goal_drift: '偏离任务目标',
     R5_stale_verification: '验证结果需要更新',
-    model_observer: '模型观察建议'
+    model_observer: '模型观察判断'
   });
-  const ACTIONS = Object.freeze({ advise: '建议', remind: '提醒', escalate: '升级提醒', halt: '请求停止' });
+  const ACTIONS = Object.freeze({ observe: '判断为不介入', advise: '建议', remind: '提醒', escalate: '升级提醒', halt: '请求停止' });
   const text = (value, limit = 2000) => typeof value === 'string' ? value.slice(0, limit) : '';
   const count = value => value !== null && value !== undefined && value !== ''
     && Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.floor(Number(value)) : null;
@@ -56,7 +56,7 @@
       outcome: OUTCOMES.has(value.outcome) ? value.outcome : '',
       judgeEvery: count(value.judgeEvery), observedSteps: count(value.observedSteps),
       judgedSteps: count(value.judgedSteps), checks: count(value.checks),
-      interventions: count(value.interventions), streak: count(value.streak),
+      interventions: count(value.interventions), observations: count(value.observations), streak: count(value.streak),
       updatedAt: count(value.updatedAt), events: events.slice(-MAX_EVENTS),
       partial: value.partial === true,
       model: value.model && typeof value.model === 'object' ? {
@@ -155,7 +155,7 @@
   function deliveryLabel(delivery) {
     return {
       pending: '正在发送提醒', queued: '提醒已排队 · 等待模型接收',
-      delivered: '提醒已送达模型', failed: '提醒发送失败', unknown: '送达状态未记录'
+      delivered: '提醒已送达模型', failed: '提醒发送失败', 'not-needed': '未向主 Agent 发送提示', unknown: '送达状态未记录'
     }[delivery] || '送达状态未记录';
   }
 
@@ -192,7 +192,8 @@
     let latestTitle = '尚未形成判断';
     let latestDescription = mode === 'empty' ? '监控记录会随任务自动更新。' : '收到真实检查结果后会在这里显示。';
     let latestRules = [];
-    const checkedAfterEvent = snapshot?.judgedSteps != null && latest?.step != null && snapshot.judgedSteps > latest.step;
+    const checkedAfterEvent = !snapshot?.model && snapshot?.judgedSteps != null
+      && latest?.step != null && snapshot.judgedSteps > latest.step;
     if (snapshot?.checks > 0 && (!latest || checkedAfterEvent)) {
       latestTitle = '最近检查没有触发新提醒';
       latestDescription = snapshot.judgedSteps == null ? '该轮检查已经完成。' : `已检查到会话第 ${snapshot.judgedSteps} 个动作。`;
@@ -299,11 +300,12 @@
       node('p', 'wd-latest-description', view.latestDescription));
     if (view.latestRules.length) latest.append(rules(view.latestRules));
     const events = node('section', 'wd-events');
-    const heading = node('h3', 'wd-section-heading', '触发时间线');
+    const heading = node('h3', 'wd-section-heading', '观察时间线');
     heading.append(node('span', 'wd-event-count', `${view.events.length} 条记录`));
     events.append(heading);
-    if (selection?.snapshot?.interventions > view.events.length) {
-      events.append(node('p', 'wd-history-caption', `本轮共 ${selection.snapshot.interventions} 次介入，保留最近 ${view.events.length} 条提醒。`));
+    const totalRecords = (count(selection?.snapshot?.interventions) || 0) + (count(selection?.snapshot?.observations) || 0);
+    if (totalRecords > view.events.length) {
+      events.append(node('p', 'wd-history-caption', `本轮共 ${totalRecords} 条观察记录，保留最近 ${view.events.length} 条。`));
     }
     if (view.events.length) {
       const timeline = node('ol', 'wd-timeline');
