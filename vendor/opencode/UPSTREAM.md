@@ -9,7 +9,7 @@ Z Kernel Copy uses the official OpenCode runtime as its only Agent execution aut
 - SDK package: `@opencode-ai/sdk@1.18.11`
 - License: MIT (retained in this directory)
 
-The executable and generated SDK are installed from the pinned official npm packages. At startup Z derives a verified runtime copy with the file-tool registry patch below. Z's Electron frontend connects to an authenticated loopback OpenCode server through `lib/opencode-sidecar.js`; it does not implement or fall back to the deleted Z V1/V2 Agent loop.
+The executable and generated SDK are installed from the pinned official npm packages. At startup Z derives a verified runtime copy with the file-tool registry and Windows process lifecycle patches below. Z's Electron frontend connects to an authenticated loopback OpenCode server through `lib/opencode-sidecar.js`; it does not implement or fall back to the deleted Z V1/V2 Agent loop.
 
 ## Z integration boundaries
 
@@ -26,19 +26,22 @@ The executable and generated SDK are installed from the pinned official npm pack
 - Z does not call OpenCode's per-directory `config.update` endpoint: in this pinned upstream release that endpoint persists its payload into `<workspace>/config.json`, which is not an acceptable place for Z provider credentials or runtime policy.
 - A configuration change restarts the sidecar only when no Agent run is active; an in-flight run is never silently moved onto another provider, model, permission set, or MCP configuration.
 
-## Native file-tool patch
+## Native runtime patches
 
-`lib/opencode-runtime.js` prepares the runtime before every actual kernel startup. The official npm executable is never overwritten. The Windows x64 build is pinned by its full SHA-256 in `runtime-patch.json`; the generated copy lives under `ZData/opencode-runtime/bin/all-file-tools-v1-<hash>/opencode.exe`.
+`lib/opencode-runtime.js` prepares the runtime before every actual kernel startup. The official npm executable is never overwritten. The Windows x64 build is pinned by its full SHA-256 in `runtime-patch.json`; the generated copy lives under `ZData/opencode-runtime/bin/all-file-tools-v1-shell-lifecycle-v2-<hash>/opencode.exe`. A new revision has its own directory and never overwrites an active older runtime.
 
-The official Bun executable embeds JavaScript source without bytecode. The adapter replaces the unique 155-byte minified model-filter block with equal-length spaces, preserving every other byte and bundled offset. It verifies the complete source hash, generated hash, and staged file hash before execution. Existing cache entries are verified and corrupt entries are regenerated. Concurrent preparations in one process share a promise; independent app processes publish through temporary files and tolerate another process winning the race.
+The official Bun executable embeds JavaScript source without bytecode. The adapter replaces the unique 155-byte minified model-filter block with equal-length spaces and applies one padded 2,263-byte process lifecycle replacement. Every byte outside these two non-overlapping blocks and every bundled offset is preserved. It verifies the complete source hash, generated hash, and staged file hash before execution. Existing cache entries are verified and corrupt entries are regenerated. Concurrent preparations in one process share a promise; independent app processes publish through temporary files and tolerate another process winning the race.
 
-This is a version-specific executable-source patch, not a rebuilt upstream release. The manifest currently supports the shipped `opencode-windows-x64@1.18.11` binary (and the identical `opencode-ai/bin/opencode.exe` fallback). Unknown binaries fail explicitly. An upstream upgrade or additional architecture needs a reviewed source filter, new source/output hashes, and the native execution tests below. `all-file-tools.patch` is the equivalent source change and can be applied with `git apply --unidiff-zero` when rebuilding upstream.
+The process lifecycle patch separates parent exit from inherited pipe closure. After parent exit, it allows up to 500 ms to drain output, then settles even if a background child retains the pipe. An exited parent is never used to trigger tree termination. Foreground timeout and cancellation use bounded termination and report failure explicitly. Very large or slowly consumed trailing output can be truncated at the drain deadline; background jobs should use their own log files. See [Windows process lifecycle patch](windows-process-lifecycle.md) for the complete rationale, calibration, and verification.
+
+This is a version-specific executable-source patch, not a rebuilt upstream release. The manifest currently supports the shipped `opencode-windows-x64@1.18.11` binary (and the identical `opencode-ai/bin/opencode.exe` fallback). Unknown Windows binaries fail explicitly; other platforms retain the official runtime. An upstream upgrade or additional architecture needs reviewed source blocks, new source/output hashes, and the native execution tests below. `all-file-tools.patch` is the equivalent registry source change and can be applied with `git apply --unidiff-zero` when rebuilding upstream; `runtime-patch.json` also records the complete original and replacement process lifecycle source.
 
 Verification:
 
 ```powershell
 node --test test/opencode-runtime.test.cjs test/opencode-permission.test.cjs test/opencode-dsml.test.cjs test/opencode-kernel-pool.test.cjs
 node test/opencode-file-tools.e2e.cjs
+node test/opencode-shell-lifecycle.e2e.cjs
 node test/provider-runtime.e2e.cjs
 ```
 

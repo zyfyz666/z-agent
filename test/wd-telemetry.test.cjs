@@ -129,12 +129,13 @@ test('disabled WD reports disabled from startup through the saved result', async
   const f = fixture(t, { enabled: false });
   const result = await f.run();
   const statuses = f.events.filter(event => event.type === 'z.thrash.watchdog.status');
-  assert.equal(statuses.length, 1);
+  assert.equal(statuses.length, 2, 'runtime health still reports startup and completion when model observation is disabled');
   assert.equal(statuses[0].data.enabled, false);
   assert.equal(statuses[0].data.phase, 'disabled');
   assert.equal(result.watchdog.phase, 'disabled');
   assert.equal(result.watchdog.checks, 0);
   assert.equal(result.watchdog.interventions, 0);
+  assert.equal(result.watchdog.health.state, 'completed');
   assert.equal(f.calls.deliveries, 0);
 });
 

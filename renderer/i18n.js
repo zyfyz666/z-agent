@@ -2,6 +2,17 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installZI18n(global) {
   const ZH_EN = Object.freeze({
+    '运行巡检': 'Runtime checks', '等待运行巡检': 'Waiting for runtime checks', '等待任务开始': 'Waiting for a task',
+    '此轮没有运行巡检记录': 'No runtime check record for this run', '等待工具返回': 'Waiting for a tool result',
+    '执行中': 'Working', '等待用户授权': 'Waiting for user approval', '等待用户回复': 'Waiting for a user response',
+    '工具等待超出声明时限': 'Tool wait exceeds its declared timeout', '运行状态待确认': 'Runtime state unconfirmed',
+    '等待模型进展': 'Waiting for model progress', '本轮已结束': 'This run has ended',
+    '等待工具': 'Pending tool', '工具名称未记录': 'Tool name not recorded', '至最近巡检已等待': 'Wait at last check',
+    '声明时限': 'Declared timeout', '未声明': 'Not declared', '最近实际进展': 'Last actual progress', '最近巡检': 'Last check',
+    '该轮保留的最后巡检': 'Last recorded check for this run', '未记录': 'Not recorded',
+    '请先保留已有产物并核对后台任务；如需中断，可使用对话中的“停止”，确认后再继续。': 'Preserve existing artifacts and check background tasks first. If you choose to interrupt, use Stop in the conversation, verify the state, then continue.',
+    '仅记录执行状态；不计入模型判断或介入次数，也不会自动发送引导或停止任务。': 'Records execution state only. Does not count as a model judgment or intervention, send guidance, or stop the task automatically.',
+    '目前没有触发观察者提醒。': 'No observer reminder has been triggered yet.',
     '最近': 'Recent', '按最近更新时间排列': 'Sorted by last updated', '显示更多': 'Show more',
     '重命名': 'Rename', '操作失败，请重试': 'Action failed. Try again.', '对话名称保存失败': 'Could not save conversation name',
     '回退到这里': 'Rewind to here', '对话回退': 'Conversation rewind',
@@ -410,6 +421,10 @@
     if (normalize(target) !== 'en' || !/[\u3400-\u9fff]/u.test(source)) return source;
     const exact = ZH_EN[source.trim()];
     if (exact) return source.replace(source.trim(), exact);
+    const healthRecords = source.match(/^巡检记录（(\d+)）$/u);
+    if (healthRecords) return `Runtime check history (${healthRecords[1]})`;
+    const healthDuration = source.match(/^(\d+(?:\.\d+)?) (毫秒|秒|分钟|小时)$/u);
+    if (healthDuration) return `${healthDuration[1]} ${{ 毫秒: 'ms', 秒: 's', 分钟: 'min', 小时: 'h' }[healthDuration[2]]}`;
     const rewindBackups = source.match(/^回退备份（(\d+)）$/u);
     if (rewindBackups) return `Rewind backups (${rewindBackups[1]})`;
     const backupMessages = source.match(/^(\d+) 条消息( · 已继续)?$/u);

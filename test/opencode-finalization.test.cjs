@@ -2118,8 +2118,8 @@ test('stall watchdog aborts a drip-stream turn and retries safely', async () => 
     if (call === 2) return assistant('stall-recovered', [{ type: 'text', text: '停滞重试成功。' }]);
     return null;
   }, { id: 'workspace-session', directory }, {
-    // Busy while the stalled turn runs; idle once the retried prompt lands.
-    status: () => (fixture.calls.promptAsync.length >= 2 ? { type: 'idle' } : { type: 'busy' }),
+    // A successful native abort must settle before replay is safe.
+    status: () => (fixture.calls.abort.length || fixture.calls.promptAsync.length >= 2 ? { type: 'idle' } : { type: 'busy' }),
     abort: () => {}
   });
   fixture.client.event.subscribe = async (_payload, opts) => {

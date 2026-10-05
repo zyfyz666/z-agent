@@ -9881,6 +9881,8 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
   if (updateSubagentWorkflow(runCtx, event, deferEffects)) return;
   const data = event.data || event.properties || {};
   if (event.type === 'z.thrash.watchdog.status' || event.type === 'z.thrash.watchdog') {
+    if (data.runID && runCtx.runId && String(data.runID) !== String(runCtx.runId)) return;
+    if (data.sessionID && runCtx.openCodeSessionId && String(data.sessionID) !== String(runCtx.openCodeSessionId)) return;
     if (runCtx.activeAgentRun && window.ZWdMonitor) {
       runCtx.activeAgentRun.watchdog = window.ZWdMonitor.reduce(runCtx.activeAgentRun.watchdog, event);
       if (state.currentSession?.id === runCtx.sessionId) renderWdMonitor();

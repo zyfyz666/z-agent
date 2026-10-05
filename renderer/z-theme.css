@@ -110,6 +110,23 @@ html[data-theme="light"] {
 .wd-eyebrow { font: 500 10px/1.5 var(--font-mono); letter-spacing: .07em; color: var(--text-dim); }
 .wd-mode { padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-faint); font-size: 10px; }
 .wd-mode[data-mode="live"] { color: var(--accent-text); border-color: var(--border-strong); background: var(--accent-soft); }
+.wd-health { padding: 15px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: var(--z-radius); background: var(--bg-elev); }
+.wd-health[data-state="overdue"], .wd-health[data-state="unknown"] { border-left: 3px solid var(--warning); }
+.wd-health-title { font-size: 14px; font-weight: 600; line-height: 1.5; margin: 0 0 8px; }
+.wd-health-message, .wd-health-caution { margin: 8px 0; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.wd-health-caution { color: var(--warning); }
+.wd-health-caption { color: var(--text-faint); font-size: 10px; line-height: 1.7; margin: 8px 0 0; }
+.wd-health-facts { margin: 12px 0; font-size: 11px; }
+.wd-health-fact { display: flex; justify-content: space-between; gap: 12px; margin: 6px 0; }
+.wd-health-fact dt { flex-shrink: 0; color: var(--text-dim); }
+.wd-health-fact dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.wd-health-history { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 10px; font-size: 11px; }
+.wd-health-history summary { cursor: pointer; color: var(--text-dim); }
+.wd-health-timeline { list-style: none; padding: 0; margin: 12px 0 0; }
+.wd-health-event { border-left: 1px solid var(--border); margin: 10px 0; padding-left: 10px; }
+.wd-health-event strong, .wd-health-time, .wd-health-tool { display: block; line-height: 1.8; overflow-wrap: anywhere; }
+.wd-health-time { color: var(--text-faint); font-size: 10px; }
+.wd-health-tool { color: var(--text-dim); }
 .wd-status { position: relative; padding: 20px 17px 16px; border: 1px solid var(--border); border-radius: var(--z-radius); background: var(--bg-elev); overflow: hidden; }
 .wd-status::after { content: ''; position: absolute; right: -18px; top: -23px; width: 83px; height: 83px; border: 1px solid var(--border-soft); border-radius: 50%; box-shadow: 0 0 0 12px var(--bg-elev), 0 0 0 13px var(--border-soft); pointer-events: none; }
 .wd-status-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); margin-bottom: 15px; box-shadow: 0 0 0 5px var(--bg-elev2); }

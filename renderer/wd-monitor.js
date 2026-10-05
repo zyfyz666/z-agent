@@ -7,6 +7,7 @@
   'use strict';
 
   const MAX_EVENTS = 30;
+  const HEALTH_STATES = new Set(['working', 'waiting_user', 'overdue', 'unknown', 'silent', 'completed']);
   const PHASES = new Set(['waiting', 'observing', 'disabled', 'completed', 'error']);
   const OUTCOMES = new Set(['completed', 'interrupted', 'error']);
   const DELIVERIES = new Set(['pending', 'delivered', 'failed', 'queued', 'not-needed']);
@@ -40,6 +41,30 @@
     return event;
   }
 
+  function normalizeHealth(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const tool = value.tool && typeof value.tool === 'object' && !Array.isArray(value.tool) ? value.tool : null;
+    return {
+      state: HEALTH_STATES.has(value.state) ? value.state : 'unknown',
+      checkedAt: count(value.checkedAt ?? value.ts), lastProgressAt: count(value.lastProgressAt),
+      message: text(value.message), waitingPermissions: count(value.waitingPermissions), waitingQuestions: count(value.waitingQuestions),
+      tool: tool ? { callId: text(tool.callId, 300), name: text(tool.name, 200), status: text(tool.status, 40),
+        startedAt: count(tool.startedAt), timeoutMs: count(tool.timeoutMs), deadlineAt: count(tool.deadlineAt),
+        lastProgressAt: count(tool.lastProgressAt) } : null
+    };
+  }
+
+  function normalizeHealthEvents(value) {
+    const records = new Map();
+    for (const raw of Array.isArray(value) ? value : []) {
+      const health = normalizeHealth(raw);
+      if (!health) continue;
+      const id = text(raw.id, 300) || JSON.stringify([health.checkedAt, health.state, health.tool?.callId, health.message]);
+      records.set(id, { ...health, id, ts: count(raw.ts) });
+    }
+    return [...records.values()].slice(-MAX_EVENTS);
+  }
+
   function normalizeSnapshot(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const events = [];
@@ -58,6 +83,7 @@
       judgedSteps: count(value.judgedSteps), checks: count(value.checks),
       interventions: count(value.interventions), observations: count(value.observations), streak: count(value.streak),
       updatedAt: count(value.updatedAt), events: events.slice(-MAX_EVENTS),
+      health: normalizeHealth(value.health), healthEvents: normalizeHealthEvents(value.healthEvents),
       partial: value.partial === true,
       model: value.model && typeof value.model === 'object' ? {
         name: text(value.model.name, 150), modelId: text(value.model.modelId, 200),
@@ -159,6 +185,51 @@
     }[delivery] || '送达状态未记录';
   }
 
+  function healthTitle(health) {
+    if (!health) return '等待运行巡检';
+    if (health.state === 'working') return health.tool ? '等待工具返回' : '执行中';
+    if (health.state === 'waiting_user') return health.waitingPermissions > 0 ? '等待用户授权' : '等待用户回复';
+    return { overdue: '工具等待超出声明时限', unknown: '运行状态待确认',
+      silent: '等待模型进展', completed: '本轮已结束' }[health.state];
+  }
+
+  function healthDuration(value) {
+    if (value == null || !Number.isFinite(value) || value < 0) return '未记录';
+    const units = [[3_600_000, '小时'], [60_000, '分钟'], [1000, '秒'], [1, '毫秒']];
+    const [unit, label] = units.find(([unit]) => value >= unit) || units.at(-1);
+    return `${Number((value / unit).toFixed(1))} ${label}`;
+  }
+
+  function healthTimestamp(value) {
+    const date = value > 0 ? new Date(value) : null;
+    return date && Number.isFinite(date.getTime()) ? date.toLocaleString('sv-SE') : '未记录';
+  }
+
+  function healthView(snapshot, mode) {
+    const health = snapshot?.health;
+    const facts = [];
+    if (health) {
+      if (health.tool) {
+        facts.push({ label: '等待工具', value: health.tool.name || '工具名称未记录' });
+        if (health.tool.startedAt > 0 && health.checkedAt >= health.tool.startedAt) {
+          facts.push({ label: '至最近巡检已等待', value: healthDuration(health.checkedAt - health.tool.startedAt) });
+        }
+        facts.push({ label: '声明时限', value: health.tool.timeoutMs > 0 ? healthDuration(health.tool.timeoutMs) : '未声明' });
+      }
+      facts.push({ label: '最近实际进展', value: healthTimestamp(health.lastProgressAt) },
+        { label: '最近巡检', value: healthTimestamp(health.checkedAt) });
+    }
+    return {
+      state: health?.state || 'unrecorded',
+      title: health ? healthTitle(health) : mode === 'history' ? '此轮没有运行巡检记录'
+        : mode === 'empty' ? '等待任务开始' : '等待运行巡检',
+      message: health?.message || '', facts,
+      historical: mode === 'history' && !!health,
+      caution: !!health?.tool && ['overdue', 'unknown'].includes(health.state),
+      events: [...(snapshot?.healthEvents || [])].reverse().map(event => ({ ...event, title: healthTitle(event) }))
+    };
+  }
+
   function viewModel(selection = {}) {
     const { mode = 'empty' } = selection;
     const snapshot = normalizeSnapshot(selection.snapshot);
@@ -207,7 +278,7 @@
       latestDescription = '观察者在本轮保持关闭。';
     }
     return {
-      mode, phase, title, description,
+      mode, phase, title, description, health: healthView(snapshot, mode),
       stats: [
         { label: '检测轮次', value: snapshot?.checks ?? null },
         { label: '会话动作', value: snapshot?.observedSteps ?? null },
@@ -222,7 +293,7 @@
       emptyTitle: mode === 'empty' ? '让每一步都有方向' : snapshot?.interventions === 0 ? '本轮尚无介入' : '暂无可展示的提醒',
       emptyDescription: mode === 'empty'
         ? '你专注目标，观察者留意过程。开始对话后，检查进度与触发原因会在这里逐步展开。'
-        : snapshot?.interventions === 0 ? '目前没有触发观察者提醒。任务仍由模型正常执行。'
+        : snapshot?.interventions === 0 ? '目前没有触发观察者提醒。'
           : '此处只展示已接收到的真实记录。'
     };
   }
@@ -231,6 +302,8 @@
     if (!host?.ownerDocument) return;
     const document = host.ownerDocument;
     const view = viewModel(selection);
+    const keepHealthHistoryOpen = host.dataset.wdSessionId === selection?.sessionId
+      && host.dataset.wdRunKey === selection?.key && host.querySelector?.('.wd-health-history')?.open === true;
     const node = (tag, className, content) => {
       const element = document.createElement(tag);
       if (className) element.className = className;
@@ -272,6 +345,35 @@
       const earlier = node('button', 'wd-history-earlier', selection.earlierLoading ? '正在加载更早记录…' : '加载更早记录');
       earlier.type = 'button'; earlier.dataset.observerEarlier = 'true'; earlier.disabled = !!selection.earlierLoading;
       history.append(earlier);
+    }
+    const health = node('section', 'wd-health');
+    health.dataset.state = view.health.state;
+    health.append(node('h3', 'wd-section-heading', '运行巡检'), node('p', 'wd-health-title', view.health.title));
+    if (view.health.historical) health.append(node('p', 'wd-health-caption', '该轮保留的最后巡检'));
+    if (view.health.message) health.append(node('p', 'wd-health-message', view.health.message));
+    const facts = node('dl', 'wd-health-facts');
+    view.health.facts.forEach(fact => {
+      const row = node('div', 'wd-health-fact');
+      row.append(node('dt', '', fact.label), node('dd', '', fact.value)); facts.append(row);
+    });
+    health.append(facts);
+    if (view.health.caution) health.append(node('p', 'wd-health-caution',
+      '请先保留已有产物并核对后台任务；如需中断，可使用对话中的“停止”，确认后再继续。'));
+    health.append(node('p', 'wd-health-caption', '仅记录执行状态；不计入模型判断或介入次数，也不会自动发送引导或停止任务。'));
+    if (view.health.events.length) {
+      const history = node('details', 'wd-health-history');
+      history.open = keepHealthHistoryOpen;
+      history.append(node('summary', '', `巡检记录（${view.health.events.length}）`));
+      const timeline = node('ol', 'wd-health-timeline');
+      view.health.events.forEach(event => {
+        const item = node('li', 'wd-health-event');
+        item.dataset.state = event.state;
+        item.append(node('strong', '', event.title), node('time', 'wd-health-time', healthTimestamp(event.ts)));
+        if (event.tool?.name) item.append(node('span', 'wd-health-tool', event.tool.name));
+        if (event.message) item.append(node('p', 'wd-health-message', event.message));
+        timeline.append(item);
+      });
+      history.append(timeline); health.append(history);
     }
     const status = node('section', 'wd-status');
     status.dataset.state = view.phase;
@@ -340,7 +442,7 @@
       empty.append(orbit, node('h4', 'wd-empty-title', view.emptyTitle), node('p', 'wd-empty-description', view.emptyDescription));
       events.append(empty);
     }
-    monitor.append(header, history, status, stats, latest, events,
+    monitor.append(header, history, health, status, stats, latest, events,
       node('footer', 'wd-footer', '观察者关注执行过程并发出提醒，不保证答案或解题结果正确。'));
     host.replaceChildren(monitor);
     host.dataset.wdState = view.phase;
@@ -348,5 +450,5 @@
     host.dataset.wdRunKey = selection?.key || '';
   }
 
-  return { MAX_EVENTS, normalizeSnapshot, reduce, finish, availableRuns, selectSession, viewModel, ruleName, deliveryLabel, render };
+  return { MAX_EVENTS, normalizeSnapshot, normalizeHealth, reduce, finish, availableRuns, selectSession, viewModel, ruleName, deliveryLabel, render };
 });

@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { stageOpenCodeRuntime } = require('../lib/opencode-runtime');
+const { stageOpenCodeRuntime, applyRuntimeReplacements } = require('../lib/opencode-runtime');
 const patch = require('../vendor/opencode/runtime-patch.json');
 
 function removeFixture(directory) {
@@ -26,7 +26,21 @@ test('unknown runtime fails explicitly without modifying it or producing a fallb
   } finally { removeFixture(directory); }
 });
 
-test('stages only the pinned registry change, shares concurrent work, and repairs a corrupt cache', {
+test('invalid replacement plans fail before changing any bytes', () => {
+  for (const manifest of [
+    { filter: 'missing' },
+    { filter: 'one', replacements: [{ id: 'duplicate', find: 'two', replace: '' }] },
+    { filter: 'one', replacements: [{ id: 'too-long', find: 'three', replace: 'longer' }] },
+    { filter: 'one', replacements: [{ id: 'overlap', find: 'one two', replace: '' }] }
+  ]) {
+    const original = Buffer.from('one two three two');
+    const bytes = Buffer.from(original);
+    assert.throws(() => applyRuntimeReplacements(bytes, manifest));
+    assert.equal(bytes.equals(original), true);
+  }
+});
+
+test('stages only the pinned registry and Windows lifecycle changes, shares work, and repairs a corrupt cache', {
   skip: process.platform !== 'win32' || process.arch !== 'x64'
 }, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-runtime-patch-'));
@@ -42,9 +56,17 @@ test('stages only the pinned registry change, shares concurrent work, and repair
     const output = fs.readFileSync(target);
     const offset = source.indexOf(patch.filter);
     assert.ok(offset > 0);
-    assert.deepEqual(output.subarray(0, offset), source.subarray(0, offset));
-    assert.deepEqual(output.subarray(offset + patch.filter.length), source.subarray(offset + patch.filter.length));
-    assert.equal(output.subarray(offset, offset + patch.filter.length).toString(), ' '.repeat(patch.filter.length));
+    const changes = [{ find: patch.filter, replace: '' }, ...patch.replacements]
+      .map(change => ({ ...change, offset: source.indexOf(change.find) })).sort((a, b) => a.offset - b.offset);
+    let cursor = 0;
+    for (const change of changes) {
+      assert.ok(change.offset >= cursor);
+      assert.equal(output.subarray(cursor, change.offset).equals(source.subarray(cursor, change.offset)), true);
+      assert.equal(output.subarray(change.offset, change.offset + change.find.length).toString(),
+        change.replace.padEnd(change.find.length, ' '));
+      cursor = change.offset + change.find.length;
+    }
+    assert.equal(output.subarray(cursor).equals(source.subarray(cursor)), true);
     assert.equal(crypto.createHash('sha256').update(output).digest('hex'), patch.binaries[0].patchedSha256);
     const cachedStat = fs.statSync(target);
     assert.equal(await stageOpenCodeRuntime(options), target);
