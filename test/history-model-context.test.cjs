@@ -75,12 +75,27 @@ test('mid-run guidance keeps delivery state and the exact assistant fragment bou
     { role: 'user', content: 'GUIDANCE', liveGuidance: guidance }
   ]);
   assert.equal(result[0].content, '');
-  assert.equal(result[0].agentRun.guidanceTimelineKey, guidance.timelineKey);
-  assert.deepEqual(result[0].agentRun.timeline.map(item => item.openCodeKey), ['text:1', 'text:2']);
+  assert.equal(result[0].agentRun.guidanceTimelineKey, undefined, 'ordered fragments cannot be split a second time');
+  assert.deepEqual(result[0].agentRun.timeline.map(item => item.openCodeKey), ['text:1']);
+  assert.equal(result[0].agentRun.timeline[0].content, 'Befo');
+  assert.equal(result[2].agentRun.timeline[0].content, 're guidance');
+  assert.deepEqual(result[2].agentRun.timeline.map(item => item.openCodeKey), ['text:1', 'text:2']);
   assert.deepEqual(result[1].liveGuidance.displayBoundary, guidance.displayBoundary);
   assert.equal(result[1].liveGuidance.status, 'pending');
   assert.equal(result[1].liveGuidance.error, 'not delivered');
   assert.equal(result[1].liveGuidance.requestId, undefined);
+});
+
+test('ordering guidance retains a final answer that exists only outside the activity timeline', () => {
+  const messages = [{ role: 'user', content: 'GUIDE', liveGuidance: { timelineKey: 'g',
+    displayBoundary: { version: 1, keys: ['text:one'], textLengths: { 'text:one': 5 } } } },
+  { role: 'assistant', content: 'UNIQUE_FINAL_ANSWER', agentRun: { guidanceTimelineKey: 'g',
+    timeline: [{ type: 'text', openCodeKey: 'text:one', content: 'EARLY ACTIVITY' }] } }];
+  const result = projectHistoryForModel(messages);
+  assert.equal(result.at(-1).content, 'UNIQUE_FINAL_ANSWER');
+  assert.equal(result[0].agentRun.timeline[0].content, 'EARLY');
+  assert.equal(result[1].content, 'GUIDE');
+  assert.equal(JSON.stringify(result).split('UNIQUE_FINAL_ANSWER').length - 1, 1);
 });
 
 test('legacy media and sole subagent output survive without subagent event buffers', () => {

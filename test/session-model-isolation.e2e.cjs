@@ -14,6 +14,7 @@ const outputDir = path.join(appRoot, 'output', 'session-model-isolation');
 fs.mkdirSync(outputDir, { recursive: true });
 const report = { ok: false, checks: [], pageErrors: [], requests: [] };
 const fixtureErrors = [];
+const sessionEfforts = new Map();
 const modelIds = { a: ['route-a-one', 'route-a-two'], b: ['route-b-one'] };
 const key = connection => JSON.stringify([connection.providerId, connection.supplierId]);
 const identity = selection => [selection?.providerId || '', selection?.supplierId || '', selection?.modelId || '', selection?.modelType || 'text'];
@@ -50,12 +51,15 @@ const server = http.createServer((request, response) => {
       assert.ok(modelIds[gateway].includes(body.model), `model ${body.model} was sent to the wrong supplier ${gateway}`);
       const userText = JSON.stringify((body.messages || []).findLast(message => message.role === 'user')?.content || '');
       const marker = userText.match(/SESSION_ROUTE_(?:A|B|BACKEND|SNAPSHOT)_4197/)?.[0] || '';
-      report.requests.push({ gateway, model: body.model, marker, endpoint: request.url });
+      report.requests.push({ gateway, model: body.model, marker, endpoint: request.url, reasoningEffort: body.reasoning_effort });
       assert.ok(report.requests.length <= 40, 'the fixture must not enter an unbounded loop');
       if (marker) {
         const expected = marker === 'SESSION_ROUTE_B_4197' ? 'route-b-one'
           : marker === 'SESSION_ROUTE_SNAPSHOT_4197' ? 'route-a-one' : 'route-a-two';
         assert.equal(body.model, expected, `${marker} retains the intended conversation model`);
+        const effort = marker === 'SESSION_ROUTE_B_4197' ? 'low'
+          : marker === 'SESSION_ROUTE_SNAPSHOT_4197' ? 'xhigh' : 'max';
+        assert.equal(body.reasoning_effort, effort, `${marker} retains the intended conversation reasoning effort on the wire`);
       }
       // Keep auxiliary title/memory work on this fixture too. The test never
       // supplies remote endpoints or actual API keys to the isolated profile.
@@ -87,15 +91,16 @@ async function launch() {
   assert.equal(await page.evaluate(() => typeof z.setSessionModel), 'function');
 }
 
-async function openModelMenu() {
+async function openModelMenu({ models = false } = {}) {
   await page.locator('#modelPill').click();
   await page.waitForFunction(() => !document.querySelector('#modelQuickMenu').classList.contains('hidden')
     && document.querySelector('#modelQuickMenu').getAttribute('aria-busy') === 'false');
+  if (models && !await page.locator('#modelQuickModelsView').isVisible()) await page.locator('#modelQuickModelRoute').click();
 }
 
 async function selectModel(sessionId, connection, modelId) {
   await page.evaluate(id => loadSession(id), sessionId);
-  await openModelMenu();
+  await openModelMenu({ models: true });
   await page.locator('#modelQuickSupplier').selectOption(key(connection));
   await page.locator(`#modelQuickList [data-model-picker-model="${modelId}"]`).click();
   await page.waitForFunction(expected => !modelPickerSaving && state.currentSession.id === expected.sessionId
@@ -113,11 +118,30 @@ async function verifySelected(sessionId, connection, modelId) {
   await page.waitForFunction(model => document.querySelector('#modelPillName').textContent === model, modelId);
   assert.deepEqual(identity(await page.evaluate(() => getAgentModelSelection())),
     [connection.providerId, connection.supplierId, modelId, 'text']);
-  await openModelMenu();
+  const effort = sessionEfforts.get(sessionId);
+  if (effort) {
+    assert.equal(await page.evaluate(() => getReasoningSpeedMode()), effort);
+    assert.equal(await page.locator('#modelPill').getAttribute('data-reasoning-mode'), effort);
+  }
+  await openModelMenu({ models: true });
   assert.equal(await page.locator('#modelQuickSupplier').inputValue(), key(connection));
   const selected = page.locator('#modelQuickList [aria-selected="true"]');
   assert.equal(await selected.count(), 1);
   assert.equal(await selected.getAttribute('data-model-picker-model'), modelId);
+  await page.keyboard.press('Escape');
+}
+
+async function selectEffort(sessionId, effort) {
+  await page.evaluate(id => loadSession(id), sessionId);
+  await openModelMenu();
+  await page.locator('#reasoningSpeedSlider').evaluate((slider, value) => {
+    slider.value = String(value);
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
+  }, ['low', 'medium', 'high', 'xhigh', 'max'].indexOf(effort) * 25);
+  await page.waitForFunction(value => !modelQuickSaving && state.currentSession.modelSelection.reasoningSpeed === value, effort);
+  assert.equal((await page.evaluate(id => z.getSession(id), sessionId)).modelSelection.reasoningSpeed, effort);
+  sessionEfforts.set(sessionId, effort);
   await page.keyboard.press('Escape');
 }
 
@@ -181,12 +205,17 @@ async function runBackend(sessionId, marker, modelSelection) {
     }
     await selectModel(sessionA.id, aConnection, 'route-a-two');
     await selectModel(sessionB.id, bConnection, 'route-b-one');
+    const globalEffort = await page.evaluate(() => z.getConfig().then(config => config.api.reasoningSpeed));
+    await selectEffort(sessionA.id, 'max');
+    await selectEffort(sessionB.id, 'low');
     for (let index = 0; index < 2; index++) {
       await verifySelected(sessionA.id, aConnection, 'route-a-two');
       await verifySelected(sessionB.id, bConnection, 'route-b-one');
     }
     assert.deepEqual(identity(await page.evaluate(() => z.getConfig().then(config => config.agentModel))), identity(globalDefault));
     report.checks.push('A/B menus, supplier selection and badges remain independent through repeated navigation');
+    assert.equal(await page.evaluate(() => z.getConfig().then(config => config.api.reasoningSpeed)), globalEffort);
+    report.checks.push('A/B reasoning sliders persist max/low independently and leave the new-conversation default unchanged');
 
     await selectModel(sessionA.id, aConnection, 'route-a-one');
     await verifySelected(sessionB.id, bConnection, 'route-b-one');
@@ -196,6 +225,7 @@ async function runBackend(sessionId, marker, modelSelection) {
 
     const snapshotSession = await page.evaluate(() => z.createSession(true));
     assert.deepEqual(identity(snapshotSession.modelSelection), identity(globalDefault));
+    assert.equal(snapshotSession.modelSelection.reasoningSpeed, globalEffort);
     await page.evaluate(connection => z.setModelRole(connection.providerId, 'route-b-one', 'text', connection.supplierId), bConnection);
     const snapshotStill = await page.evaluate(id => z.getSession(id), snapshotSession.id);
     assert.deepEqual(identity(snapshotStill.modelSelection), identity(globalDefault));
@@ -236,12 +266,13 @@ async function runBackend(sessionId, marker, modelSelection) {
       assert.equal(saved.modelSelection.modelId, model);
       assert.ok(saved.messages.some(message => message.role === 'assistant' && message.content.includes(`MODEL_REPLY_${model}`)));
       assert.equal(saved.messages.findLast(message => message.role === 'user').modelSelection.modelId, model);
+      assert.equal(saved.messages.findLast(message => message.role === 'user').modelSelection.reasoningSpeed, sessionEfforts.get(session.id));
     }
     report.checks.push('concurrent real OpenCode turns use each conversation supplier, credential and model');
 
     const backend = await runBackend(sessionA.id, 'SESSION_ROUTE_BACKEND_4197');
     assert.match(backend.text, /MODEL_REPLY_route-a-two/);
-    const frozen = { ...globalDefault, modelId: 'route-a-one', modelType: 'text' };
+    const frozen = { ...globalDefault, modelId: 'route-a-one', modelType: 'text', reasoningSpeed: 'xhigh' };
     const snapshot = await runBackend(sessionA.id, 'SESSION_ROUTE_SNAPSHOT_4197', frozen);
     assert.match(snapshot.text, /MODEL_REPLY_route-a-one/);
     await verifySelected(sessionA.id, aConnection, 'route-a-two');

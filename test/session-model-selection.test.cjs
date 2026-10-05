@@ -185,11 +185,14 @@ test('a rejected model selection leaves the saved conversation model intact', as
 
 test('a background run sends the target conversation model and freezes it before later UI changes', async () => {
   const f = fixture();
+  f.a.modelSelection.reasoningSpeed = 'max';
+  f.b.modelSelection.reasoningSpeed = 'low';
   f.context.state.currentSession = f.b;
   const runCtx = {};
   const pending = f.context.runOpenCodeLoop(f.a, null, runCtx);
   f.a.modelSelection.modelId = 'next-turn-only';
   f.a.modelSelection.capabilities.vision = false;
+  f.a.modelSelection.reasoningSpeed = 'medium';
   f.b.modelSelection = model('other-page-selection');
   await pending;
   assert.equal(f.calls.length, 1);
@@ -198,15 +201,18 @@ test('a background run sends the target conversation model and freezes it before
   assert.equal(f.calls[0].modelSelection.providerId, 'provider-a');
   assert.equal(f.calls[0].modelSelection.capabilities.vision, true);
   assert.equal(runCtx.modelSelection.modelId, 'a');
+  assert.equal(f.calls[0].modelSelection.reasoningSpeed, 'max');
+  assert.equal(runCtx.modelSelection.reasoningSpeed, 'max');
 });
 
 test('a queued or utility run preserves its explicit frozen model over the current session selection', async () => {
   const f = fixture();
   f.context.state.currentSession = f.b;
-  const runCtx = { modelSelection: model('queued'), utility: true };
+  const runCtx = { modelSelection: { ...model('queued'), reasoningSpeed: 'xhigh' }, utility: true };
   await f.context.runOpenCodeLoop(f.a, null, runCtx);
   assert.equal(f.calls[0].modelSelection.modelId, 'queued');
   assert.equal(f.calls[0].utility, true);
+  assert.equal(f.calls[0].modelSelection.reasoningSpeed, 'xhigh');
   assert.equal(f.a.modelSelection.modelId, 'a');
 });
 
@@ -307,4 +313,86 @@ test('the actual quick output save targets its original conversation without ann
   assert.equal(f.b.modelSelection.maxOutputTokens, 48000);
   assert.equal(f.input.value, '48000');
   assert.deepEqual(f.notices, []);
+});
+
+function reasoningFixture() {
+  const f = fixture();
+  f.a.modelSelection.reasoningSpeed = 'high';
+  f.b.modelSelection.reasoningSpeed = 'low';
+  f.context.state.config.api.reasoningSpeed = 'medium';
+  f.context.api.setConfig = () => { throw new Error('Reasoning changes must not write global settings'); };
+  const renders = [], notices = [], announcements = [];
+  Object.assign(f.context, {
+    REASONING_SPEED_UI: Object.fromEntries(['low', 'medium', 'high', 'xhigh', 'max'].map(mode => [mode, { label: mode, toast: mode }])),
+    REASONING_SPEED_ORDER: ['low', 'medium', 'high', 'xhigh', 'max'],
+    modelPickerDraft: { reasoningSpeed: 'high' }, modelQuickSaving: false,
+    maxReasoningNoticeTimer: null, clearTimeout() {}, setTimeout() { return 1; },
+    clearMaxReasoningNotice() {}, showMaxReasoningNotice() {}, getReasoningSpeedBillingNote: () => '',
+    renderReasoningSpeedControl(mode) { renders.push({ id: f.context.state.currentSession.id, mode: mode || f.context.getReasoningSpeedMode() }); },
+    setModelPickerMenuNotice(message) { if (message) notices.push({ id: f.context.state.currentSession.id, message }); },
+    toast(message) { announcements.push({ id: f.context.state.currentSession.id, message }); }
+  });
+  vm.runInContext(section('function getReasoningSpeedMode(', 'function getReasoningSpeedBillingNote('), f.context);
+  vm.runInContext(section('function reasoningModeFromProgress(', 'let maxReasoningNoticeTimer'), f.context);
+  vm.runInContext(section('async function selectReasoningSpeed(', 'function previewReasoningSlider('), f.context);
+  vm.runInContext(section('async function commitReasoningSlider(', 'const WORK_MODE_UI'), f.context);
+  return { ...f, renders, notices, announcements };
+}
+
+test('switching conversations restores each reasoning value even after global catalog updates', () => {
+  const f = reasoningFixture();
+  assert.equal(f.context.getReasoningSpeedMode(), 'high');
+  f.context.state.currentSession = f.b;
+  assert.equal(f.context.getReasoningSpeedMode(), 'low');
+  assert.equal(f.context.getAgentModelSelection().reasoningSpeed, 'low');
+  f.context.state.config.api.reasoningSpeed = 'max';
+  assert.equal(f.context.getReasoningSpeedMode(), 'low');
+  f.context.state.currentSession = f.a;
+  assert.equal(f.context.getReasoningSpeedMode(), 'high');
+});
+
+test('the reasoning slider persists only its captured conversation and does not alter a running snapshot', async () => {
+  const f = reasoningFixture();
+  const originalGlobal = JSON.stringify(f.context.state.config);
+  const runCtx = {};
+  f.context.setRunModelPresentation(runCtx, f.context.getAgentModelSelection(f.a));
+  f.context.state.activeRuns.set('A', runCtx);
+  const pending = f.context.commitReasoningSlider(100);
+  assert.equal(f.saves[0].id, 'A');
+  assert.equal(f.saves[0].selection.reasoningSpeed, 'max');
+  f.context.state.currentSession = f.b;
+  f.context.modelPickerDraft.reasoningSpeed = 'low';
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(f.a.modelSelection.reasoningSpeed, 'max');
+  assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
+  assert.equal(runCtx.modelSelection.reasoningSpeed, 'high');
+  assert.equal(f.context.modelPickerDraft.reasoningSpeed, 'low');
+  assert.equal(f.context.getReasoningSpeedMode(), 'low');
+  assert.equal(JSON.stringify(f.context.state.config), originalGlobal);
+  assert.deepEqual(f.announcements, []);
+  assert.deepEqual(f.notices, []);
+  assert.equal(f.renders.filter(item => item.id === 'B').every(item => item.mode === 'low'), true);
+});
+
+test('a late failed reasoning save cannot reset or display its error in another conversation', async () => {
+  const f = reasoningFixture();
+  const pending = f.context.commitReasoningSlider(75);
+  f.context.state.currentSession = f.b;
+  f.saves[0].resolve({ ok: false, error: 'Fixture failed' });
+  await pending;
+  assert.equal(f.a.modelSelection.reasoningSpeed, 'high');
+  assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
+  assert.deepEqual(f.notices, []);
+  assert.equal(f.context.modelQuickSaving, false);
+});
+
+test('a model-only selection keeps its conversation effort instead of inheriting another task or default', async () => {
+  const f = reasoningFixture();
+  const pending = f.context.selectSessionTextModel(model('other'));
+  assert.equal(f.saves[0].selection.reasoningSpeed, 'high');
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(f.a.modelSelection.reasoningSpeed, 'high');
+  assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
 });

@@ -224,6 +224,21 @@ test('the explicit edit shortcut retains the same exclusive rewind behavior', as
   assert.equal(f.getComposer(), 'old prompt');
 });
 
+test('rewinding live guidance retains the backend execution prefix and restores the selected instruction for editing', async () => {
+  const f = fixture();
+  f.sourceSession.messages[2].liveGuidance = { timelineKey: 'guided-turn', status: 'delivered' };
+  const retained = { role: 'assistant', content: '', agentRun: { status: 'incomplete',
+    timeline: [{ type: 'text', content: 'RETAINED_PARTIAL_WORK' }] } };
+  const rewound = { ...f.sourceSession, conversationRevision: 5, messages: [f.sourceSession.messages[0], retained] };
+  f.setMutation(async () => ({ ok: true, backupSessionId: 'backup', session: rewound }));
+  f.context.loadSession = async () => { f.context.sessionLoadToken++; f.context.state.currentSession = rewound; };
+  await f.context.rewindSessionFromMessage(f.element(2));
+  assert.equal(f.calls[0].includeSelected, false);
+  assert.equal(f.getComposer(), 'future turn');
+  assert.equal(f.context.state.currentSession.messages[1].agentRun.timeline[0].content, 'RETAINED_PARTIAL_WORK');
+  assert.match(f.confirmations[0].description, /保留发送它之前已经生成的回复与工具记录/);
+});
+
 test('a pending user rewind preserves the edit until returning to its revision without changing another conversation draft', async () => {
   const f = fixture();
   const result = deferred(), entered = deferred();

@@ -10,10 +10,11 @@ const crypto = require('node:crypto');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
 const { taskWorkspaceRoot, ensureTaskWorkspace } = require('../lib/task-workspace');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
-const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
+const { preserveForkAuthority, forkRunContext, createSessionForkRecord, messageForkAnchor } = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 const { isDefaultSessionTitle } = require('../lib/session-policy');
 const { normalizeOutputTokens, validateOutputTokens } = require('../lib/model-output-limits');
+const { normalizeReasoningSpeed, reasoningSpeedEnablesThinking } = require('../lib/reasoning-effort');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -57,6 +58,7 @@ function fixture(t) {
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
     normalizeOutputTokens, validateOutputTokens,
+    normalizeReasoningSpeed, reasoningSpeedEnablesThinking,
     isDefaultSessionTitle,
     MODEL_PROVIDERS: providers,
     loadConfig: () => structuredClone(config),
@@ -165,6 +167,85 @@ test('session output caps retain explicit values and preserve legacy omitted fie
   }
   const restored = inferSessionModelSelection({ modelSelection: { ...original, maxOutputTokens: 24000 } }, selection('b'));
   assert.equal(restored.maxOutputTokens, 24000);
+});
+
+test('reasoning snapshots normalize legacy values and history retains the originating turn effort', () => {
+  assert.equal(Object.hasOwn(sessionModelSnapshot(selection('a')), 'reasoningSpeed'), false);
+  assert.equal(sessionModelSnapshot({ ...selection('a'), reasoningSpeed: 'smart' }).reasoningSpeed, 'high');
+  assert.equal(sessionModelSnapshot({ ...selection('a'), thinking: true }).reasoningSpeed, 'high');
+  assert.equal(sessionModelSnapshot({ ...selection('a'), reasoningSpeed: 'invalid' }).reasoningSpeed, 'medium');
+  const inferred = inferSessionModelSelection({ messages: [
+    { role: 'user', modelSelection: { ...selection('a'), reasoningSpeed: 'max' } },
+    { role: 'assistant', agentRun: selection('a') }
+  ] }, { ...selection('b'), reasoningSpeed: 'low' });
+  assert.equal(inferred.reasoningSpeed, 'max');
+});
+
+test('reasoning effort is isolated in storage, real run configuration, compression and queued snapshots', async t => {
+  const f = fixture(t);
+  const a = await f.create();
+  const b = await f.create();
+  const global = f.config();
+  assert.equal(a.modelSelection.reasoningSpeed, 'medium');
+  await f.set(a.id, { ...selection('a'), reasoningSpeed: 'max' });
+  await f.set(b.id, { ...selection('b'), reasoningSpeed: 'low' });
+  const queued = structuredClone(f.disk(a.id).modelSelection);
+  const running = await f.start({ zSessionId: a.id });
+  assert.equal(running.runtime.reasoningSpeed, 'max');
+  assert.equal(running.cfg.api.thinking, true);
+  await f.set(a.id, { ...selection('a'), reasoningSpeed: 'medium' });
+  await f.save({ ...a, messages: [{ role: 'user', content: 'A stale progress save' }] });
+  assert.equal(f.disk(a.id).modelSelection.reasoningSpeed, 'medium');
+  assert.equal(f.disk(b.id).modelSelection.reasoningSpeed, 'low');
+  assert.equal(running.runtime.reasoningSpeed, 'max', 'already running configuration is immutable');
+  assert.equal((await f.start({ zSessionId: a.id, modelSelection: queued })).runtime.reasoningSpeed, 'max');
+  assert.equal((await f.start({ zSessionId: b.id })).runtime.reasoningSpeed, 'low');
+  assert.equal((await f.start({ zSessionId: a.id, modelSelection: selection('a') })).runtime.reasoningSpeed, 'medium',
+    'legacy queued requests missing effort inherit their own conversation, not global settings');
+  f.seed({ ...f.disk(b.id), openCodeSessionId: 'kernel-b' });
+  assert.equal((await f.compress(b.id)).ok, true);
+  assert.equal(f.compressionCalls[0].runtime.reasoningSpeed, 'low');
+  assert.equal(f.compressionCalls[0].request.openCodeConfig.reasoningSpeed, 'low');
+  assert.deepEqual(f.config(), global);
+});
+
+test('legacy sessions freeze current default effort once and model-only saves preserve it', async t => {
+  const f = fixture(t);
+  const a = await f.create();
+  f.seed({ ...a, updatedAt: 42, modelSelection: selection('a') });
+  f.editConfig(config => { config.api.reasoningSpeed = 'xhigh'; });
+  assert.equal((await f.read(a.id)).modelSelection.reasoningSpeed, 'xhigh');
+  assert.equal(f.disk(a.id).updatedAt, 42, 'migration does not reorder old conversations');
+  f.editConfig(config => { config.api.reasoningSpeed = 'low'; });
+  assert.equal((await f.read(a.id)).modelSelection.reasoningSpeed, 'xhigh');
+  assert.equal((await f.create()).modelSelection.reasoningSpeed, 'low');
+  await f.set(a.id, selection('b'));
+  assert.equal(f.disk(a.id).modelSelection.reasoningSpeed, 'xhigh');
+  const stale = structuredClone(await f.read(a.id));
+  const gate = f.pauseWrite();
+  const change = f.set(a.id, { ...selection('b'), reasoningSpeed: 'max' });
+  await gate.entered;
+  const save = f.save({ ...stale, messages: [{ role: 'user', content: 'Keep progress' }] });
+  gate.release();
+  await Promise.all([change, save]);
+  assert.equal(f.disk(a.id).modelSelection.reasoningSpeed, 'max');
+  assert.equal(f.disk(a.id).messages[0].content, 'Keep progress');
+});
+
+test('forks and rewinds of legacy message snapshots keep the source conversation frozen effort', () => {
+  const source = { id: 'sess_source_effort', title: 'Source', workspace: '/fixture',
+    modelSelection: { ...selection('a'), reasoningSpeed: 'xhigh' }, messages: [
+      { role: 'user', content: 'Earlier request', modelSelection: selection('b') },
+      { role: 'assistant', content: 'Earlier response', agentRun: selection('b') }
+    ] };
+  const defaultSelection = { ...selection('a'), reasoningSpeed: 'low' };
+  const fork = createSessionForkRecord(source, { sessionId: source.id, messageIndex: 1,
+    messageAnchor: messageForkAnchor(source.messages[1]) }, { id: 'sess_fork_effort', workspace: source.workspace, defaultSelection });
+  const rewound = rewind.createRewoundSession(source, source.messages, { backupSessionId: 'sess_backup_effort', defaultSelection });
+  for (const derived of [fork, rewound]) {
+    assert.equal(derived.modelSelection.modelId, 'model-b');
+    assert.equal(derived.modelSelection.reasoningSpeed, 'xhigh');
+  }
 });
 
 test('manual output caps persist per conversation through reload, stale message saves, and run admission', async t => {

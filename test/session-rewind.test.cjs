@@ -13,6 +13,8 @@ const { createSessionWriteQueue, inferSessionModelSelection, sessionModelSnapsho
 const { ensureTaskWorkspace } = require('../lib/task-workspace');
 const { normalizeIntent } = require('../lib/z-core/protocol');
 const { filterReviewSummary } = require('../lib/run-change-summary');
+const { guidedHistory } = require('./fixtures/guidance-history.cjs');
+const { combineTurnPrompt } = require('../lib/opencode-sidecar');
 
 const main = fs.readFileSync(path.resolve(__dirname, '../main.js'), 'utf8');
 function section(start, end) {
@@ -186,6 +188,50 @@ test('withdraw-and-rewrite excludes only the selected user and supports an empty
   assert.equal(started.request.openCodeSessionId, '');
   assert.equal(started.request.forkHistory.kind, 'rewind');
   f.filesUnchanged();
+});
+
+test('guidance rewind IPC persists the send-time assistant prefix and reloaded edited runs receive that exact context', async t => {
+  const f = fixture(t);
+  const guided = guidedHistory();
+  const original = f.read(f.source.id);
+  original.messages = guided.messages;
+  fs.writeFileSync(f.file(original.id), JSON.stringify(original));
+  const result = await f.rewind({ ...f.boundary(2), includeSelected: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.session.messages.length, 3);
+  assert.equal(result.session.messages.at(-1).agentRun.timeline[0].content, 'BEFORE_FIRST BETWEEN_GUIDES');
+  assert.equal(f.read(result.backupSessionId).messages.at(-1).content, 'FUTURE_FINAL');
+  f.enableProductionRead();
+  const loaded = await f.context.readSessionRecord(original.id);
+  assert.equal(loaded.messages.at(-1).agentRun.timeline[3].output, 'KNOWN_TOOL_RESULT');
+  const replacement = { role: 'user', content: 'EDITED_GUIDANCE', ts: 200 };
+  const saved = await f.save({ ...loaded, messages: [...loaded.messages, replacement] });
+  const started = await f.start({ zSessionId: saved.id, conversationRevision: 1, prompt: replacement.content,
+    requestMessageIndex: 3, requestMessageAnchor: fork.messageForkAnchor(replacement) });
+  assert.equal(started.ok, true);
+  const prompt = combineTurnPrompt(started.request, replacement.content, true);
+  assert.match(prompt, /BEFORE_FIRST/);
+  assert.match(prompt, /GUIDE_ONE/);
+  assert.match(prompt, /BETWEEN_GUIDES/);
+  assert.match(prompt, /KNOWN_TOOL_RESULT/);
+  assert.doesNotMatch(prompt, /FUTURE_|GUIDE_TWO|historyBoundary|NATIVE_BUFFER/);
+  f.filesUnchanged();
+});
+
+test('rewinding and restoring conversation history preserve the current session browser tabs', async t => {
+  const f = fixture(t);
+  const source = f.read(f.source.id);
+  source.browserState = { version: 1, tabs: [{ id: 'browser-one', url: 'https://example.com/one', title: 'Current page' }],
+    activeTabId: 'browser-one', lastActiveTabId: 'browser-one' };
+  fs.writeFileSync(f.file(source.id), JSON.stringify(source));
+  const first = await f.rewind(f.boundary(5));
+  assert.deepEqual(first.session.browserState, source.browserState);
+  const current = f.read(source.id);
+  current.browserState.tabs[0].url = 'https://example.com/current';
+  fs.writeFileSync(f.file(source.id), JSON.stringify(current));
+  const restored = await f.restore({ sessionId: source.id, conversationRevision: 1 });
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.session.browserState, current.browserState, 'restoring messages does not roll back current pages');
 });
 
 test('stale full/tail saves, starts and late native bindings cannot overwrite a rewound revision', async t => {

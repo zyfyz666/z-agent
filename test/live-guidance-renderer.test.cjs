@@ -99,8 +99,10 @@ test('guidance captures flushed text at send time and reuses its display identit
   assert.equal(message.liveGuidance.timelineKey, 'display-original');
   assert.equal(run.activeAgentRun.guidanceTimelineKey, 'display-original');
   assert.equal(message.liveGuidance.displayBoundary.textLengths['text:a'], 'Earlier just received'.length);
+  assert.equal(message.liveGuidance.historyBoundary.agentRun.timeline[0].content, 'Earlier just received');
   run.activeAgentRun.timeline[0].content += ' later';
   assert.equal(message.liveGuidance.displayBoundary.textLengths['text:a'], 'Earlier just received'.length);
+  assert.equal(message.liveGuidance.historyBoundary.agentRun.timeline[0].content, 'Earlier just received');
 });
 
 test('detached guidance keeps its status badge without restoring runtime request handles', () => {

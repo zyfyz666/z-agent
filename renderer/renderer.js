@@ -2867,7 +2867,9 @@ async function rewindSessionFromMessage(element, { edit = false } = {}) {
     const confirmed = await requestGenericConfirmation({
       title: edit ? '回退并编辑' : '回退对话',
       description: edit
-        ? '将所选消息放回输入框，并回退到它之前。当前对话会先备份，可恢复；项目文件保持不变。'
+        ? (target.message.liveGuidance
+          ? '将这条引导放回输入框，保留发送它之前已经生成的回复与工具记录。当前对话会先备份，可恢复；项目文件保持不变。'
+          : '将所选消息放回输入框，并回退到它之前。当前对话会先备份，可恢复；项目文件保持不变。')
         : `保留到第 ${target.messageIndex + 1} 条消息（含这条）。后续对话会备份，可恢复；项目文件保持不变。`,
       confirmLabel: edit ? '回退并编辑' : '回退到这里'
     });
@@ -7717,6 +7719,8 @@ function getAgentModelSelection(session = state.currentSession) {
       modelId: storedModelId,
       modelType: String(stored.modelType),
       name: String(stored.name || storedModelId),
+      reasoningSpeed: normalizeSessionReasoningSpeed(stored.reasoningSpeed ?? state.config?.api?.reasoningSpeed,
+        stored.thinking ?? state.config?.api?.thinking),
       ...(Object.hasOwn(stored, 'maxOutputTokens') ? { maxOutputTokens: stored.maxOutputTokens } : {}),
       configName: String(stored.configName || (sessionSelection && !supplierId ? '' : getAgentModelConfigName(storedProvider, supplierId))),
       capabilities: { ...(stored.capabilities && Object.keys(stored.capabilities).length
@@ -7732,6 +7736,7 @@ function getAgentModelSelection(session = state.currentSession) {
     modelId,
     modelType: 'text',
     name: model?.name || modelId,
+    reasoningSpeed: normalizeSessionReasoningSpeed(state.config?.api?.reasoningSpeed, state.config?.api?.thinking),
     configName: getAgentModelConfigName(
       state.config?.api?.provider,
       state.config?.api?.providerActiveSupplierIds?.[state.config?.api?.provider]
@@ -7751,6 +7756,7 @@ async function selectSessionTextModel(selection, session = state.currentSession)
   sessionModelSelectionVersions.set(sessionId, version);
   const requested = normalizeModelSelectionSnapshot({
     ...selection,
+    reasoningSpeed: selection.reasoningSpeed ?? getAgentModelSelection(target).reasoningSpeed,
     modelId: selection.modelId || selection.id,
     modelType: 'text'
   });
@@ -7780,8 +7786,17 @@ function normalizeModelSelectionSnapshot(selection = {}) {
   const capabilities = source.capabilities && typeof source.capabilities === 'object' ? { ...source.capabilities } : {};
   const maxOutputTokens = Number(source.maxOutputTokens);
   return { providerId, supplierId, modelId, modelType, name, configName, capabilities,
+    ...(Object.hasOwn(source, 'reasoningSpeed') || Object.hasOwn(source, 'thinking')
+      ? { reasoningSpeed: normalizeSessionReasoningSpeed(source.reasoningSpeed, source.thinking) } : {}),
     ...(Object.hasOwn(source, 'maxOutputTokens') ? { maxOutputTokens:
       Number.isSafeInteger(maxOutputTokens) && maxOutputTokens > 0 ? maxOutputTokens : 0 } : {}) };
+}
+
+function normalizeSessionReasoningSpeed(value, thinking = false) {
+  const mode = String(value || '').trim().toLowerCase();
+  if (['low', 'medium', 'high', 'xhigh', 'max'].includes(mode)) return mode;
+  const legacy = { fast: 'low', balanced: 'medium', smart: 'high' };
+  return Object.hasOwn(legacy, mode) ? legacy[mode] : (thinking ? 'high' : 'medium');
 }
 
 function modelSelectionIdentity(selection = {}) {
@@ -13037,7 +13052,8 @@ function renderAgentRunHeader(bodyEl, agentRun) {
   const hasWork = timeline.some(item => (item?.stage || 'work') === 'work');
   const canToggle = hasWork;
   header.dataset.workToggleAvailable = String(canToggle);
-  const terminalLabel = status === 'error' ? '运行失败' : (status === 'interrupted' ? '已暂停' : '');
+  const terminalLabel = agentRun.historyBoundaryAt ? '引导前的上下文'
+    : status === 'error' ? '运行失败' : (status === 'interrupted' ? '已暂停' : '');
   const cacheStats = status === 'working' ? null : getAgentRunCacheStats(agentRun);
   const cacheRate = cacheStats ? formatCacheHitRate(cacheStats.rate) : '';
   const cacheLevel = cacheStats?.rate >= 0.8 ? 'is-high' : (cacheStats?.rate > 0 ? 'is-active' : 'is-cold');
@@ -13925,7 +13941,7 @@ function buildAgentTimelineSourceParts(renderTimeline, status, hasSubtask, resul
     if (item.type === 'tool_call') {
       if (item.name === 'task') return;
       const result = findTimelineToolResult(renderTimeline, item, index, claimedResults, resultIndex);
-      const phase = result?.interrupted || (!result && status === 'interrupted')
+      const phase = result?.interrupted || (!result && ['interrupted', 'incomplete'].includes(status))
         ? 'interrupted'
         : (!result && status === 'working' ? 'running' : 'done');
       calls.push({
@@ -14038,7 +14054,7 @@ function syncAgentTimelineParts(activityBody, timeline, status, fallbackContent,
       ? findTimelineToolResult(renderTimeline, item, index, claimedResults, resultIndex)
       : null;
     const phase = item.type === 'tool_call'
-      ? (result?.interrupted || (!result && status === 'interrupted')
+      ? (result?.interrupted || (!result && ['interrupted', 'incomplete'].includes(status))
         ? 'interrupted'
         : (!result && status === 'working' ? 'running' : 'done'))
       : (status === 'working' ? 'running' : 'done');
@@ -14102,6 +14118,7 @@ function captureLiveGuidanceDisplayBoundary(runCtx, message) {
     || `display-${message.liveGuidance.requestId}`;
   message.liveGuidance.timelineKey = run.guidanceTimelineKey;
   message.liveGuidance.displayBoundary = window.ZGuidanceTimeline.captureBoundary(run.timeline);
+  message.liveGuidance.historyBoundary = window.ZGuidanceTimeline.captureHistoryBoundary(run);
 }
 
 function refreshGuidedHistoryDisplays() {
@@ -19273,9 +19290,12 @@ function openRightSidebarTool(tool, { reuseBrowser = false } = {}) {
     return true;
   }
   const browserSessionId = currentBrowserScope().sessionId;
+  if (tool === 'browser' && deletedBrowserSessionIds.has(browserSessionId)) return false;
   if (tool === 'browser' && !browserSessionRecord(browserSessionId).loaded) {
-    void ensureBrowserSessionState(browserSessionId).then(() => {
-      if (currentBrowserScope().sessionId === browserSessionId) openRightSidebarTool(tool, { reuseBrowser });
+    void ensureBrowserSessionState(browserSessionId).then(saved => {
+      if (saved?.loaded && !saved.disposed && currentBrowserScope().sessionId === browserSessionId) {
+        openRightSidebarTool(tool, { reuseBrowser });
+      }
     });
     return true;
   }
@@ -22995,11 +23015,9 @@ async function saveModelPicker() {
     const modelChanged = String(current.providerId || '') !== String(selectedModel.providerId || '')
       || String(current.supplierId || '') !== String(selectedModel.supplierId || '')
       || String(current.modelId || '') !== String(selectedModel.id || '');
-    if (modelChanged) {
-      if (!await selectSessionTextModel({ ...selectedModel, maxOutputTokens: 0 }, targetSession)) return;
-    }
-    if (reasoningSpeed !== getReasoningSpeedMode()) {
-      await selectReasoningSpeed(reasoningSpeed, { notify: false });
+    if (modelChanged || reasoningSpeed !== getReasoningSpeedMode(targetSession)) {
+      if (!await selectSessionTextModel({ ...current, ...selectedModel, modelId: selectedModel.id,
+        reasoningSpeed, maxOutputTokens: modelChanged ? 0 : current.maxOutputTokens }, targetSession)) return;
     }
     if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
     renderModelBadge();
@@ -23101,12 +23119,10 @@ function renderReasoningFlower(mode) {
 
 const LEGACY_REASONING_SPEED_MODES = Object.freeze({ fast: 'low', balanced: 'medium', smart: 'high' });
 
-function getReasoningSpeedMode() {
+function getReasoningSpeedMode(session = state.currentSession) {
   const apiConfig = state.config?.api || {};
-  const value = String(apiConfig.reasoningSpeed || '');
-  if (REASONING_SPEED_UI[value]) return value;
-  if (LEGACY_REASONING_SPEED_MODES[value]) return LEGACY_REASONING_SPEED_MODES[value];
-  return apiConfig.thinking ? 'high' : 'medium';
+  return normalizeSessionReasoningSpeed(session?.modelSelection?.reasoningSpeed ?? apiConfig.reasoningSpeed,
+    session?.modelSelection?.thinking ?? apiConfig.thinking);
 }
 
 function getReasoningSpeedBillingNote(mode) {
@@ -23209,22 +23225,25 @@ function renderReasoningSpeedControl(modeOverride, { updateBadge = true, progres
   });
 }
 
-async function selectReasoningSpeed(mode, { notify = true } = {}) {
-  if (!REASONING_SPEED_UI[mode] || mode === getReasoningSpeedMode()) {
-    renderReasoningSpeedControl();
-    return state.config;
+async function selectReasoningSpeed(mode, { notify = true, session = state.currentSession } = {}) {
+  const targetSession = session || await newSession();
+  const isCurrent = () => state.currentSession?.id === targetSession?.id;
+  if (!REASONING_SPEED_UI[mode] || mode === getReasoningSpeedMode(targetSession)) {
+    if (isCurrent()) renderReasoningSpeedControl();
+    return false;
   }
-  modelPickerDraft.reasoningSpeed = mode;
-  if (mode !== 'max') clearMaxReasoningNotice();
-  if (mode === 'max' && !$('#modelPill')?.classList.contains('show-max-reasoning-notice')) showMaxReasoningNotice();
+  if (isCurrent()) {
+    modelPickerDraft.reasoningSpeed = mode;
+    if (mode !== 'max') clearMaxReasoningNotice();
+    if (mode === 'max' && !$('#modelPill')?.classList.contains('show-max-reasoning-notice')) showMaxReasoningNotice();
+  }
   try {
-    state.config = await api.setConfig({
-      api: { reasoningSpeed: mode, thinking: ['high', 'xhigh', 'max'].includes(mode) }
-    });
+    if (!await selectSessionTextModel({ ...getAgentModelSelection(targetSession), reasoningSpeed: mode }, targetSession)) return false;
   } catch (error) {
-    clearMaxReasoningNotice();
+    if (isCurrent()) clearMaxReasoningNotice();
     throw error;
   }
+  if (!isCurrent()) return true;
   modelPickerDraft.reasoningSpeed = mode;
   if (mode === 'max' && !$('#modelPill')?.classList.contains('show-max-reasoning-notice')) showMaxReasoningNotice();
   renderModelBadge();
@@ -23236,7 +23255,7 @@ async function selectReasoningSpeed(mode, { notify = true } = {}) {
     maxReasoningNoticeTimer = setTimeout(clearMaxReasoningNotice, 2000);
   }
   if (notify) toast(billingNote || REASONING_SPEED_UI[mode].toast);
-  return state.config;
+  return true;
 }
 
 function previewReasoningSlider(value) {
@@ -23250,6 +23269,8 @@ function previewReasoningSlider(value) {
 
 async function commitReasoningSlider(value) {
   if (modelQuickSaving) return;
+  const targetSession = state.currentSession;
+  const isCurrent = () => state.currentSession?.id === targetSession?.id;
   const mode = reasoningModeFromProgress(Math.max(0, Math.min(1, Number(value) / 100)));
   modelPickerDraft.reasoningSpeed = mode;
   const currentMode = getReasoningSpeedMode();
@@ -23262,12 +23283,16 @@ async function commitReasoningSlider(value) {
   modelQuickSaving = true;
   renderReasoningSpeedControl(mode, { updateBadge: false });
   try {
-    await selectReasoningSpeed(mode, { notify: true });
-    setModelPickerMenuNotice();
-    renderReasoningSpeedControl(mode);
+    await selectReasoningSpeed(mode, { notify: true, session: targetSession });
+    if (isCurrent()) {
+      setModelPickerMenuNotice();
+      renderReasoningSpeedControl();
+    }
   } catch (error) {
-    setModelPickerMenuNotice(`推理强度保存失败：${error?.message || error}`);
-    renderReasoningSpeedControl(currentMode);
+    if (isCurrent()) {
+      setModelPickerMenuNotice(`推理强度保存失败：${error?.message || error}`);
+      renderReasoningSpeedControl(currentMode);
+    }
   } finally {
     modelQuickSaving = false;
     renderReasoningSpeedControl(getReasoningSpeedMode());

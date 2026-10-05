@@ -33,6 +33,64 @@
     return { version: 1, keys, textLengths };
   }
 
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const pick = (value, keys) => Object.fromEntries(keys.filter(key => value?.[key] !== undefined)
+    .map(key => [key, clone(value[key])]));
+  const historyRunKeys = ['providerId', 'supplierId', 'modelId', 'modelName', 'configName',
+    'presentationMode', 'startedAt', 'guidanceTimelineKey'];
+
+  // Unlike the display boundary, a rewind must freeze mutable tool outputs and
+  // Observer decisions. Capture only durable execution evidence, not the live
+  // session, native event buffers, permissions, or model request configuration.
+  function captureHistoryBoundary(run = {}) {
+    const snapshot = pick(run, [...historyRunKeys, 'todos', 'watchdog']);
+    snapshot.timeline = clone((Array.isArray(run.timeline) ? run.timeline : [])
+      .filter(item => item && !(item.type === 'progress' && item.variant === 'agent-loader')));
+    if (Array.isArray(run.subagents)) snapshot.subagents = run.subagents.map(child => pick(child,
+      ['callId', 'name', 'title', 'role', 'task', 'prompt', 'status', 'result', 'error', 'textContent', 'timeline']));
+    return { version: 1, agentRun: snapshot };
+  }
+
+  // Old conversations already recorded part identities and streamed lengths.
+  // Do not use the display projection here: it deliberately attaches a later
+  // tool result to its earlier call, which would import the future on rewind.
+  function historyRunAtBoundary(run = {}, guidance = {}) {
+    const saved = guidance.historyBoundary;
+    if (saved?.version === 1 && Array.isArray(saved.agentRun?.timeline)) return clone(saved.agentRun);
+    if (guidance.displayBoundary?.version !== 1) return null;
+    const boundary = normalizeBoundary(guidance.displayBoundary);
+    const snapshot = pick(run, historyRunKeys);
+    snapshot.timeline = [];
+    (Array.isArray(run.timeline) ? run.timeline : []).forEach((item, index) => {
+      const key = timelineKey(item, index);
+      if (!item || !boundary.keys.has(key) || (item.type === 'progress' && item.variant === 'agent-loader')) return;
+      const part = clone(item);
+      if (isText(item)) {
+        const length = Number(boundary.textLengths[key]);
+        if (!owns(boundary.textLengths, key) || !Number.isFinite(length)) return;
+        part.content = String(part.content || '').slice(0, Math.max(0, Math.floor(length)));
+        if (!part.content) return;
+      } else if (item.type === 'tool_call') {
+        for (const field of ['output', 'result', 'error', 'ok', 'status', 'completedAt']) delete part[field];
+        const resultKnown = (Array.isArray(run.timeline) ? run.timeline : []).some((result, resultIndex) =>
+          result?.type === 'tool_result' && boundary.keys.has(timelineKey(result, resultIndex))
+          && (item.callId ? result.callId === item.callId : (!result.name || item.name === result.name)));
+        if (!resultKnown) {
+          for (const field of ['args', 'input', 'arguments']) delete part[field];
+          part.inputUnavailableAtBoundary = true;
+        }
+      } else if (item.type === 'delivery_contract') {
+        delete part.review;
+        part.verification = 'recorded';
+      }
+      delete part.guidanceMarkdown;
+      part.streaming = false;
+      snapshot.timeline.push(part);
+    });
+    snapshot.boundaryRestoration = 'legacy';
+    return snapshot;
+  }
+
   function normalizeBoundary(boundary) {
     return {
       keys: new Set(Array.isArray(boundary?.keys) ? boundary.keys.filter(key => typeof key === 'string') : []),
@@ -177,11 +235,11 @@
 
   // This is a presentation projection, never model history. Keep the raw run
   // untouched and retain even empty segments so guidance stays in send order.
-  function projectTimeline(rawTimeline, rawBoundaries) {
+  function projectTimeline(rawTimeline, rawBoundaries, { pairToolResults = true } = {}) {
     const timeline = Array.isArray(rawTimeline) ? rawTimeline : [];
     const boundaries = (Array.isArray(rawBoundaries) ? rawBoundaries : []).map(normalizeBoundary);
     const segments = Array.from({ length: boundaries.length + 1 }, () => []);
-    const resultSegments = toolResultSegments(timeline, boundaries);
+    const resultSegments = pairToolResults ? toolResultSegments(timeline, boundaries) : new Map();
     const lastLoader = timeline.reduce((last, item, index) => item?.type === 'progress' && item.variant === 'agent-loader' ? index : last, -1);
     timeline.forEach((item, index) => {
       if (!item || typeof item !== 'object') return;
@@ -220,5 +278,5 @@
     return segments;
   }
 
-  return { captureBoundary, projectTimeline, markdownContent };
+  return { captureBoundary, captureHistoryBoundary, historyRunAtBoundary, projectTimeline, markdownContent };
 });

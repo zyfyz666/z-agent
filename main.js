@@ -3537,6 +3537,7 @@ function normalizeAgentModelSelection(cfg) {
     modelType: 'text',
     name: currentModel.name || currentModel.id,
     capabilities: currentModel.capabilities || {},
+    ...(Object.hasOwn(stored, 'reasoningSpeed') ? { reasoningSpeed: normalizeReasoningSpeed(stored.reasoningSpeed) } : {}),
     ...(stored.providerId === providerId && stored.supplierId === supplierId
       && storedModelId === currentModel.id && Object.hasOwn(stored, 'maxOutputTokens')
       ? { maxOutputTokens: normalizeOutputTokens(stored.maxOutputTokens) } : {})
@@ -6904,11 +6905,13 @@ function initialSessionModelSelection(session) {
   const candidates = composerConnections(cfg).flatMap(connection => connection.models.map(model => ({
     providerId: connection.providerId, supplierId: connection.supplierId, modelId: model.id
   })));
-  return inferSessionModelSelection(session, cfg.agentModel, candidates);
+  return inferSessionModelSelection(session, { ...cfg.agentModel,
+    reasoningSpeed: cfg.api?.reasoningSpeed, thinking: cfg.api?.thinking }, candidates);
 }
 
 function resolveSessionModelSelection(cfg, requested) {
-  const selection = sessionModelSnapshot(requested);
+  const selection = sessionModelSnapshot({ ...requested,
+    reasoningSpeed: requested?.reasoningSpeed ?? cfg.api?.reasoningSpeed, thinking: cfg.api?.thinking });
   const fail = () => {
     const error = new Error(`此对话的模型“${selection?.name || selection?.modelId || '未选择'}”或供应商已不可用，请为此对话重新选择模型。`);
     error.code = 'SESSION_MODEL_UNAVAILABLE';
@@ -6937,6 +6940,7 @@ function applySessionModelToRunConfig(cfg, requested) {
   const connection = getProviderConnectionForSupplier(cfg, selection.providerId, selection.supplierId);
   cfg.agentModel = selection;
   cfg.api = { ...cfg.api, provider: selection.providerId, model: selection.modelId,
+    reasoningSpeed: selection.reasoningSpeed, thinking: reasoningSpeedEnablesThinking(selection.reasoningSpeed),
     baseUrl: connection.baseUrl, apiKey: connection.apiKey,
     providerActiveSupplierIds: { ...cfg.api.providerActiveSupplierIds, [selection.providerId]: selection.supplierId } };
   cfg.models = getProviderModels(cfg, selection.providerId, selection.supplierId);
@@ -6983,7 +6987,7 @@ async function readSessionRecord(id, options = {}) {
     stat = await fsp.stat(file);
     needsSanitizing = true;
   }
-  if (!sessionModelSnapshot(data.modelSelection)) {
+  if (!sessionModelSnapshot(data.modelSelection) || !Object.hasOwn(data.modelSelection, 'reasoningSpeed')) {
     data = { ...data, modelSelection: initialSessionModelSelection(data) };
     await writeSessionFileAtomic(file, JSON.stringify(data, null, 2));
     await refreshSessionSummaryCache(key, data);
@@ -7477,7 +7481,8 @@ async function setSessionModelRecord(id, requested, conversationRevision = 0) {
     const stored = await readSessionRecord(id, { sessionLocked: true });
     if (!stored) return { ok: false, error: '会话不存在', code: 'session-not-found' };
     assertConversationRevision(stored, conversationRevision);
-    const modelSelection = resolveSessionModelSelection(loadConfig(), requested);
+    const modelSelection = resolveSessionModelSelection(loadConfig(), { ...requested,
+      reasoningSpeed: requested?.reasoningSpeed ?? stored.modelSelection?.reasoningSpeed });
     const data = { ...stored, modelSelection, updatedAt: Date.now() };
     await writeSessionFileAtomic(sessionPath(id), JSON.stringify(data, null, 2));
     await refreshSessionSummaryCache(id, data);
@@ -9650,7 +9655,8 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     const cfg = loadConfig();
     const requestedModel = Object.prototype.hasOwnProperty.call(request, 'modelSelection')
       ? request.modelSelection : (authoritativeSession?.modelSelection || (request.utility === true ? null : cfg.agentModel));
-    const selection = applySessionModelToRunConfig(cfg, requestedModel);
+    const selection = applySessionModelToRunConfig(cfg, requestedModel ? { ...requestedModel,
+      reasoningSpeed: requestedModel.reasoningSpeed ?? authoritativeSession?.modelSelection?.reasoningSpeed } : requestedModel);
     request.modelSelection = selection;
     // The persisted conversation owns its directory. A stale renderer must
     // not erase it, borrow another task's folder, or fall back to private storage.

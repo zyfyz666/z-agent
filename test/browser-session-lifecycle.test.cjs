@@ -43,12 +43,12 @@ function fixture({ read } = {}) {
     browserSessionRecords: new Map(), browserTabControllers: new Map(), deletedBrowserSessionIds: new Set(),
     openRightSidebarTabs: [], browserDraftSessionId: 'draft:fixture', displayedBrowserSessionId: '',
     rightSidebarBrowserCounter: 0, activeRightSidebarTab: null, lastActiveBrowserTabId: null,
-    currentWindowView: 'main', currentMainPage: 'chat', RIGHT_SIDEBAR_TOOLS: {},
+    currentWindowView: 'main', currentMainPage: 'chat', RIGHT_SIDEBAR_TOOLS: { browser: { label: 'Browser' } },
     setTimeout(fn) { const id = ++nextTimer; timers.set(id, fn); return id; },
     clearTimeout(id) { timers.delete(id); },
     normalizeBrowserTabFavicon: value => value,
     renderRightSidebarTabs() {}, updateBrowserFocusControls() {}, syncBrowserViewport() {},
-    setRightSidebarOpen() {}, closeAllBrowserSettingsMenus() {}, hideReviewQuickDiff() {}, toast() {},
+    setRightSidebarOpen() {}, setRightSidebarAddMenuOpen() {}, closeAllBrowserSettingsMenus() {}, hideReviewQuickDiff() {}, toast() {},
     createBrowserTabController(tab) {
       context.browserTabControllers.set(tab.id, {
         id: tab.id, agentSessionId: tab.agentSessionId, agentWorkspace: tab.agentWorkspace,
@@ -62,7 +62,7 @@ function fixture({ read } = {}) {
   });
   for (const code of [
     section('function browserScopeKey(', 'function findRunCtxByRunId('),
-    section('function getActiveRightSidebarTab(', 'function openRightSidebarTool('),
+    section('function getActiveRightSidebarTab(', 'function openBrowserUrlInNewTab('),
     section('function openBrowserUrlInNewTab(', "$('#rightSidebarTabStrip')?.addEventListener('click'"),
     section('function syncAgentBrowserVisibility(', "document.addEventListener('keydown', event => {")
   ]) vm.runInContext(code, context);
@@ -160,6 +160,20 @@ test('deleting during an in-flight read prevents late hydration and queued savin
   assert.equal(context.browserTabControllers.size, 0);
   assert.equal(context.openRightSidebarTabs.length, 0);
   assert.deepEqual(writes, []);
+});
+
+test('an open-browser retry waiting on hydration stops when its chat was deleted before selection switches', async () => {
+  const read = deferred();
+  const { context } = fixture({ read: () => read.promise });
+  const hydration = context.ensureBrowserSessionState('sess_a');
+  assert.equal(context.openRightSidebarTool('browser'), true);
+  context.disposeBrowserSessionState('sess_a');
+  read.resolve(persisted());
+  await hydration;
+  await Promise.resolve();
+  assert.equal(context.openRightSidebarTool('browser'), false);
+  assert.equal(context.browserSessionRecords.has('sess_a'), false);
+  assert.equal(context.openRightSidebarTabs.length, 0);
 });
 
 test('an older preload restores the session snapshot and keeps mounted pages isolated without new IPC methods', async () => {
