@@ -690,6 +690,36 @@ function renderWdMonitorLoading() {
   host.dataset.wdRunKey = '';
 }
 
+// End-of-turn goal check and observer wakes (renderer/observer-completion.js).
+function observerSessionsInMemory(sessionId) {
+  const id = String(sessionId || '');
+  return [...new Set([
+    state.currentSession?.id === id ? state.currentSession : null,
+    state.activeRuns.get(id)?.sessionRef,
+    state.sessions.find(item => String(item.id) === id)
+  ].filter(Boolean))];
+}
+const observerCompletion = window.ZObserverCompletion?.createController({
+  api,
+  inMemory: observerSessionsInMemory,
+  loadSession: async id => {
+    const held = observerSessionsInMemory(id).find(session => Array.isArray(session.messages));
+    if (held) return held;
+    const session = await api.getSession(id, { messageLimit: MESSAGE_LOAD_LIMIT });
+    if (session && Array.isArray(session.messages)) markSessionLoadBaseline(session);
+    return session;
+  },
+  submit: (session, text, wake) => submitMessage(text, [], [], { session, observerWake: wake }),
+  isBusy: id => isSessionExecutionActive(id) || state.queuedTurns.has(id) || sessionRewindRequests.has(id),
+  // Rules mode cannot judge a goal; skip without flashing a "checking" state.
+  reviewEnabled: () => !!state.config?.observer?.model && state.config.observer.completion?.enabled !== false,
+  render: id => { if (state.currentSession?.id === id) renderWdMonitor(); }
+});
+// Run and submit paths reach it through globalThis: they are also loaded on
+// their own by tests, where it is simply absent.
+globalThis.zObserverCompletion = observerCompletion;
+setInterval(() => observerCompletion?.tick(document), 1000);
+
 function renderWdMonitor(session = state.currentSession) {
   if (observerPendingSessionId) { renderWdMonitorLoading(); return; }
   if (session && state.currentSession?.id !== session.id) return;
@@ -697,7 +727,11 @@ function renderWdMonitor(session = state.currentSession) {
   if (!monitor) return;
   const runCtx = session?.id ? getRunCtx(session.id) : null;
   const selection = monitor.selectSession(session, runCtx, observerHistorySelection.get(session?.id) || '');
-  monitor.render($('#rs-watchdog'), { ...selection, earlierLoading: observerEarlierSessionId === session?.id });
+  // The end-of-turn card belongs to the newest saved run only.
+  const record = observerCompletion?.recordFor(session?.id) || session?.observerCompletion;
+  const completion = !isSessionExecutionActive(session?.id) && selection.key === selection.runs?.[0]?.key
+    ? window.ZObserverCompletion?.displayFor(session, record) : null;
+  monitor.render($('#rs-watchdog'), { ...selection, completion, earlierLoading: observerEarlierSessionId === session?.id });
 }
 
 $('#rs-watchdog')?.addEventListener('change', event => {
@@ -706,6 +740,15 @@ $('#rs-watchdog')?.addEventListener('change', event => {
   if (key) observerHistorySelection.set(state.currentSession.id, key);
   else observerHistorySelection.delete(state.currentSession.id);
   renderWdMonitor();
+});
+
+$('#rs-watchdog')?.addEventListener('click', event => {
+  const act = event.target.closest('[data-observer-completion]')?.dataset.observerCompletion;
+  const session = state.currentSession;
+  if (!act || !session?.id || !observerCompletion) return;
+  if (act === 'cancel') void observerCompletion.cancel(session.id);
+  // After a restart an expired wake exists only on the saved session.
+  else if (act === 'wake') void observerCompletion.wakeNow(session.id, window.ZObserverCompletion.displayFor(session));
 });
 
 $('#rs-watchdog')?.addEventListener('click', async event => {
@@ -1173,6 +1216,7 @@ async function init() {
   await syncPetWindowButton();
   await refreshSessions();
   await hydrateQueuedTurns();
+  await globalThis.zObserverCompletion?.hydrate();
   const recoveredTurns = await listRecoveredZCoreTurns();
   // Replay interrupted Turns from the Core journal before the first session
   // paint so the recovered content is part of the conversation from the start.
@@ -5463,6 +5507,13 @@ function appendMessage(role, content, attachments = [], animate = true, msgIndex
   el.innerHTML = avatar + bodyHtml + actionsHtml;
   if (el._messageRecord?.forkedHistory) el.querySelector('[data-act="edit"]')?.remove();
   if (role === 'user' && liveGuidance) renderLiveGuidanceStatus(el, liveGuidance);
+  if (role === 'user' && el._messageRecord?.observerWake) {
+    el.classList.add('observer-wake');
+    const badge = document.createElement('div');
+    badge.className = 'msg-observer-wake';
+    badge.textContent = `观察者唤醒 · 第 ${Number(el._messageRecord.observerWake.wake) || 1} 次`;
+    el.querySelector('.msg-body')?.before(badge);
+  }
   wrap.appendChild(el);
   bindSkillLogoFallbacks(el);
 
@@ -11419,6 +11470,10 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   };
   if (!userMsg.modelSelection) userMsg.modelSelection = effectiveModelSelection;
   if (intentId && !userMsg.intentId) userMsg.intentId = intentId;
+  // Observer wakes are marked so they never count as a new user goal; anything
+  // else the user sends takes over from a pending observer wake.
+  if (options.observerWake && !persistedSubmission?.userMessage) userMsg.observerWake = { ...options.observerWake, ts: userMsg.ts };
+  else if (!persistedSubmission?.userMessage) void globalThis.zObserverCompletion?.onUserMessage(runSession.id);
   runCtx.requestMessage = {
     ...userMsg,
     attachments: (userMsg.attachments || []).map(item => ({ ...item })),
@@ -11645,6 +11700,8 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
       }
       await activatePendingAgentHandoff(runSession.id);
       scheduleQueuedTurnDispatch(runSession);
+      // A queued turn or new run takes precedence; the controller checks that itself.
+      void globalThis.zObserverCompletion?.afterRun(runSession);
     }
   }
   return { ok: taskOk, error: taskErr };

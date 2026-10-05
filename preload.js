@@ -40,6 +40,10 @@ contextBridge.exposeInMainWorld('z', {
   listQuickModels: () => ipcRenderer.invoke('models:quick-list'),
   listModelConnections: () => ipcRenderer.invoke('models:connections'),
   configureObserver: (settings) => ipcRenderer.invoke('observer:configure', settings),
+  reviewObserverCompletion: (payload) => ipcRenderer.invoke('observer:review-completion', payload),
+  cancelObserverCompletion: (sessionId) => ipcRenderer.invoke('observer:cancel-completion', sessionId),
+  setObserverCompletion: (sessionId, record) => ipcRenderer.invoke('observer:set-completion', sessionId, record),
+  listObserverWakes: () => ipcRenderer.invoke('observer:list-wakes'),
   listMediaModels: () => ipcRenderer.invoke('models:media-list'),
   setModelRole: (providerId, modelId, modelType, supplierId = '') => ipcRenderer.invoke('model:role-set', {
     providerId,

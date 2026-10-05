@@ -411,6 +411,17 @@
     '观察者在本轮保持关闭。': 'Observer remains disabled for this run.',
     '你专注目标，观察者留意过程。开始对话后，检查进度与触发原因会在这里逐步展开。': 'Focus on your goal while Observer follows the process. Start a conversation to see checks and reminder reasons here.',
     '目前没有触发观察者提醒。任务仍由模型正常执行。': 'Observer has not triggered any reminders. The model continues the task normally.',
+    '收尾核验': 'End-of-turn check', '正在核验目标': 'Checking the goal', '目标已达成': 'Goal met',
+    '等待你的回复': 'Waiting for your reply', '无法确认是否完成': 'Cannot confirm completion', '本轮未核验': 'Not checked this turn',
+    '即将唤醒主 Agent': 'About to wake the main agent', '已安排稍后唤醒': 'Wake scheduled', '定时唤醒已过期': 'Scheduled wake expired',
+    '已达到连续唤醒上限': 'Wake limit reached', '已唤醒主 Agent': 'Main agent woken', '已取消唤醒': 'Wake cancelled',
+    '你已接手，未唤醒': 'You took over; no wake sent', '唤醒没有发出': 'Wake not sent', '续做指令': 'Follow-up instruction',
+    '立即唤醒': 'Wake now', '取消核验': 'Cancel check', '唤醒': 'Wake', '继续一次': 'Continue once', '即将唤醒': 'Waking soon',
+    '本轮已自然结束，观察者正在核验目标是否达成。': 'This turn ended on its own. Observer is checking whether the goal is met.',
+    'Z 关闭期间到了唤醒时间，没有自动执行。': 'The wake time passed while Z was closed, so nothing ran automatically.',
+    '收尾核验并自动唤醒': 'Check the goal at the end of each turn and wake automatically', '同一目标连续唤醒上限': 'Consecutive wakes per goal',
+    '连续唤醒上限须为 1 到 10 次': 'Consecutive wakes must be 1 to 10',
+    '每轮自然结束后，观察者核验目标是否达成；没达成会在 15 秒倒计时后唤醒主 Agent，或按它安排的时间唤醒。每轮多一次观察者模型调用。规则模式不可用。': 'After each turn ends on its own, Observer checks whether the goal is met. If not, it wakes the main agent after a 15-second countdown or at the time it schedules. This adds one Observer model call per turn. Not available in rules mode.',
     ...(global.ZProductContent?.translations || {})
   });
   const attributeFragments = Object.freeze(Object.keys(ZH_EN)
@@ -434,6 +445,12 @@
     if (exact) return source.replace(source.trim(), exact);
     const healthRecords = source.match(/^巡检记录（(\d+)）$/u);
     if (healthRecords) return `Runtime check history (${healthRecords[1]})`;
+    const wakeIn = source.match(/^(?:(\d+) 小时 )?(?:(\d+) 分 ?)?(?:(\d+) 秒)?后唤醒$/u);
+    if (wakeIn) return `Wakes in ${[[wakeIn[1], 'h'], [wakeIn[2], 'min'], [wakeIn[3], 's']].filter(([n]) => n).map(([n, u]) => `${n} ${u}`).join(' ')}`;
+    const wakeBadge = source.match(/^观察者唤醒 · 第 (\d+) 次$/u);
+    if (wakeBadge) return `Observer wake · #${wakeBadge[1]}`;
+    const wakeLimit = source.match(/^观察者已连续唤醒 (\d+) 次，仍判断未完成，交给你决定。$/u);
+    if (wakeLimit) return `Observer has woken the agent ${wakeLimit[1]} times in a row and still sees work left. It's your call now.`;
     const healthDuration = source.match(/^(\d+(?:\.\d+)?) (毫秒|秒|分钟|小时)$/u);
     if (healthDuration) return `${healthDuration[1]} ${{ 毫秒: 'ms', 秒: 's', 分钟: 'min', 小时: 'h' }[healthDuration[2]]}`;
     const rewindBackups = source.match(/^回退备份（(\d+)）$/u);

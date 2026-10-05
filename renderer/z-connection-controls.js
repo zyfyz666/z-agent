@@ -33,7 +33,19 @@
     return { requested, automatic, resolution,
       summary: `${t(requested ? '手动' : '自动')} · ${amount} · ${origin}${unverified}` };
   }
+  // End-of-turn review needs the observer model; rules mode cannot judge a goal.
+  function fillCompletion(value) {
+    const completion = value?.completion || {};
+    $('zObserverCompletion').checked = completion.enabled !== false;
+    $('zObserverMaxWakes').value = String(Number.isInteger(completion.maxWakes) ? completion.maxWakes : 3);
+  }
+  function renderCompletionControl() {
+    const ruleOnly = $('zConnectionSelect').value === 'rules';
+    $('zObserverCompletion').disabled = saving || ruleOnly;
+    $('zObserverMaxWakes').disabled = saving || ruleOnly || !$('zObserverCompletion').checked;
+  }
   function renderOutputControl() {
+    renderCompletionControl();
     const input = $('zObserverOutputTokens');
     const summary = $('zObserverOutputSummary');
     const ruleOnly = $('zConnectionSelect').value === 'rules';
@@ -87,6 +99,7 @@
     $('zObserverOutputTokens').disabled = true;
     $('zObserverOutputTokens').setCustomValidity('');
     $('zObserverOutputSummary').textContent = '';
+    fillCompletion(observer());
     $('zConnectionNotice').textContent = t('正在读取连接…');
     $('zConnectionSelect').disabled = true;
     $('zConnectionSave').disabled = true;
@@ -101,6 +114,7 @@
       $('zObserverEvery').value = result.observer?.judgeEvery || 6;
       $('zObserverReasoning').value = reasoningEffort(result.observer?.reasoningEffort);
       $('zObserverOutputTokens').value = result.observer?.maxOutputTokens > 0 ? String(result.observer.maxOutputTokens) : '';
+      fillCompletion(result.observer);
       $('zConnectionSelect').replaceChildren(
         option('rules', t('仅规则观察（不调用模型）')),
         ...entries.map(entry => option(key(entry), entry.name))
@@ -127,6 +141,11 @@
       $('zObserverOutputTokens').reportValidity();
       return;
     }
+    const maxWakes = Number($('zObserverMaxWakes').value);
+    if (!Number.isInteger(maxWakes) || maxWakes < 1 || maxWakes > 10) {
+      $('zConnectionNotice').textContent = t('连续唤醒上限须为 1 到 10 次');
+      return;
+    }
     saving = true;
     $('zConnectionSave').disabled = true;
     $('zConnectionSelect').disabled = true; $('zConnectionModel').disabled = true; $('zObserverEvery').disabled = true;
@@ -138,6 +157,7 @@
         judgeEvery: Number($('zObserverEvery').value),
         reasoningEffort: reasoningEffort($('zObserverReasoning').value),
         maxOutputTokens: output.requested,
+        completion: { enabled: $('zObserverCompletion').checked, maxWakes },
         model: selected ? { providerId: entry.providerId, supplierId: entry.supplierId, modelId: selected.id } : null
       });
       if (result.error) throw new Error(result.error);
@@ -163,6 +183,7 @@
       $('zConnectionSelect').addEventListener('change', () => models($('zConnectionModel').value));
       $('zConnectionModel').addEventListener('change', renderOutputControl);
       $('zObserverOutputTokens').addEventListener('input', renderOutputControl);
+      $('zObserverCompletion').addEventListener('change', renderCompletionControl);
       $('zConnectionForm').addEventListener('submit', save);
       $('zConnectionClose').addEventListener('click', close);
       $('zConnectionCancel').addEventListener('click', close);

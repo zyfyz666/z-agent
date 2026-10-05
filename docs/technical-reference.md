@@ -349,7 +349,9 @@ Sidecar 在自动重试前以有时限的状态读取确认内核会话已空闲
 
 观察者面板默认展开，记录随对话和所选运行轮次恢复。模型判断无需介入时，也保存「判断为不介入」、时间与理由，不增加介入次数、不发送引导。每轮持久保存检查计数、最近的模型判断和最近 30 条观察记录；重启后仍可查看。当前使用说明见 [README](../README.md)。
 
-实现入口为 `lib/observer-model.js`、`lib/wd-monitor-state.js` 和 `renderer/wd-monitor.js`，运行调度由 `lib/opencode-sidecar.js` 协调。
+**收尾核验。** 一轮以 `done` 结束且不是用户点了结束（`userRequestedFinish`）时，渲染进程把最近一条用户目标（观察者唤醒消息和运行中引导不算新目标）、最终回复、待办、最近 20 个工具动作、验证摘要和改动文件交给 `observer:review-completion`。主进程用观察者连接请求 `reviewCompletion`（独立提示词，默认不唤醒），结果是 `achieved / continue / needs_user / uncertain`。`continue` 必须同时给出未完成项、证据和续做指令，否则降为 `uncertain`；`delayMinutes` 限制在 0–1440。渲染进程的 `renderer/observer-completion.js` 据此进入 15 秒倒计时（`pending`）或定时（`scheduled`），到点时如果对话已有新回合或正在运行就放弃；发出的唤醒消息带 `observerWake` 标记。记录写在会话的 `observerCompletion` 字段（只改这一字段、不改 `updatedAt`），待执行的唤醒另存 `ZData/observer-wakes.json` 供启动时发现：已过期或正在倒计时的显示为「已过期」，未到时间的定时唤醒重新计时。同一目标连续唤醒超过上限（默认 3）进入 `limit`，等用户决定。「核验中」只在内存中显示，不落盘。
+
+实现入口为 `lib/observer-model.js`、`lib/wd-monitor-state.js`、`renderer/wd-monitor.js` 和 `renderer/observer-completion.js`，运行调度由 `lib/opencode-sidecar.js` 协调。
 
 <a id="context"></a>
 ## 上下文预算与压缩
@@ -686,7 +688,8 @@ Goal、Serena、基础子代理、内置浏览器、基础 Git、DSML 与基础�
 | [lib/agi](../lib/agi) | 实验性侧路、轨迹、经验与评估 |
 | [renderer/renderer.js](../renderer/renderer.js) | 任务 UI、流式显示与面板协调 |
 | [renderer/browser-annotations.js](../renderer/browser-annotations.js) | 注释交互与受限 DOM 修改 |
-| [renderer/wd-monitor.js](../renderer/wd-monitor.js) | 观察者面板与历史轮次 |
+| [renderer/wd-monitor.js](../renderer/wd-monitor.js) | 观察者面板、眼睛与历史轮次 |
+| [renderer/observer-completion.js](../renderer/observer-completion.js) | 收尾核验、观察者唤醒与定时 |
 | [test](../test) | 模块测试、Electron E2E 与运行时验证 |
 
 Z 主项目采用 MIT 许可。OpenCode、Electron、模型 SDK、Serena、CodeGraph、Tree-sitter、dsh 审阅组件、ReactBits Ghost Fibers、Three.js、字体及场景素材各自遵循其许可证。

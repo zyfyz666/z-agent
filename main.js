@@ -98,7 +98,7 @@ const updateChecker = require('./lib/update-checker');
 const { detectVsCode, launchVsCode } = require('./lib/vscode-launcher');
 const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
-const { normalizeObserverSettings } = require('./lib/observer-model');
+const { normalizeObserverSettings, completionInput, completionSettings, reviewCompletion } = require('./lib/observer-model');
 const { normalizeOutputTokens, validateOutputTokens } = require('./lib/model-output-limits');
 const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
 const { sessionConversationRevision, assertConversationRevision, rewindBoundary, createRewindBackup,
@@ -6048,6 +6048,71 @@ ipcMain.handle('observer:configure', (_event, payload = {}) => {
   saveConfig(cfg);
   publishModelState(cfg);
   return { observer: cfg.observer };
+});
+
+// End-of-turn goal check by the observer model. One review per conversation; a
+// newer request or a cancel aborts the older one. Only goal/result summaries are
+// sent, never API keys; the renderer decides what to do with the verdict.
+const completionReviews = new Map();
+ipcMain.handle('observer:review-completion', async (_event, payload = {}) => {
+  const sessionId = String(payload.sessionId || '');
+  if (!sessionId) return { skipped: 'no-session' };
+  const cfg = loadConfig();
+  const settings = completionSettings(normalizeObserverSettings(cfg.observer).completion);
+  if (!settings.enabled) return { skipped: 'disabled' };
+  const connection = observerConnectionForRun(cfg);
+  if (!connection) return { skipped: 'rules-only' };
+  if (connection.unavailable) return { error: '所选观察者 API 已停用，请在观察者设置里重新选择', maxWakes: settings.maxWakes };
+  completionReviews.get(sessionId)?.abort();
+  const controller = new AbortController();
+  completionReviews.set(sessionId, controller);
+  const timer = setTimeout(() => controller.abort(), 300_000);
+  try {
+    const verdict = await reviewCompletion(connection, completionInput(payload), { signal: controller.signal });
+    return { verdict, maxWakes: settings.maxWakes, model: connection.name || connection.modelId };
+  } catch (error) {
+    if (controller.signal.aborted) return { cancelled: true };
+    const message = String(error?.message || '');
+    return { error: message.startsWith('观察者模型') ? message.slice(0, 160) : '观察者模型暂时不可用，本轮未核验', maxWakes: settings.maxWakes };
+  } finally {
+    clearTimeout(timer);
+    if (completionReviews.get(sessionId) === controller) completionReviews.delete(sessionId);
+  }
+});
+ipcMain.handle('observer:cancel-completion', (_event, sessionId) => {
+  completionReviews.get(String(sessionId || ''))?.abort();
+  return { ok: true };
+});
+
+// Pending/scheduled observer wakes, indexed so startup can find them without
+// opening every conversation. The full record also lives on the session.
+const observerWakeIndexPath = () => path.join(dataDir, 'observer-wakes.json');
+function readObserverWakes() {
+  try { const value = JSON.parse(fs.readFileSync(observerWakeIndexPath(), 'utf8')); return value && typeof value === 'object' ? value : {}; }
+  catch { return {}; }
+}
+let observerWakeWrite = Promise.resolve();
+ipcMain.handle('observer:list-wakes', () => Object.entries(readObserverWakes()).map(([sessionId, record]) => ({ ...record, sessionId })));
+ipcMain.handle('observer:set-completion', async (_event, sessionId, record) => {
+  const id = String(sessionId || '');
+  if (!isSafeSessionId(id) || !record || typeof record !== 'object' || JSON.stringify(record).length > 32_000) return { ok: false };
+  const wake = ['pending', 'scheduled'].includes(record.status);
+  // Only this field changes: no updatedAt bump, so the conversation keeps its place in the list.
+  const saved = await withSessionWrite(id, async () => {
+    const p = sessionPath(id);
+    const data = p && fs.existsSync(p) ? await readSessionRecord(id, { sessionLocked: true }) : null;
+    if (!data) return false;
+    data.observerCompletion = record;
+    await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
+    return true;
+  });
+  observerWakeWrite = observerWakeWrite.then(async () => {
+    const index = readObserverWakes();
+    if (wake && saved) index[id] = record; else delete index[id];
+    await writeAtomic(observerWakeIndexPath(), index);
+  }).catch(error => console.warn('[observer] wake index write failed:', error?.message || error));
+  await observerWakeWrite;
+  return { ok: saved };
 });
 
 ipcMain.handle('models:quick-list', () => {

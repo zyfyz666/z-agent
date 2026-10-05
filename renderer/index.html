@@ -2166,6 +2166,10 @@
       <input id="zObserverOutputTokens" type="number" min="0" step="1" placeholder="自动" aria-describedby="zObserverOutputSummary zObserverOutputHint">
       <p id="zObserverOutputSummary" class="z-output-limit-summary" aria-live="polite"></p>
       <p id="zObserverOutputHint">留空或 0 为自动。与主模型独立，下轮任务生效。</p>
+      <label class="z-check-field" for="zObserverCompletion"><input id="zObserverCompletion" type="checkbox" checked aria-describedby="zObserverCompletionHint"> 收尾核验并自动唤醒</label>
+      <label for="zObserverMaxWakes">同一目标连续唤醒上限</label>
+      <input id="zObserverMaxWakes" type="number" min="1" max="10" step="1" value="3" aria-describedby="zObserverCompletionHint">
+      <p id="zObserverCompletionHint">每轮自然结束后，观察者核验目标是否达成；没达成会在 15 秒倒计时后唤醒主 Agent，或按它安排的时间唤醒。每轮多一次观察者模型调用。规则模式不可用。</p>
       <details id="zObserverDetails" hidden>
         <summary>细节模式</summary>
         <label for="zObserverEvery">检查间隔（工具动作数）</label>
@@ -2179,6 +2183,7 @@
   <script src="../lib/model-output-limits.js"></script>
   <script src="z-connection-controls.js"></script>
   <script src="wd-monitor.js"></script>
+  <script src="observer-completion.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

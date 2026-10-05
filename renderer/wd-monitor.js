@@ -312,6 +312,10 @@
 
   function eyeState(view, selection = {}) {
     if (view.mode === 'empty') return 'resting';
+    const completion = selection.completion?.status;
+    if (completion === 'reviewing') return 'pondering';
+    if (completion === 'pending') return 'watching';
+    if (completion === 'scheduled') return 'resting';
     if (view.mode !== 'live' || view.phase === 'disabled') return 'closed';
     if (view.phase === 'error') return 'alarmed';
     return normalizeSnapshot(selection.snapshot)?.model?.phase === 'reviewing' ? 'pondering' : 'watching';
@@ -449,13 +453,66 @@
     const fresh = entry.runKey === runKey && !!latest && latest.id !== entry.lastEventId;
     const win = entry.oracle.ownerDocument?.defaultView;
     if (entry.runKey !== runKey && entry.flareTimer) { win?.clearTimeout(entry.flareTimer); entry.flareTimer = null; }
-    Object.assign(entry, { runKey, lastEventId: latest?.id ?? null, base });
-    if (fresh && view.mode === 'live' && FLARE_ACTIONS.has(latest.action) && win?.setTimeout) {
+    // The observer also speaks when its end-of-turn review decides to wake the agent.
+    const completion = selection?.completion?.status || null;
+    const decided = ['pending', 'scheduled'].includes(completion) && entry.lastCompletion === 'reviewing';
+    Object.assign(entry, { runKey, lastEventId: latest?.id ?? null, base, lastCompletion: completion });
+    if (((fresh && view.mode === 'live' && FLARE_ACTIONS.has(latest.action)) || decided) && win?.setTimeout) {
       if (entry.flareTimer) win.clearTimeout(entry.flareTimer);
       entry.flareTimer = win.setTimeout(() => { entry.flareTimer = null; applyEye(entry, entry.base); }, 2600);
     }
     applyEye(entry, entry.flareTimer ? 'speaking' : base);
     scheduleBlink(entry);
+  }
+
+  const COMPLETION = Object.freeze({
+    reviewing: ['正在核验目标', '本轮已自然结束，观察者正在核验目标是否达成。'],
+    achieved: ['目标已达成', ''], needs_user: ['等待你的回复', ''], uncertain: ['无法确认是否完成', ''],
+    error: ['本轮未核验', ''], pending: ['即将唤醒主 Agent', ''], scheduled: ['已安排稍后唤醒', ''],
+    expired: ['定时唤醒已过期', 'Z 关闭期间到了唤醒时间，没有自动执行。'], limit: ['已达到连续唤醒上限', ''],
+    sent: ['已唤醒主 Agent', ''], cancelled: ['已取消唤醒', ''], superseded: ['你已接手，未唤醒', ''], failed: ['唤醒没有发出', '']
+  });
+
+  // End-of-turn review card: verdict, reason, what is left and the wake controls.
+  function completionCard(node, record) {
+    const known = record?.status && COMPLETION[record.status];
+    if (!known) return null;
+    const card = node('section', 'wd-completion');
+    card.dataset.status = record.status;
+    card.append(node('h3', 'wd-section-heading', '收尾核验'), node('p', 'wd-completion-title', known[0]));
+    const detail = ['error', 'failed'].includes(record.status) ? record.error : record.reason;
+    if (detail || known[1]) card.append(node('p', 'wd-completion-reason', text(detail, 600) || known[1]));
+    const waiting = ['pending', 'scheduled', 'expired', 'limit'].includes(record.status);
+    if (waiting && Array.isArray(record.unmet) && record.unmet.length) {
+      const list = node('ul', 'wd-completion-unmet');
+      record.unmet.slice(0, 5).forEach(item => list.append(node('li', '', text(item, 300))));
+      card.append(list);
+    }
+    if (['pending', 'scheduled'].includes(record.status) && record.dueAt > 0) {
+      const due = node('p', 'wd-completion-due', globalThis.ZObserverCompletion?.remaining(record.dueAt - Date.now()) || '即将唤醒');
+      due.dataset.observerDue = String(record.dueAt);
+      card.append(due);
+    }
+    if (record.status === 'limit') {
+      card.append(node('p', 'wd-completion-reason', `观察者已连续唤醒 ${count(record.maxWakes) || 3} 次，仍判断未完成，交给你决定。`));
+    }
+    if (waiting && record.followUp) {
+      const details = node('details', 'wd-completion-followup');
+      details.append(node('summary', '', '续做指令'), node('p', '', text(record.followUp, 2000)));
+      card.append(details);
+    }
+    const buttons = [];
+    const button = (label, act) => {
+      const element = node('button', 'wd-completion-button', label);
+      element.type = 'button'; element.dataset.observerCompletion = act;
+      buttons.push(element);
+    };
+    if (['pending', 'scheduled'].includes(record.status)) { button('立即唤醒', 'wake'); button('取消', 'cancel'); }
+    else if (record.status === 'reviewing') button('取消核验', 'cancel');
+    else if (record.status === 'expired') button('唤醒', 'wake');
+    else if (record.status === 'limit') button('继续一次', 'wake');
+    if (buttons.length) { const actions = node('div', 'wd-completion-actions'); actions.append(...buttons); card.append(actions); }
+    return card;
   }
 
   function render(host, selection) {
@@ -604,7 +661,8 @@
       events.append(empty);
     }
     // The status card sits under the eye and reads as what the observer is doing.
-    shell.body.replaceChildren(status, history, health, stats, latest, events,
+    const completion = completionCard(node, selection?.completion);
+    shell.body.replaceChildren(status, ...(completion ? [completion] : []), history, health, stats, latest, events,
       node('footer', 'wd-footer', '观察者关注执行过程并发出提醒，不保证答案或解题结果正确。'));
     updateEye(shell, view, selection);
     host.dataset.wdState = view.phase;
