@@ -62,6 +62,7 @@ const {
 } = require('./lib/session-handoff');
 const { taskWorkspaceRoot, ensureTaskWorkspace, legacyRuntimeWorkspace } = require('./lib/task-workspace');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('./lib/session-model');
+const { normalizeBrowserSessionState } = require('./lib/browser-session-state');
 const { pruneZagentEvidence } = require('./lib/zagent-evidence');
 const skillRegistry = require('./lib/skill-registry');
 const codeGraphRuntime = require('./lib/codegraph-runtime');
@@ -1090,10 +1091,10 @@ function isExternalBrowserUrl(url) {
   return /^https?:/i.test(String(url || '').trim());
 }
 
-function sendBrowserNewTab(url) {
+function sendBrowserNewTab(url, contents) {
   const targetUrl = String(url || '').trim();
   if (!isBrowserPageUrl(targetUrl) || !mainWindow || mainWindow.isDestroyed()) return false;
-  mainWindow.webContents.send('browser:new-tab-request', { url: targetUrl });
+  mainWindow.webContents.send('browser:new-tab-request', { url: targetUrl, sourceWebContentsId: contents?.id || 0 });
   return true;
 }
 
@@ -1144,7 +1145,7 @@ function buildBrowserContextMenu(contents, params) {
 
   if (isBrowserPageUrl(linkUrl)) {
     template.push(
-      { label: '在新标签页中打开链接', click: () => sendBrowserNewTab(linkUrl) },
+      { label: '在新标签页中打开链接', click: () => sendBrowserNewTab(linkUrl, contents) },
       ...(isExternalBrowserUrl(linkUrl)
         ? [{ label: '在系统浏览器中打开链接', click: () => shell.openExternal(linkUrl).catch(() => {}) }]
         : []),
@@ -1155,7 +1156,7 @@ function buildBrowserContextMenu(contents, params) {
   if (params.mediaType === 'image' && isBrowserPageUrl(mediaUrl)) {
     addSeparator();
     template.push(
-      { label: '在新标签页中打开图片', click: () => sendBrowserNewTab(mediaUrl) },
+      { label: '在新标签页中打开图片', click: () => sendBrowserNewTab(mediaUrl, contents) },
       { label: '复制图片', click: () => contents.copyImageAt(params.x, params.y) },
       { label: '复制图片地址', click: () => clipboard.writeText(mediaUrl) }
     );
@@ -1191,7 +1192,7 @@ function buildBrowserContextMenu(contents, params) {
     }
     if (isBrowserPageUrl(mediaUrl)) {
       template.push(
-        { label: `在新标签页中打开${params.mediaType === 'video' ? '视频' : '音频'}`, click: () => sendBrowserNewTab(mediaUrl) },
+        { label: `在新标签页中打开${params.mediaType === 'video' ? '视频' : '音频'}`, click: () => sendBrowserNewTab(mediaUrl, contents) },
         { label: '复制媒体地址', click: () => clipboard.writeText(mediaUrl) }
       );
     }
@@ -1228,7 +1229,7 @@ function buildBrowserContextMenu(contents, params) {
       { label: '复制', accelerator: 'CmdOrCtrl+C', click: () => contents.copy() },
       {
         label: `使用 Bing 搜索“${displaySelection}”`,
-        click: () => sendBrowserNewTab(`https://www.bing.com/search?q=${encodeURIComponent(selection)}`)
+        click: () => sendBrowserNewTab(`https://www.bing.com/search?q=${encodeURIComponent(selection)}`, contents)
       }
     );
   }
@@ -1269,7 +1270,7 @@ function configureBrowserGuest(contents) {
   configuredBrowserGuestIds.add(contents.id);
   contents.once('destroyed', () => configuredBrowserGuestIds.delete(contents.id));
   contents.setWindowOpenHandler(({ url }) => {
-    sendBrowserNewTab(url);
+    sendBrowserNewTab(url, contents);
     return { action: 'deny' };
   });
   contents.on('context-menu', (event, params) => {
@@ -7090,7 +7091,8 @@ function toSessionSummary(data) {
     pinned: !!data.pinned,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
-    messageCount: (data.messages || []).length
+    messageCount: (data.messages || []).length,
+    browserTabCount: Array.isArray(data.browserState?.tabs) ? data.browserState.tabs.length : 0
   };
 }
 
@@ -7335,7 +7337,7 @@ async function createOrReuseSessionRecord() {
     const reusable = findReusableBlankSession(summaries);
     if (reusable) {
       const existing = await readSessionRecord(reusable.id);
-      if (existing) return { session: existing, reused: true };
+      if (existing && isBlankUnassignedNewChat(existing)) return { session: existing, reused: true };
     }
     return { session: await createFreshSessionRecord(), reused: false };
   })();
@@ -7429,6 +7431,44 @@ ipcMain.handle('session:list', () => listSessionSummaries({ includeRewindBackups
 
 ipcMain.handle('session:get', async (_e, id, options = {}) => {
   return readSessionRecord(id, { messageLimit: options?.messageLimit });
+});
+
+async function getSessionBrowserStateRecord(id) {
+  if (typeof id !== 'string' || id !== id.trim() || !isSafeSessionId(id)) {
+    return { ok: false, error: '会话 ID 无效', code: 'invalid-session-id' };
+  }
+  return withSessionWrite(id, async () => {
+    const stored = await readSessionRecord(id, { sessionLocked: true });
+    if (!stored) return { ok: false, error: '会话不存在', code: 'session-not-found' };
+    return { ok: true, id, browserState: normalizeBrowserSessionState(stored.browserState) };
+  });
+}
+
+async function setSessionBrowserStateRecord(id, requested) {
+  if (typeof id !== 'string' || id !== id.trim() || !isSafeSessionId(id)) {
+    return { ok: false, error: '会话 ID 无效', code: 'invalid-session-id' };
+  }
+  const browserState = normalizeBrowserSessionState(requested);
+  if (!browserState) return { ok: false, error: '浏览器状态无效', code: 'invalid-browser-state' };
+  return withSessionWrite(id, async () => {
+    const stored = await readSessionRecord(id, { sessionLocked: true });
+    if (!stored) return { ok: false, error: '会话不存在', code: 'session-not-found' };
+    // Navigation does not change conversation messages or reorder the sidebar.
+    const data = { ...stored, browserState };
+    await writeSessionFileAtomic(sessionPath(id), JSON.stringify(data, null, 2));
+    await refreshSessionSummaryCache(id, data);
+    return { ok: true, id, browserState };
+  });
+}
+
+ipcMain.handle('session:browser-state-get', async (_e, id) => {
+  try { return await getSessionBrowserStateRecord(id); }
+  catch (error) { return { ok: false, error: error.message, code: error.code || 'session-browser-state-read-failed' }; }
+});
+
+ipcMain.handle('session:browser-state-set', async (_e, { id, browserState } = {}) => {
+  try { return await setSessionBrowserStateRecord(id, browserState); }
+  catch (error) { return { ok: false, error: error.message, code: error.code || 'session-browser-state-save-failed' }; }
 });
 
 async function setSessionModelRecord(id, requested, conversationRevision = 0) {
@@ -7552,6 +7592,10 @@ ipcMain.handle('session:save', async (_e, session) => {
     let persisted = { ...session, title: stored?.title ?? session.title,
       modelSelection: stored?.modelSelection
       || initialSessionModelSelection({ ...session, modelSelection: undefined }) };
+    // Only the browser-state IPC may change this field. Message saves often
+    // carry stale renderer snapshots, including snapshots from a previous tab.
+    if (stored && Object.hasOwn(stored, 'browserState')) persisted.browserState = stored.browserState;
+    else delete persisted.browserState;
     if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
       if (stored && Array.isArray(stored.messages)) {
         const head = stored.messages.slice(0, session.messagesStart);

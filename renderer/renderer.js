@@ -1530,6 +1530,7 @@ async function refreshSessions() {
     const deletionResults = await Promise.all(redundantBlanks.map(session => api.deleteSession(session.id)));
     const deletedBlanks = redundantBlanks.filter((session, index) => deletionResults[index]?.ok !== false);
     deletedBlanks.forEach(session => {
+      disposeBrowserSessionState(session.id);
       state.composerDrafts.delete(String(session.id));
       state.queuedTurns.delete(String(session.id));
     });
@@ -1624,6 +1625,7 @@ async function applyExternalSessionChange(detail = {}) {
   // metadata updates must not trigger deletion cleanup or discard its draft.
   const allSessionSummaries = [...state.sessions, ...(state.rewindBackups || [])];
   if (detail.id && !allSessionSummaries.some(session => session.id === detail.id)) {
+    disposeBrowserSessionState(detail.id);
     settleAgentInteractionsForSession(detail.id);
   }
 
@@ -1685,6 +1687,8 @@ function getSessionMessageCount(session) {
 
 function isBlankNewChat(session) {
   return !!session && !session.rewindState?.backupSessionId
+    && !(session.browserTabCount > 0 || session.browserState?.tabs?.length
+      || openRightSidebarTabs.some(tab => tab.type === 'browser' && tab.agentSessionId === session.id))
     && isDefaultSessionTitle(session.title) && getSessionMessageCount(session) === 0;
 }
 
@@ -2065,6 +2069,7 @@ async function performSessionDeletionFromSidebar(id) {
     toast(result.error || '删除失败');
     return;
   }
+  disposeBrowserSessionState(id);
   await clearZCoreQueuedIntentsForThread(id, 'session_removed');
   state.composerDrafts.delete(String(id));
   state.queuedTurns.delete(String(id));
@@ -2384,6 +2389,7 @@ async function confirmDeadWorkspaceCleanup(summary) {
     try {
       const result = await api.deleteSession(session.id, true);
       if (result?.ok !== false) {
+        disposeBrowserSessionState(session.id);
         await clearZCoreQueuedIntentsForThread(session.id, 'dead_workspace_session_removed');
         state.composerDrafts.delete(String(session.id));
         state.queuedTurns.delete(String(session.id));
@@ -2424,6 +2430,10 @@ async function createOrActivateNewSession() {
   // task inside workspace A opens the next task inside A.
   const inheritedWorkspace = state.currentSession?.workspaceKind === 'default'
     ? '' : String(state.currentSession?.workspace || '').trim();
+  if (state.currentSession?.id && openRightSidebarTabs.some(tab => tab.type === 'browser' && tab.agentSessionId === state.currentSession.id)) {
+    await flushBrowserSessionState(state.currentSession.id);
+    if (loadToken !== sessionLoadToken) return null;
+  }
   const existing = inheritedWorkspace
     ? state.sessions.find(session => (
         isBlankNewChat(session)
@@ -19010,7 +19020,7 @@ function syncRightSidebarTabLayout() {
   // Measure all tabs before hiding the oldest prefix. A label is never
   // allowed to make the shared tab width grow without a cap.
   units.forEach(unit => { unit.hidden = false; });
-  const tabs = openRightSidebarTabs.slice(0, units.length);
+  const tabs = visibleRightSidebarTabs().slice(0, units.length);
   const naturalWidth = Math.max(...units.map((unit, index) => (
     measureRightSidebarTabWidth(tabs[index], unit.querySelector('[data-rs-tab]'))
   )));
@@ -19078,7 +19088,8 @@ function syncRightSidebarTabLayout() {
 function renderRightSidebarTabs() {
   const strip = $('#rightSidebarTabStrip');
   if (!strip) return;
-  strip.innerHTML = openRightSidebarTabs.map(tab => {
+  const visibleTabs = visibleRightSidebarTabs();
+  strip.innerHTML = visibleTabs.map(tab => {
     const meta = RIGHT_SIDEBAR_TOOLS[tab.type];
     const active = tab.id === activeRightSidebarTab;
     const label = String(tab.label || meta.label);
@@ -19093,7 +19104,7 @@ function renderRightSidebarTabs() {
     </div>`;
   }).join('');
 
-  const hasOpenTabs = openRightSidebarTabs.length > 0;
+  const hasOpenTabs = visibleTabs.length > 0;
   $('#rightSidebarAddWrap')?.classList.toggle('hidden', !hasOpenTabs);
   if (!hasOpenTabs) setRightSidebarAddMenuOpen(false);
   const hasActiveTab = !!getActiveRightSidebarTab();
@@ -19124,9 +19135,11 @@ function browserTabLabel(title, url = '') {
 function updateBrowserTabLabel(tabId, title, url = '') {
   const tab = openRightSidebarTabs.find(item => item.id === tabId && item.type === 'browser');
   if (!tab) return;
+  if (tab.restoringUrl && (!url || url === 'about:blank')) return;
   const label = browserTabLabel(title, url);
   if (tab.label === label) return;
   tab.label = label;
+  scheduleBrowserSessionSave(tab.agentSessionId);
 
   const unit = $(`[data-rs-tab-unit="${CSS.escape(tabId)}"]`);
   const tabButton = unit?.querySelector('[data-rs-tab]');
@@ -19160,6 +19173,7 @@ function updateBrowserTabFavicon(tabId, favicons = []) {
   const favicon = candidates.map(normalizeBrowserTabFavicon).find(Boolean) || '';
   if ((tab.favicon || '') === favicon) return;
   tab.favicon = favicon;
+  scheduleBrowserSessionSave(tab.agentSessionId);
 
   const unit = $(`[data-rs-tab-unit="${CSS.escape(tabId)}"]`);
   const iconHost = unit?.querySelector('.rs-work-tab-icon');
@@ -19170,7 +19184,7 @@ function updateBrowserTabFavicon(tabId, favicons = []) {
 }
 
 function getActiveRightSidebarTab() {
-  return openRightSidebarTabs.find(tab => tab.id === activeRightSidebarTab) || null;
+  return visibleRightSidebarTabs().find(tab => tab.id === activeRightSidebarTab) || null;
 }
 
 function createRightSidebarTab(tool, options = {}) {
@@ -19189,25 +19203,36 @@ function createRightSidebarTab(tool, options = {}) {
     return tab;
   }
   if (tool !== 'browser') return null;
-  const number = ++rightSidebarBrowserCounter;
+  const scope = currentBrowserScope();
+  const sessionId = String(options.agentSessionId || options.sessionId || scope.sessionId);
+  if (deletedBrowserSessionIds.has(sessionId)) return null;
+  const workspace = String(options.agentWorkspace ?? options.workspace ?? scope.workspace);
+  let tabId = String(options.id || '');
+  if (!/^browser-[a-zA-Z0-9_-]+$/.test(tabId) || openRightSidebarTabs.some(tab => tab.id === tabId)) {
+    do { tabId = `browser-${++rightSidebarBrowserCounter}`; }
+    while (openRightSidebarTabs.some(tab => tab.id === tabId));
+  }
+  const restoredCounter = Number(tabId.match(/^browser-(\d+)$/)?.[1]);
+  if (Number.isSafeInteger(restoredCounter)) rightSidebarBrowserCounter = Math.max(rightSidebarBrowserCounter, restoredCounter);
   const tab = {
-    id: `browser-${number}`,
+    id: tabId,
     type: 'browser',
-    label: '新标签页',
-    favicon: '',
+    label: String(options.title || '新标签页'),
+    favicon: normalizeBrowserTabFavicon(options.favicon || ''),
+    url: String(options.url || 'about:blank'),
+    persistedId: options.restoring === true ? String(options.id || '') : '',
+    restoringUrl: options.restoring === true ? String(options.url || '') : '',
     agentRunId: String(options.agentRunId || ''),
-    agentWorkspace: String(options.agentWorkspace || options.workspace || ''),
-    agentSessionId: String(options.agentSessionId || options.sessionId || ''),
-    agentScopeKey: browserScopeKey(
-      options.agentWorkspace || options.workspace || '',
-      options.agentSessionId || options.sessionId || ''
-    ),
+    agentWorkspace: workspace,
+    agentSessionId: sessionId,
+    agentScopeKey: browserScopeKey(workspace, sessionId),
     // Agent tabs outlive a single run. The run id is only the current
     // controller lease; agentOwned identifies tabs eligible for the next run.
     agentOwned: options.agentOwned === true || !!options.agentRunId
   };
   openRightSidebarTabs.push(tab);
   createBrowserTabController(tab);
+  if (!options.restoring) scheduleBrowserSessionSave(sessionId);
   return tab;
 }
 
@@ -19215,12 +19240,12 @@ function activateRightSidebarTab(tabId, { forceReview = true } = {}) {
   const tab = openRightSidebarTabs.find(item => item.id === tabId);
   if (!tab) return false;
   if (tab.type === 'browser' && !browserTabMatchesScope(tab)) {
-    setRightSidebarOpen(false);
     return false;
   }
   if (tab.type !== 'review') hideReviewQuickDiff();
   activeRightSidebarTab = tab.id;
   if (tab.type === 'browser') lastActiveBrowserTabId = tab.id;
+  rememberBrowserSessionSelection();
   renderRightSidebarTabs();
   updateBrowserFocusControls();
   setRightSidebarOpen(true);
@@ -19241,6 +19266,19 @@ function activateRightSidebarTab(tabId, { forceReview = true } = {}) {
 
 function openRightSidebarTool(tool, { reuseBrowser = false } = {}) {
   if (!RIGHT_SIDEBAR_TOOLS[tool]) return false;
+  if (tool === 'browser' && !state.currentSession?.id) {
+    void newSession().then(() => {
+      if (state.currentSession?.id) openRightSidebarTool(tool, { reuseBrowser });
+    });
+    return true;
+  }
+  const browserSessionId = currentBrowserScope().sessionId;
+  if (tool === 'browser' && !browserSessionRecord(browserSessionId).loaded) {
+    void ensureBrowserSessionState(browserSessionId).then(() => {
+      if (currentBrowserScope().sessionId === browserSessionId) openRightSidebarTool(tool, { reuseBrowser });
+    });
+    return true;
+  }
   if (tool === 'review') {
     rsReviewState.source = 'agent';
     rsReviewState.requestedSessionId = '';
@@ -19271,12 +19309,28 @@ function openRightSidebarTool(tool, { reuseBrowser = false } = {}) {
   return true;
 }
 
-function openBrowserUrlInNewTab(url) {
+function openBrowserUrlInNewTab(url, { sourceWebContentsId = 0 } = {}) {
   const targetUrl = String(url || '').trim();
   if (!/^(?:https?|file):/i.test(targetUrl)) return false;
-  const tab = createRightSidebarTab('browser');
+  if (!sourceWebContentsId && !state.currentSession?.id) {
+    void newSession().then(() => {
+      if (state.currentSession?.id) openBrowserUrlInNewTab(targetUrl);
+    });
+    return true;
+  }
+  const source = sourceWebContentsId ? [...browserTabControllers.values()].find(controller => {
+    try { return controller.webview.getWebContentsId() === Number(sourceWebContentsId); }
+    catch { return false; }
+  }) : null;
+  // A popup belongs to its source page, even when that chat is in the background.
+  // If the page closed before delivery, do not attach its popup to another chat.
+  if (sourceWebContentsId && !source) return false;
+  const tab = createRightSidebarTab('browser', source ? {
+    sessionId: source.agentSessionId,
+    workspace: source.agentWorkspace
+  } : {});
   if (!tab) return false;
-  activateRightSidebarTab(tab.id);
+  if (browserTabMatchesScope(tab)) activateRightSidebarTab(tab.id);
   const controller = getBrowserTabController(tab.id);
   controller?.navigate?.(targetUrl, { waitForLoad: true })
     .catch(error => toast(`网页加载失败：${error.message}`));
@@ -19287,6 +19341,7 @@ function closeRightSidebarTool(tool) {
   const index = openRightSidebarTabs.findIndex(tab => tab.id === tool);
   if (index < 0) return false;
   const [closedTab] = openRightSidebarTabs.splice(index, 1);
+  const visibleTabs = visibleRightSidebarTabs();
   if (closedTab.type === 'review') {
     rsReviewRenderVersion++;
     rsReviewPendingRender = null;
@@ -19297,18 +19352,27 @@ function closeRightSidebarTool(tool) {
   }
   if (closedTab.type === 'browser') destroyBrowserTabController(closedTab.id, { userInitiated: true });
   if (activeRightSidebarTab === tool) {
-    activeRightSidebarTab = openRightSidebarTabs[index - 1]?.id || openRightSidebarTabs[index]?.id || null;
+    activeRightSidebarTab = visibleTabs.at(-1)?.id || null;
   }
   if (lastActiveBrowserTabId === tool) {
-    lastActiveBrowserTabId = [...openRightSidebarTabs].reverse().find(tab => tab.type === 'browser')?.id || null;
+    lastActiveBrowserTabId = [...visibleTabs].reverse().find(tab => tab.type === 'browser')?.id || null;
   }
+  if (closedTab.type === 'browser') {
+    const saved = browserSessionRecord(closedTab.agentSessionId);
+    if (closedTab.persistedId || saved.loaded) saved.closedTabIds.add(closedTab.persistedId || closedTab.id);
+    if (saved.activeTabId === closedTab.id) saved.activeTabId = null;
+    if (saved.selectedPanelId === closedTab.id) saved.selectedPanelId = null;
+    scheduleBrowserSessionSave(closedTab.agentSessionId);
+  }
+  rememberBrowserSessionSelection();
   renderRightSidebarTabs();
   const active = getActiveRightSidebarTab();
   updateBrowserFocusControls();
   if (active?.type === 'review') void renderRightSidebarReview();
   if (active?.type === 'interjection') syncInterjectionUi();
   if (active?.type === 'browser') syncBrowserViewport(active.id);
-  if (!openRightSidebarTabs.length) setRightSidebarOpen(false);
+  if (!visibleTabs.length) setRightSidebarOpen(false);
+  if (closedTab.type === 'browser') void flushBrowserSessionState(closedTab.agentSessionId);
   return true;
 }
 
@@ -19470,7 +19534,7 @@ $('#reviewRefreshBtn')?.addEventListener('click', () => {
   void renderRightSidebarReview({ force: true });
 });
 api.onBrowserNewTabRequest?.(detail => {
-  openBrowserUrlInNewTab(detail?.url);
+  openBrowserUrlInNewTab(detail?.url, { sourceWebContentsId: detail?.sourceWebContentsId });
 });
 document.addEventListener('click', event => {
   const agentLink = event.target.closest?.('a[data-z-browser-link]');
@@ -23716,6 +23780,7 @@ async function applySessionWorkspace(workspace) {
       }
     }
     if (removed?.ok) {
+      disposeBrowserSessionState(targetSession.id);
       settleAgentInteractionsForSession(targetSession.id);
       state.sessions = state.sessions.filter(session => session.id !== targetSession.id);
       await loadSession(reusable.id);
@@ -24568,6 +24633,12 @@ const browserTabControllers = new Map();
 const agentBrowserTabsByRun = new Map();
 const blockedAgentBrowserRuns = new Map();
 let lastActiveBrowserTabId = null;
+// Guest pages remain mounted while chats switch, preserving page state/history.
+// Only their tab strip and active panel change; durable metadata is per chat.
+const browserSessionRecords = new Map();
+const deletedBrowserSessionIds = new Set();
+const browserDraftSessionId = `draft:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+let displayedBrowserSessionId = '';
 let browserFocusComposerObserver = null;
 const BROWSER_SCROLLBAR_CSS = `
   ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
@@ -24615,6 +24686,13 @@ function syncBrowserAddressInput(controller) {
 function setBrowserPageState(controller, url) {
   if (!controller) return;
   const displayUrl = getBrowserDisplayUrl(url);
+  const tab = openRightSidebarTabs.find(item => item.id === controller.id);
+  if (tab?.restoringUrl && !displayUrl) return;
+  if (tab && tab.url !== (displayUrl || 'about:blank')) {
+    tab.url = displayUrl || 'about:blank';
+    scheduleBrowserSessionSave(tab.agentSessionId);
+  }
+  if (tab && displayUrl) tab.restoringUrl = '';
   controller.currentUrl = displayUrl;
   if (!controller.addressEditing) {
     controller.addressDraft = displayUrl;
@@ -24899,32 +24977,235 @@ function browserWorkspaceKey(workspace) {
 }
 
 function browserScopeKey(workspace, sessionId = '') {
-  const workspaceKey = browserWorkspaceKey(workspace);
-  return workspaceKey ? `workspace:${workspaceKey}` : `session:${String(sessionId || '').trim()}`;
+  return `session:${String(sessionId || browserDraftSessionId).trim()}`;
 }
 
 function browserControllerMatchesScope(controller, { workspace = '', sessionId = '' } = {}) {
-  if (!controller?.agentOwned) return false;
-  const scope = browserScopeKey(workspace, sessionId);
-  return !!scope && controller.agentScopeKey === scope;
+  if (!controller) return false;
+  return controller.agentScopeKey === browserScopeKey(workspace, sessionId);
 }
 
 function browserTabMatchesScope(tab, scope = currentBrowserScope()) {
-  if (!tab?.agentOwned) return true;
+  if (tab?.type !== 'browser') return true;
   return !!tab.agentScopeKey && tab.agentScopeKey === browserScopeKey(scope.workspace, scope.sessionId);
+}
+
+function visibleRightSidebarTabs() {
+  return openRightSidebarTabs.filter(tab => browserTabMatchesScope(tab));
+}
+
+function disposeBrowserSessionState(sessionId) {
+  const id = String(sessionId || '').trim();
+  if (!id) return;
+  deletedBrowserSessionIds.add(id);
+  const saved = browserSessionRecords.get(id);
+  if (saved) {
+    saved.disposed = true;
+    saved.revision += 1;
+    clearTimeout(saved.saveTimer);
+    saved.saveTimer = 0;
+  }
+  browserSessionRecords.delete(id);
+  const tabIds = new Set(openRightSidebarTabs
+    .filter(tab => tab.type === 'browser' && tab.agentSessionId === id).map(tab => tab.id));
+  for (const controller of browserTabControllers.values()) {
+    if (controller.agentSessionId === id) tabIds.add(controller.id);
+  }
+  for (let index = openRightSidebarTabs.length - 1; index >= 0; index -= 1) {
+    if (tabIds.has(openRightSidebarTabs[index].id)) openRightSidebarTabs.splice(index, 1);
+  }
+  for (const tabId of tabIds) destroyBrowserTabController(tabId);
+  const visibleTabs = visibleRightSidebarTabs();
+  if (tabIds.has(activeRightSidebarTab)) activeRightSidebarTab = visibleTabs.at(-1)?.id || null;
+  if (tabIds.has(lastActiveBrowserTabId)) {
+    lastActiveBrowserTabId = [...visibleTabs].reverse().find(tab => tab.type === 'browser')?.id || null;
+  }
+  if (displayedBrowserSessionId === id) displayedBrowserSessionId = '';
+  renderRightSidebarTabs();
+  updateBrowserFocusControls();
+  if (!activeRightSidebarTab) setRightSidebarOpen(false);
+}
+
+function browserSessionRecord(sessionId) {
+  const id = String(sessionId || browserDraftSessionId);
+  if (!browserSessionRecords.has(id)) browserSessionRecords.set(id, {
+    loaded: false, loading: null, revision: 0, saveTimer: 0, saving: null,
+    lastSaved: '', closedTabIds: new Set(), activeTabId: null,
+    selectedPanelId: null, selectionKnown: false
+  });
+  return browserSessionRecords.get(id);
+}
+
+function browserSessionSnapshot(sessionId) {
+  const saved = browserSessionRecord(sessionId);
+  const tabs = openRightSidebarTabs.filter(tab => tab.type === 'browser' && tab.agentSessionId === sessionId);
+  const ids = new Set(tabs.map(tab => tab.id));
+  return {
+    version: 1,
+    tabs: tabs.map(tab => ({
+      id: tab.id, url: tab.url || 'about:blank', title: tab.label || '新标签页',
+      favicon: tab.favicon || '', agentOwned: tab.agentOwned === true,
+      workspace: tab.agentWorkspace || ''
+    })),
+    activeTabId: ids.has(saved.activeTabId) ? saved.activeTabId : null,
+    selectedTabId: ids.has(saved.selectedPanelId) ? saved.selectedPanelId : null
+  };
+}
+
+function rememberBrowserSessionSelection(sessionId = currentBrowserScope().sessionId, { passive = false } = {}) {
+  if (deletedBrowserSessionIds.has(sessionId)) return;
+  const saved = browserSessionRecord(sessionId);
+  // A transient empty panel while first restoring a chat is not a user choice.
+  if (passive && !saved.loaded && !saved.selectionKnown) return;
+  const active = openRightSidebarTabs.find(tab => tab.id === activeRightSidebarTab);
+  if (active?.type === 'browser' && active.agentSessionId !== sessionId) return;
+  saved.selectedPanelId = active?.id || null;
+  saved.selectionKnown = true;
+  if (active?.type === 'browser') saved.activeTabId = active.id;
+  scheduleBrowserSessionSave(sessionId);
+}
+
+function scheduleBrowserSessionSave(sessionId) {
+  if (!sessionId || sessionId.startsWith('draft:') || deletedBrowserSessionIds.has(sessionId)) return;
+  const saved = browserSessionRecord(sessionId);
+  saved.revision += 1;
+  clearTimeout(saved.saveTimer);
+  saved.saveTimer = setTimeout(() => { void flushBrowserSessionState(sessionId); }, 300);
+}
+
+async function flushBrowserSessionState(sessionId) {
+  if (!sessionId || sessionId.startsWith('draft:') || deletedBrowserSessionIds.has(sessionId)) return;
+  const saved = browserSessionRecord(sessionId);
+  clearTimeout(saved.saveTimer);
+  saved.saveTimer = 0;
+  await ensureBrowserSessionState(sessionId);
+  if (saved.disposed || browserSessionRecords.get(sessionId) !== saved) return;
+  if (saved.saving) {
+    await saved.saving;
+    if (saved.disposed || browserSessionRecords.get(sessionId) !== saved) return;
+    return flushBrowserSessionState(sessionId);
+  }
+  const snapshot = browserSessionSnapshot(sessionId);
+  const serialized = JSON.stringify(snapshot);
+  if (saved.lastSaved === serialized) return;
+  if (state.currentSession?.id === sessionId) state.currentSession.browserState = snapshot;
+  const summary = state.sessions.find(session => session.id === sessionId);
+  if (summary) summary.browserTabCount = snapshot.tabs.length;
+  // Old preload versions can still isolate mounted pages until normal restart.
+  if (typeof api.setSessionBrowserState !== 'function') return;
+  saved.saving = Promise.resolve(api.setSessionBrowserState(sessionId, snapshot))
+    .then(result => {
+      if (result?.ok) {
+        saved.lastSaved = serialized;
+        for (const tab of openRightSidebarTabs) {
+          if (tab.type === 'browser' && tab.agentSessionId === sessionId) tab.persistedId = tab.id;
+        }
+      }
+      else console.warn('[browser] could not save chat pages:', result?.code || 'unknown');
+    })
+    .catch(error => console.warn('[browser] could not save chat pages:', error.message))
+    .finally(() => { saved.saving = null; });
+  await saved.saving;
+}
+
+function restoreBrowserSessionSelection(sessionId) {
+  if (currentBrowserScope().sessionId !== sessionId || deletedBrowserSessionIds.has(sessionId)) return;
+  const saved = browserSessionRecord(sessionId);
+  const visible = visibleRightSidebarTabs();
+  const selected = visible.find(tab => tab.id === saved.selectedPanelId);
+  const current = visible.find(tab => tab.id === activeRightSidebarTab && tab.type !== 'browser');
+  activeRightSidebarTab = saved.selectionKnown ? selected?.id || null : current?.id || null;
+  lastActiveBrowserTabId = visible.find(tab => tab.id === saved.activeTabId)?.id
+    || [...visible].reverse().find(tab => tab.type === 'browser')?.id || null;
+  renderRightSidebarTabs();
+  updateBrowserFocusControls();
+  if (selected?.type === 'browser' && currentWindowView === 'main' && currentMainPage === 'chat') {
+    setRightSidebarOpen(true);
+    syncBrowserViewport(selected.id);
+  } else if (!activeRightSidebarTab) {
+    setRightSidebarOpen(false);
+  }
+}
+
+async function ensureBrowserSessionState(sessionId = currentBrowserScope().sessionId) {
+  if (deletedBrowserSessionIds.has(sessionId)) return null;
+  const saved = browserSessionRecord(sessionId);
+  if (saved.loaded) return saved;
+  if (saved.loading) return saved.loading;
+  if (!sessionId || sessionId.startsWith('draft:')) { saved.loaded = true; return saved; }
+  const startRevision = saved.revision;
+  const localState = state.currentSession?.id === sessionId ? state.currentSession.browserState : null;
+  saved.loading = (async () => {
+    let persisted = localState;
+    if (typeof api.getSessionBrowserState === 'function') {
+      try {
+        const result = await api.getSessionBrowserState(sessionId);
+        if (result?.ok) persisted = result.browserState;
+      } catch (error) { console.warn('[browser] could not restore chat pages:', error.message); }
+    }
+    if (saved.disposed || browserSessionRecords.get(sessionId) !== saved) return null;
+    const normalized = window.ZBrowserSessionState?.normalizeBrowserSessionState(persisted);
+    const idMap = new Map();
+    const navigation = [];
+    for (const descriptor of normalized?.tabs || []) {
+      if (saved.closedTabIds.has(descriptor.id)) continue;
+      // A new page can open while this read is pending and take browser-1.
+      // Its runtime ID does not mean it is the old persisted browser-1 page.
+      let tab = openRightSidebarTabs.find(item => item.persistedId === descriptor.id && item.agentSessionId === sessionId);
+      if (!tab) {
+        tab = createRightSidebarTab('browser', {
+          ...descriptor, sessionId, workspace: descriptor.workspace || '', restoring: true
+        });
+        const controller = tab && getBrowserTabController(tab.id);
+        if (controller && descriptor.url !== 'about:blank') navigation.push({ controller, url: descriptor.url });
+      }
+      if (tab) idMap.set(descriptor.id, tab.id);
+    }
+    if (normalized && saved.revision === startRevision) {
+      saved.activeTabId = idMap.get(normalized.activeTabId) || null;
+      saved.selectedPanelId = idMap.get(normalized.selectedTabId) || null;
+      saved.selectionKnown = true;
+    }
+    saved.loaded = true;
+    restoreBrowserSessionSelection(sessionId);
+    for (const { controller, url } of navigation) {
+      void controller.navigate(url, { waitForLoad: true }).catch(error => {
+        console.warn('[browser] restored page load failed:', error.message);
+      });
+    }
+    return saved;
+  })().finally(() => { saved.loading = null; });
+  return saved.loading;
+}
+
+function migrateBrowserTabOwners() {
+  const scope = currentBrowserScope();
+  for (const tab of openRightSidebarTabs) {
+    if (tab.type !== 'browser') continue;
+    if (!tab.agentSessionId || (tab.agentSessionId === browserDraftSessionId && state.currentSession?.id)) {
+      tab.agentSessionId = scope.sessionId;
+      tab.agentWorkspace ||= scope.workspace;
+    }
+    tab.agentScopeKey = browserScopeKey(tab.agentWorkspace, tab.agentSessionId);
+    const controller = getBrowserTabController(tab.id);
+    if (controller) {
+      controller.agentSessionId = tab.agentSessionId;
+      controller.agentWorkspace = tab.agentWorkspace;
+      controller.agentScopeKey = tab.agentScopeKey;
+    }
+  }
 }
 
 function currentBrowserScope() {
   const session = state.currentSession;
   return {
     workspace: session ? (session.workspace || '') : (state.config?.workspace || ''),
-    sessionId: session?.id || ''
+    sessionId: session?.id || browserDraftSessionId
   };
 }
 
 function browserControllerVisibleInCurrentSession(controller) {
   if (currentWindowView !== 'main' || currentMainPage !== 'chat') return false;
-  if (!controller?.agentOwned) return true;
   return browserControllerMatchesScope(controller, currentBrowserScope());
 }
 
@@ -24936,16 +25217,17 @@ function getAgentBrowserController(runId = '', scope = null) {
     if (controller && (!scope || browserControllerMatchesScope(controller, scope))) return controller;
     return null;
   }
-  const active = getBrowserTabController();
-  if (active) return active;
-  return getBrowserTabController(lastActiveBrowserTabId)
-    || [...browserTabControllers.values()].at(-1)
-    || null;
+  const requestedScope = scope || currentBrowserScope();
+  const candidates = [...browserTabControllers.values()].filter(controller => browserControllerMatchesScope(controller, requestedScope));
+  return candidates.find(controller => controller.id === activeRightSidebarTab)
+    || candidates.find(controller => controller.id === lastActiveBrowserTabId)
+    || candidates.at(-1) || null;
 }
 
 function getReusableAgentBrowserController(scope = currentBrowserScope()) {
   const candidates = [...browserTabControllers.values()].filter(controller => (
     browserControllerMatchesScope(controller, scope)
+      && controller.agentOwned
       && controller.agentControlActive !== true
       && controller.agent
       && controller.webview
@@ -25080,12 +25362,19 @@ function releaseBrowserAgentControl(runId, { userReleased = false, skipAgentRele
 }
 
 function syncAgentBrowserVisibility() {
-  const active = getActiveRightSidebarTab();
-  if (active?.type !== 'browser') return;
-  const controller = getBrowserTabController(active.id);
-  if (controller?.agentOwned && !browserControllerVisibleInCurrentSession(controller)) {
-    setRightSidebarOpen(false);
+  migrateBrowserTabOwners();
+  const sessionId = currentBrowserScope().sessionId;
+  if (displayedBrowserSessionId && displayedBrowserSessionId !== sessionId) {
+    rememberBrowserSessionSelection(displayedBrowserSessionId, { passive: true });
+    void flushBrowserSessionState(displayedBrowserSessionId);
+    closeAllBrowserSettingsMenus();
+    for (const controller of browserTabControllers.values()) {
+      if (!browserControllerMatchesScope(controller, currentBrowserScope())) controller.annotations?.stop();
+    }
   }
+  displayedBrowserSessionId = sessionId;
+  restoreBrowserSessionSelection(sessionId);
+  void ensureBrowserSessionState(sessionId);
 }
 
 document.addEventListener('keydown', event => {
@@ -25168,6 +25457,10 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
     workspace: String(runCtx?.workspace || ''),
     sessionId: String(runCtx?.sessionId || '')
   };
+  if (!scope.sessionId) {
+    return { ok: false, error: '内置浏览器缺少所属对话身份。', code: 'BROWSER_SESSION_ID_REQUIRED' };
+  }
+  await ensureBrowserSessionState(scope.sessionId);
   let url = '';
   try {
     url = await resolveBrowserUrl(urlOrPath, runCtx);
@@ -25176,7 +25469,7 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
   }
   if (!url) return { ok: false, error: '请提供 URL 或文件路径' };
 
-  if (currentWindowView === 'main') {
+  if (currentWindowView === 'main' && scope.sessionId === currentBrowserScope().sessionId) {
     window.ZUnderstandAnything?.close();
     switchSidebarNav('tasks');
   }
@@ -25195,6 +25488,7 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
     browser = getBrowserTabController(tab.id);
     created = true;
   }
+  renderRightSidebarTabs();
   if (!browser?.navigate) return { ok: false, error: '浏览器尚未初始化，请稍后重试' };
   if (browserControllerVisibleInCurrentSession(browser)) {
     activateRightSidebarTab(browser.id);
@@ -25249,7 +25543,8 @@ async function executeBrowserAgentCommand(detail = {}) {
     return agentOpenBuiltinBrowser(target, {
       runId,
       operationId,
-      runCtx: runCtx || {
+      runCtx: {
+        ...(runCtx || {}),
         runId,
         workspace: scope.workspace,
         sessionId: scope.sessionId
@@ -25266,6 +25561,7 @@ async function executeBrowserAgentCommand(detail = {}) {
   let controller = getAgentBrowserController(runId, scope);
   if (runCtx?.browserAnnotation) {
     const annotated = browserTabControllers.get(runCtx.browserAnnotation.tabId);
+    if (!browserControllerMatchesScope(annotated, scope)) return {ok:false,error:'注释页面不属于当前任务对话'};
     if (!annotated || annotated.webview.getURL() !== runCtx.browserAnnotation.url) return {ok:false,error:'注释原页面已关闭或跳转，请重新选择元素'};
     if (annotated.agentControlActive && annotated.agentRunId !== runId) return {ok:false,error:'注释页面正被其他任务操控'};
     controller = annotated;
@@ -25275,10 +25571,13 @@ async function executeBrowserAgentCommand(detail = {}) {
   // to a run. Rebind an idle Agent-owned tab when a sequential task starts
   // with snapshot/status/read_page instead of opening it again.
   if (!controller) {
+    await ensureBrowserSessionState(scope.sessionId);
     controller = getReusableAgentBrowserController(scope);
     if (controller) {
-      activateRightSidebarTab(controller.id);
-      setRightSidebarOpen(true);
+      if (browserControllerVisibleInCurrentSession(controller)) {
+        activateRightSidebarTab(controller.id);
+        setRightSidebarOpen(true);
+      }
       setBrowserAgentControl(controller, true, { runId });
     }
   }
@@ -25295,7 +25594,9 @@ async function executeBrowserAgentCommand(detail = {}) {
     try {
       return await agent.enqueueAction(operationId, operation);
     } finally {
-      if (controller.agentControlActive) controller.agentInputShield?.focus({ preventScroll: true });
+      if (controller.agentControlActive && browserControllerVisibleInCurrentSession(controller)) {
+        controller.agentInputShield?.focus({ preventScroll: true });
+      }
     }
   };
 
@@ -25476,6 +25777,7 @@ function createBrowserTabController(tab) {
   controller.annotations = window.ZBrowserAnnotations?.init(controller, {
     notify: message => toast(message),
     onAdd: async note => {
+      if (!browserControllerVisibleInCurrentSession(controller)) return { ok: false, error: '请先回到此网页所属的对话再发送注释' };
       if (isCurrentSessionExecutionActive() || !canStartRun()) return { ok: false, error: '当前任务正在执行，请结束后重试；注释已保留' };
       const modelSelection = normalizeModelSelectionSnapshot(getAgentModelSelection());
       if (modelSelection.modelType && modelSelection.modelType !== 'text') return { ok: false, error: '请先选择文本模型' };

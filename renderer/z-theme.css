@@ -4,13 +4,31 @@
 .composer-toolbar-controls { flex-wrap: wrap; min-width: 0; gap: 6px; height: auto; min-height: 36px; flex: 0 0 auto; }
 .composer-toolbar-controls .z-connection-pill { max-width: 170px; min-width: 0; gap: 5px; font-size: 12px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 9px; }
 .z-connection-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#modelQuickMenu { display: flex; flex-direction: column; width: min(300px, calc(100vw - 32px)); overflow-y: auto; }
+#modelQuickMenu {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 32px));
+  height: auto;
+  max-height: min(640px, calc(100dvh - 140px));
+  padding: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 /* The chat shortcut must not cover controls in the expanded model menu. */
 #composer:has(#modelQuickMenu:not(.hidden)) .chat-scroll-resume-host { visibility: hidden; }
 .model-quick-supplier-field { padding: 6px 4px 10px; flex-shrink: 0; }
 .model-quick-supplier-field label, .model-quick-field-label { display: block; margin: 0 0 6px; font-size: 12px; color: var(--text-dim); }
 #modelQuickSupplier { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--bg); font: inherit; font-size: 13px; }
-#modelQuickModelsView { order: 1; max-height: min(210px, 45vh); }
+#modelQuickModelsView { order: 1; flex: 0 0 auto; max-height: none; }
+#modelQuickModelsView #modelQuickList {
+  flex: 0 1 auto;
+  min-height: 136px;
+  max-height: 300px;
+  scrollbar-gutter: stable;
+}
+#modelQuickList .model-quick-item { flex: 0 0 auto; min-height: 38px; padding: 8px; line-height: 1.4; }
+#modelQuickList .model-quick-name { white-space: normal; overflow-wrap: anywhere; }
 #modelQuickDefaultView { order: 2; flex-shrink: 0; border-top: 1px solid var(--border); padding-top: 8px; }
 #modelPickerMenuNotice { order: 3; }
 .z-output-limit-control { margin: 10px 4px 4px; }

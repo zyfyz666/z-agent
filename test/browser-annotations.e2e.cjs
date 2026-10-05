@@ -2,7 +2,8 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('nod
 const {pathToFileURL}=require('node:url'),{_electron:electron}=require('playwright');
 (async()=>{let app;const root=path.resolve(__dirname,'..'),data=fs.mkdtempSync(path.join(os.tmpdir(),'z-annotations-'));try{
 app=await electron.launch({executablePath:require('electron'),args:[root],cwd:root,env:{...process.env,Z_E2E_MODE:'1',Z_E2E_USER_DATA_DIR:data}});
-const page=await app.firstWindow();await page.waitForFunction(()=>typeof createRightSidebarTab==='function'&&state.currentSession);
+const page=await app.firstWindow();await page.waitForFunction(()=>typeof quickInputHandlerReady!=='undefined'&&quickInputHandlerReady&&state.currentSession);
+await page.evaluate(()=>ensureBrowserSessionState(state.currentSession.id));
 const id=await page.evaluate(async url=>{const tab=createRightSidebarTab('browser');activateRightSidebarTab(tab.id);const c=browserTabControllers.get(tab.id);await c.navigate(url,{waitForLoad:true});return tab.id;},pathToFileURL(path.join(root,'test/fixtures/browser-agent.html')).href);
 const panel=page.locator('[data-browser-tab-id="'+id+'"]');
 page.on('pageerror',e=>console.error(e.message));

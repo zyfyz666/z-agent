@@ -267,6 +267,7 @@ test('first-message rewind with a default title survives blank-chat cleanup whil
   const blank = { id: 'blank', title: '新对话', messageCount: 0, workspaceKind: 'default' };
   const deleted = [];
   const context = vm.createContext({ state: { currentSession: blank, sessions: [], composerDrafts: new Map(), queuedTurns: new Map() },
+    openRightSidebarTabs: [],
     api: { listSessions: async () => [rewound, blank], deleteSession: async id => { deleted.push(id); return { ok: true }; } },
     renderSessionList() {}, clearZCoreQueuedIntentsForThread() {} });
   vm.runInContext(section('function isDefaultSessionTitle(', 'function syncCurrentSessionWorkspace('), context);

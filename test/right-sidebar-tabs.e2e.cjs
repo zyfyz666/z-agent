@@ -41,7 +41,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-right-sidebar-tabs-
       browser.label = 'A long browser page title';
       createRightSidebarTab('review');
       createRightSidebarTab('interjection');
-      openRightSidebarTabs.push({ id: 'browser-extra', type: 'browser', label: 'Extra browser tab', favicon: '' });
+      createRightSidebarTab('browser', { id: 'browser-extra', title: 'Extra browser tab' });
       activeRightSidebarTab = openRightSidebarTabs.at(-1).id;
 
       const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -70,7 +70,7 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-right-sidebar-tabs-
       const base = inspect();
 
       for (let index = 0; index < 8; index += 1) {
-        openRightSidebarTabs.push({ id: `browser-extra-${index}`, type: 'browser', label: `Extra browser page ${index}`, favicon: '' });
+        createRightSidebarTab('browser', { id: `browser-extra-${index}`, title: `Extra browser page ${index}` });
       }
       activeRightSidebarTab = openRightSidebarTabs.at(-1).id;
       renderRightSidebarTabs();

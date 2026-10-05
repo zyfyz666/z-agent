@@ -50,6 +50,7 @@ function externalChangeFixture(t) {
     loadSession: async id => { effects.push(['load', id]); context.state.currentSession = source; },
     syncAgentInteractionPanel() {}, syncPetFocusedSession() {}, updateTaskBar() {}, updateSendState() {},
     renderModelBadge() {}, syncAgentBrowserVisibility() {}, renderSessionList() {},
+    disposeBrowserSessionState: id => effects.push(['dispose-browser', id]),
     sessionModelSelectionVersions: new Map(),
     api: { getSession: async id => JSON.parse(fs.readFileSync(path.join(directory, `${id}.json`), 'utf8')) }
   });
@@ -119,7 +120,7 @@ test('deleting a viewed backup still clears its draft and queued intent and open
   assert.equal(f.context.state.composerDrafts.has(f.backup.id), false);
   assert.equal(f.context.state.queuedTurns.has(f.backup.id), false);
   assert.deepEqual(f.effects, [
-    ['settle', f.backup.id], ['clear-intents', f.backup.id], ['restore-draft', ''],
+    ['dispose-browser', f.backup.id], ['settle', f.backup.id], ['clear-intents', f.backup.id], ['restore-draft', ''],
     ['clear-messages'], ['empty-state', true], ['load', f.source.id]
   ]);
 });
