@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
-const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
 
 const source = fs.readFileSync(path.join(__dirname, '../build/installer.nsh'), 'utf8');
 const clear = source.match(/  Function un\.ZClearData\r?\n[\s\S]*?  FunctionEnd/)?.[0];
@@ -16,7 +15,7 @@ assert.match(source, /SetFont "Microsoft YaHei UI" 9/);
 assert.match(source, /taskkill\.exe" \/F \/T \/IM "\$\{APP_EXECUTABLE_FILENAME\}"/);
 assert.doesNotMatch(source, /\/IM "(?:Z Agent|z-agent)\.exe"/);
 assert.deepEqual([...clear.matchAll(/Push "\$(APPDATA|LOCALAPPDATA)\\([^"\r\n]+)"/g)].map(match => [match[1], match[2]]), [
-  ['APPDATA', 'wd-agent'], ['APPDATA', 'WD Agent'], ['LOCALAPPDATA', 'wd-agent'], ['LOCALAPPDATA', 'WD Agent']
+  ['APPDATA', 'Z'], ['LOCALAPPDATA', 'Z']
 ]);
 assert.doesNotMatch(clear, /\$TEMP\b|z-agent|Z Agent|ZAgent/,
   'cleanup must not target upstream profiles or shared temporary files');
@@ -40,13 +39,13 @@ function findNsis() {
 function runIsolatedFixture(nsis) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-uninstaller-test-'));
   const quoteNsis = value => value.replaceAll('$', '$$');
-  const targetDirs = ['roaming/wd-agent', 'roaming/WD Agent', 'local/wd-agent', 'local/WD Agent'];
+  const targetDirs = ['roaming/Z', 'local/Z'];
   const preservedDirs = [
     'roaming/z-agent', 'roaming/Z Agent', 'local/z-agent', 'local/Z Agent',
     'local/z-agent-updater', 'temp/ZAgent', 'temp/z-agent-update',
     'temp/z-dsh-code-review', 'workspace/project', 'roaming/OtherApp'
   ];
-  const preservedFiles = [`temp/${LEGACY_NAMESPACE.agentHyphen}-${LEGACY_NAMESPACE.lower}xi-code-workspace.json`];
+  const preservedFiles = ['temp/z-code-workspace.json'];
   // Never run the real uninstaller. Every filesystem root is redirected into
   // this fixture; process termination and PATH modification are not invoked.
   const isolated = source
@@ -82,7 +81,7 @@ Section "Uninstall"
  IfFileExists "${quoteNsis(root)}\\preserve-test" 0 +2
  StrCpy $ZClearDataRequested "0"
  IfFileExists "${quoteNsis(root)}\\lock-test" 0 +2
- System::Call 'Kernel32::CreateFileW(w "${quoteNsis(root)}\\roaming\\wd-agent\\locked.txt", i 0x80000000, i 0, p 0, i 3, i 0, p 0) p.r9'
+ System::Call 'Kernel32::CreateFileW(w "${quoteNsis(root)}\\roaming\\Z\\locked.txt", i 0x80000000, i 0, p 0, i 3, i 0, p 0) p.r9'
  !insertmacro customUnInstall
  IfFileExists "${quoteNsis(root)}\\lock-test" 0 +2
  System::Call 'Kernel32::CloseHandle(p r9)'
@@ -115,7 +114,7 @@ SectionEnd
     for (const rel of targetDirs) assert.equal(fs.existsSync(path.join(root, rel)), false, rel + ' must be removed');
     assertPreserved();
     assert.equal(run(path.join(root, 'uninstall.exe'), ['/S', `_?=${root}`]).status, 0, 'missing paths should not fail');
-    const retained = path.join(root, 'roaming/wd-agent');
+    const retained = path.join(root, 'roaming/Z');
     fs.mkdirSync(retained, { recursive: true });
     fs.writeFileSync(path.join(retained, 'locked.txt'), 'fixture');
     fs.writeFileSync(path.join(root, 'preserve-test'), '');
@@ -126,7 +125,7 @@ SectionEnd
     assert.equal(run(path.join(root, 'uninstall.exe'), ['/S', `_?=${root}`]).status, 1, 'locked file must report failure');
     assert.ok(fs.existsSync(path.join(retained, 'locked.txt')));
     assertPreserved();
-    console.log('NSIS fixture passed: 4 fork profiles removed; upstream profiles, shared caches and unrelated data preserved; unchecked retained, missing skipped, locked file reported failure.');
+    console.log('NSIS fixture passed: both Z profiles removed; upstream profiles, shared caches and unrelated data preserved; unchecked retained, missing skipped, locked file reported failure.');
   } finally {
     const resolved = path.resolve(root);
     assert.equal(path.dirname(resolved), path.resolve(os.tmpdir()));

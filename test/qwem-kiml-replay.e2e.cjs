@@ -55,7 +55,7 @@ const server = http.createServer((req, res) => {
         if (step === 0 || (!child && step === 1)) {
           const name = step === 0 ? 'read' : 'task';
           const args = name === 'read' ? { filePath: file } : { subagent_type: 'explorer', description: 'Inspect fixture',
-            prompt: childMarker + ': read ' + file + '\nyan-plan: {"id":"inspect","acceptance":"fixture read"}' };
+            prompt: childMarker + ': read ' + file + '\nz-plan: {"id":"inspect","acceptance":"fixture read"}' };
           emit({ tool_calls: [{ index: 0, id: `${child ? 'child' : 'parent'}-${step}-${counts.parent + counts.child}`,
             type: 'function', function: { name, arguments: JSON.stringify(args) } }] });
           emit({}, 'tool_calls');

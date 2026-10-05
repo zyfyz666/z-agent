@@ -7,7 +7,6 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 const worktrees = require('../lib/worktree-service');
-const { LEGACY_STORAGE } = require('../lib/legacy-compat');
 
 function git(root, args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -155,11 +154,11 @@ test('concurrent task merges serialize and retain both results', async t => {
   assert.equal(git(root, ['status', '--porcelain']).trim(), '');
 });
 
-test('registered preceding-format worktrees stay in place and remain manageable', async t => {
+test('worktrees registered directly with git stay in place and remain manageable', async t => {
   const root = makeRepo(t);
   const taskId = 'existing-task';
-  const directory = path.join(root, LEGACY_STORAGE.workspaceDir, 'worktrees', taskId);
-  const branch = `${LEGACY_STORAGE.worktreeBranchPrefix}${taskId}`;
+  const directory = path.join(worktrees.worktreeRoot(root), taskId);
+  const branch = `z-task-${taskId}`;
   fs.mkdirSync(path.dirname(directory), { recursive: true });
   git(root, ['worktree', 'add', '-b', branch, directory]);
   const beforeRegistration = fs.readFileSync(path.join(directory, '.git'), 'utf8');
@@ -175,7 +174,7 @@ test('registered preceding-format worktrees stay in place and remain manageable'
   assert.equal(listed[0].branch, branch);
   assert.equal((await worktrees.taskWorktreeStatus(root, { taskId })).dirty, false);
   await assert.rejects(() => worktrees.createTaskWorktree(root, { taskId }), error => error.code === 'WORKTREE_EXISTS');
-  assert.equal(fs.existsSync(path.join(worktrees.worktreeRoot(root), taskId)), false);
+  assert.equal((await worktrees.listTaskWorktrees(root)).length, 1);
   assert.equal(fs.readFileSync(path.join(directory, '.git'), 'utf8'), beforeRegistration);
 
   fs.writeFileSync(path.join(directory, 'compat.txt'), 'preserved work');
@@ -184,35 +183,33 @@ test('registered preceding-format worktrees stay in place and remain manageable'
   git(directory, ['add', 'compat.txt']);
   git(directory, ['commit', '-m', 'preserved work']);
   const merged = await worktrees.mergeTaskWorktree(root, { taskId });
-  assert.equal(merged.merged, true, 'the former metadata directory is excluded from main-tree dirtiness');
+  assert.equal(merged.merged, true, 'the .zagent metadata directory is excluded from main-tree dirtiness');
   assert.equal(fs.readFileSync(path.join(root, 'compat.txt'), 'utf8'), 'preserved work');
   const removed = await worktrees.removeTaskWorktree(root, { taskId });
   assert.equal(removed.removed, true);
   assert.equal(removed.branchKept, false);
 });
 
-test('both worktree namespaces are discovered, but external checkouts are not adopted', async t => {
+test('only .zagent task worktrees are discovered; external checkouts are not adopted', async t => {
   const root = makeRepo(t);
-  const previous = path.join(root, LEGACY_STORAGE.workspaceDir, 'worktrees', 'previous');
   const external = path.join(root, 'outside-worktrees', 'unrelated');
-  for (const directory of [previous, external]) fs.mkdirSync(path.dirname(directory), { recursive: true });
-  git(root, ['worktree', 'add', '-b', `${LEGACY_STORAGE.worktreeBranchPrefix}previous`, previous]);
+  fs.mkdirSync(path.dirname(external), { recursive: true });
   git(root, ['worktree', 'add', '-b', 'unrelated-branch', external]);
   const created = await worktrees.createTaskWorktree(root, { taskId: 'current' });
   assert.equal(path.dirname(created.path), path.join(root, '.zagent', 'worktrees'));
   assert.equal(created.branch, 'z-task-current');
   const list = await worktrees.listTaskWorktrees(root);
-  assert.deepEqual(list.map(entry => entry.taskId).sort(), ['current', 'previous']);
-  assert.ok(fs.existsSync(path.join(previous, '.git')));
+  assert.deepEqual(list.map(entry => entry.taskId), ['current']);
   assert.ok(fs.existsSync(path.join(external, '.git')));
 });
 
-test('duplicate task identities in two registered namespaces refuse destructive management', async t => {
+test('a task id matching two registered worktrees refuses destructive management', async t => {
   const root = makeRepo(t);
-  await worktrees.createTaskWorktree(root, { taskId: 'duplicate' });
-  const previous = path.join(root, LEGACY_STORAGE.workspaceDir, 'worktrees', 'duplicate');
-  fs.mkdirSync(path.dirname(previous), { recursive: true });
-  git(root, ['worktree', 'add', '-b', `${LEGACY_STORAGE.worktreeBranchPrefix}duplicate`, previous]);
+  const byDirectory = path.join(worktrees.worktreeRoot(root), 'duplicate');
+  const byBranch = path.join(worktrees.worktreeRoot(root), 'second');
+  fs.mkdirSync(worktrees.worktreeRoot(root), { recursive: true });
+  git(root, ['worktree', 'add', '-b', 'manual-branch', byDirectory]);
+  git(root, ['worktree', 'add', '-b', 'z-task-duplicate', byBranch]);
   await assert.rejects(() => worktrees.removeTaskWorktree(root, { taskId: 'duplicate' }), error => error.code === 'WORKTREE_AMBIGUOUS');
   assert.equal((await worktrees.listTaskWorktrees(root)).length, 2);
 });

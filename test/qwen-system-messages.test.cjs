@@ -5,12 +5,12 @@ test('Qwen gateway aliases receive one initial system message without losing ins
   const { shapeQwenRequestBody } = await import('../lib/qwen-request-shaping.mjs');
   const original = { model: 'Qwen', messages: [
     { role: 'system', content: 'Kernel instructions' },
-    { role: 'system', content: 'WD Agent instructions' },
+    { role: 'system', content: 'Z instructions' },
     { role: 'user', content: 'Fix the bug' }
   ] };
   const actual = shapeQwenRequestBody(original, { singleSystemMessage: true });
   assert.deepEqual(actual.messages, [
-    { role: 'system', content: 'Kernel instructions\n\nWD Agent instructions' }, original.messages[2]
+    { role: 'system', content: 'Kernel instructions\n\nZ instructions' }, original.messages[2]
   ]);
   assert.equal(original.messages.length, 3);
   assert.equal(shapeQwenRequestBody(original), original, 'other gateways keep their existing contract');

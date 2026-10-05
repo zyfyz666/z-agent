@@ -1,9 +1,9 @@
 (function (root, factory) {
   'use strict';
-  const content = factory(typeof module === 'object' && module.exports ? require('../lib/legacy-compat') : root.ZLegacyCompat);
+  const content = factory();
   if (typeof module === 'object' && module.exports) module.exports = content;
   else root.ZProductContent = content;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (compat) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
   const translations = {};
@@ -132,8 +132,7 @@
   ];
 
   function normalizeUserName(value) {
-    const name = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 32);
-    return name.toLowerCase() === `${compat.LEGACY_NAMESPACE.lower}xi` ? '' : name;
+    return String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 32);
   }
   function greeting(value, language = 'zh-CN') {
     const name = normalizeUserName(value);

@@ -8,9 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
-const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
-const previousCodeApp = `${LEGACY_NAMESPACE.title}xi Code`;
-const previousCodeAppSelector = `#taskBar${LEGACY_NAMESPACE.title}xiCode`;
+const { findObsoleteBrand } = require('./helpers/obsolete-brand.cjs');
 
 const appRoot = path.resolve(__dirname, '..');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-task-bar-e2e-'));
@@ -31,13 +29,15 @@ const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-task-bar-e2e-'));
     const page = await application.firstWindow();
     await page.locator('#taskBar:not(.hidden)').waitFor();
 
-    assert.equal(await page.locator(previousCodeAppSelector).count(), 0, 'the former code app entry must be removed');
-    assert.equal(await page.locator('.task-tool-item', { hasText: previousCodeApp }).count(), 0);
+    const taskBarIds = await page.locator('#taskBar [id]').evaluateAll(elements => elements.map(element => element.id));
+    assert.deepEqual(taskBarIds.filter(id => findObsoleteBrand(id).length), [], 'the former code app entry must be removed');
+    const toolItems = await page.locator('.task-tool-item').allInnerTexts();
+    assert.deepEqual(toolItems.filter(text => findObsoleteBrand(text).length), []);
 
     await page.locator('#taskToolsMenuToggle').click();
     await page.locator('#taskToolsMenu:not(.hidden)').waitFor();
     const labels = await page.locator('#taskToolsMenu .task-tool-item strong').allInnerTexts();
-    assert.ok(!labels.includes(previousCodeApp), `tools menu still lists the former code app: ${labels.join(', ')}`);
+    assert.ok(!labels.some(label => findObsoleteBrand(label).length), `tools menu still lists the former code app: ${labels.join(', ')}`);
     assert.ok(labels.includes('终端') && labels.includes('资源管理器'));
     assert.ok(labels.includes('VS Code'));
     await page.keyboard.press('Escape');

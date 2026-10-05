@@ -6,7 +6,7 @@ const vm = require('vm');
 
 const appRoot = path.resolve(__dirname, '..');
 const skillRegistry = require('../lib/skill-registry');
-const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
+const { findObsoleteBrand } = require('./helpers/obsolete-brand.cjs');
 const categoryIds = [
   'code-assist',
   'ui-beautify',
@@ -219,9 +219,8 @@ function assertRetiredMigration() {
     const displayed = skillRegistry.getAllSkillsForCatalog(cfg, appRoot, dataDir);
     assert.strictEqual(displayed.find(skill => skill.id === 'z-prompt-optimizer').name, 'Z Prompt Optimizer');
     assert.strictEqual(displayed.find(skill => skill.id === 'z-understand-anything').name, '项目地图');
-    const obsoleteBrand = new RegExp(`\\b${LEGACY_NAMESPACE.title}(?:[ -]Agent)?\\b`, 'i');
     for (const skill of displayed.filter(skill => !skill.hidden)) {
-      assert.ok(!obsoleteBrand.test(`${skill.name} ${skill.desc}`), `${skill.id} exposes obsolete product branding`);
+      assert.deepStrictEqual(findObsoleteBrand(`${skill.name} ${skill.desc}`), [], `${skill.id} exposes obsolete product branding`);
     }
 
     const companion = skillRegistry.readSkill('hyperframes-cli', 'render this composition', cfg, appRoot, dataDir);

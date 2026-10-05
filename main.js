@@ -4,7 +4,6 @@ configureSoftwareRendering(app);
 const path = require('path');
 const os = require('os');
 const storageLayout = require('./lib/storage-layout');
-const { LEGACY_STORAGE, normalizeProviderEvent } = require('./lib/legacy-compat');
 const { agiEnabled, evolutionEnabled, isolateWorkMode } = require('./lib/work-mode-isolation');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -167,13 +166,11 @@ if (e2eUserDataDir) {
   fs.mkdirSync(e2eUserDataDir, { recursive: true });
   app.setPath('userData', path.resolve(e2eUserDataDir));
 } else if (typeof app.setPath === 'function' && typeof app.getPath === 'function') {
-  // Keep the pre-Z profile in place. Electron would otherwise switch to a new
-  // directory after the package/product rename, hiding existing settings and
-  // sessions. macOS already used the packaged profile even for source runs.
-  const legacyProfileName = app.isPackaged || process.platform === 'darwin' ? 'WD Agent' : 'wd-agent';
-  const legacyUserDataDir = path.join(app.getPath('appData'), legacyProfileName);
-  fs.mkdirSync(legacyUserDataDir, { recursive: true });
-  app.setPath('userData', legacyUserDataDir);
+  // One profile for source and packaged runs on every platform, independent
+  // of the package name Electron would otherwise derive it from.
+  const userDataDir = path.join(app.getPath('appData'), 'Z');
+  fs.mkdirSync(userDataDir, { recursive: true });
+  app.setPath('userData', userDataDir);
 }
 if (typeof app.setName === 'function') app.setName('Z');
 
@@ -334,9 +331,9 @@ function recoveryRendererEvent(coreEvent) {
   const payload = coreEvent?.payload;
   if (!payload || typeof payload !== 'object' || !payload.rawType) return null;
   const raw = payload.raw;
-  if (raw && typeof raw === 'object' && typeof raw.type === 'string' && raw.type) return normalizeProviderEvent(raw);
+  if (raw && typeof raw === 'object' && typeof raw.type === 'string' && raw.type) return raw;
   if (payload.data && typeof payload.data === 'object') {
-    return normalizeProviderEvent({ type: String(payload.rawType), data: payload.data });
+    return { type: String(payload.rawType), data: payload.data };
   }
   return null;
 }
@@ -1305,7 +1302,7 @@ async function refreshBrowserNetworkSession(url = 'https://example.com', { reset
 // ---------------------------------------------------------------------------
 // Paths & storage
 // ---------------------------------------------------------------------------
-// 新安装使用 ZData；已有数据保持原位置，升级不会创建空白档案。
+// 数据统一放在 userData/ZData。
 const userDataDir = app.getPath('userData');
 const STABLE_DATA_DIR = storageLayout.dataRoot(userDataDir);
 
@@ -1318,7 +1315,7 @@ async function migrateLegacyDataDir() {
   let bestDir = null;
   let bestMtime = 0;
   for (const name of names) {
-    if (!name.startsWith('ZData-') && !name.startsWith(LEGACY_STORAGE.versionedDataDirPrefix)) continue;
+    if (!name.startsWith('ZData-')) continue;
     const candidate = path.join(userDataDir, name);
     const cfg = path.join(candidate, 'config.json');
     if (!fs.existsSync(cfg)) continue;
@@ -1432,7 +1429,6 @@ const skillsDir = skillRegistry.getZSkillDirectory(dataDir);
 const generatedImageStoreDir = path.join(dataDir, 'generated-images');
 const generatedVideoStoreDir = path.join(dataDir, 'generated-videos');
 const generatedMediaManifestDir = path.join(dataDir, 'generated-media');
-const legacyGeneratedImageTempDir = path.join(app.getPath('temp'), LEGACY_STORAGE.generatedImageTempDir, 'generated-images');
 const memoryPath = path.join(dataDir, 'memory.json');
 const skillEvolutionPath = path.join(dataDir, 'skill-evolution.json');
 const continualHarnessPath = path.join(dataDir, 'harness', 'harness-state.json');
@@ -1468,14 +1464,6 @@ const GENERATED_IMAGE_MIME_BY_EXTENSION = {
 function loadGeneratedImageStore() {
   generatedImages.clear();
   fs.mkdirSync(generatedImageStoreDir, { recursive: true });
-  try {
-    for (const file of fs.readdirSync(legacyGeneratedImageTempDir, { withFileTypes: true })) {
-      if (!file.isFile() || !/^[a-f0-9]{32}\.(?:png|jpg|jpeg|webp|gif)$/i.test(file.name)) continue;
-      const target = path.join(generatedImageStoreDir, file.name.toLowerCase());
-      if (!fs.existsSync(target)) fs.copyFileSync(path.join(legacyGeneratedImageTempDir, file.name), target);
-    }
-    fs.rmSync(legacyGeneratedImageTempDir, { recursive: true, force: true });
-  } catch {}
 
   const restored = [];
   for (const file of fs.readdirSync(generatedImageStoreDir, { withFileTypes: true })) {
@@ -6419,7 +6407,6 @@ const pendingWorkspaceChanges = new Map();
 
 const WORKSPACE_WATCH_IGNORED_ROOTS = new Set([
   ZAGENT_DIR,
-  LEGACY_STORAGE.workspaceDir,
   '.git',
   'node_modules',
   'dist',
@@ -10547,7 +10534,7 @@ if (!gotSingleInstanceLock) {
 
 app.whenReady().then(async () => {
   if (e2eOrphanShutdownStarted) return;
-  app.setAppUserModelId('io.github.zyfyz666.wdagent');
+  app.setAppUserModelId('io.github.zyfyz666.z');
   // The Chromium spellchecker re-segments a contenteditable on every edit and
   // is a constant per-keystroke cost under CJK IME input — the composer's
   // typing lag. The app is Chinese-first; disable it at the session level.

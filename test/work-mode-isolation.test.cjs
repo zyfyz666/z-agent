@@ -43,6 +43,12 @@ test('mode changes and legacy sessions cannot reuse injected kernel history', ()
   assert.equal(sessionModeMatches(session, { workMode: 'normal' }), false);
   assert.equal(sessionModeMatches(session, { workMode: 'agi' }), true);
   assert.equal(sessionModeMatches({ metadata: { zWorkMode: 'normal' } }, { workMode: 'normal' }), false);
+  assert.equal(sessionModeMatches({ metadata: { zModeIsolation: 0, zWorkMode: 'normal' } }, { workMode: 'normal' }), false);
+  assert.equal(sessionModeMatches({ metadata: { zModeIsolation: 1, zWorkMode: 'plan' } }, { workMode: 'plan' }), true);
+  assert.equal(sessionModeMatches({ metadata: { zModeIsolation: 1, zWorkMode: 'normal' } }, {}), true);
+  assert.equal(sessionModeMatches(null, { workMode: 'normal' }), false);
+  const inherited = { metadata: Object.create({ zModeIsolation: 1, zWorkMode: 'normal' }) };
+  assert.equal(sessionModeMatches(inherited, { workMode: 'normal' }), false);
   const text = combineTurnPrompt({ workMode: 'normal', history: [
     { role: 'assistant', content: 'Visible answer<z-reasoning-sidepath>SECRET_BRIEF</z-reasoning-sidepath>' },
     { role: 'user', content: '<z-turn-context>OLD_SYSTEM</z-turn-context>Continue work' }
@@ -50,6 +56,19 @@ test('mode changes and legacy sessions cannot reuse injected kernel history', ()
   assert.match(text, /Visible answer/);
   assert.match(text, /Continue work/);
   assert.doesNotMatch(text, /SECRET_BRIEF|OLD_SYSTEM/);
+});
+test('recreated history drops runtime envelopes but keeps user text, unknown tags and the journal', () => {
+  const userText = 'My supplier z-custom is intentional. <z-custom>source code</z-custom>';
+  const envelopes = ['turn-context', 'reasoning-sidepath', 'continual-harness', 'long-horizon-protocol', 'experience-edges']
+    .map(suffix => `<z-${suffix} id="old">obsolete-${suffix}</z-${suffix}>`).join('');
+  const messages = [{ role: 'user', content: userText + envelopes }];
+  const serialized = JSON.stringify(messages);
+  const rendered = combineTurnPrompt({ history: messages }, 'Continue.', true);
+  assert.ok(rendered.includes(userText));
+  assert.doesNotMatch(rendered, /obsolete-/);
+  assert.equal(JSON.stringify(messages), serialized);
+  const mismatched = '<other-turn-context>must remain</z-turn-context>';
+  assert.ok(combineTurnPrompt({ history: [{ role: 'user', content: mismatched }] }, '', true).includes(mismatched));
 });
 test('normal retrieval excludes AGI-derived memory without deleting regular memory', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'z-mode-memory-'));

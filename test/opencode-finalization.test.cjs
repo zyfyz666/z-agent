@@ -5,7 +5,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { LEGACY_NAMESPACE, LEGACY_STORAGE } = require('../lib/legacy-compat');
 const {
   OpenCodeSidecar,
   sessionDirectoryMatches,
@@ -135,13 +134,9 @@ function waitForSignal(signal) {
   return new Promise(resolve => signal?.addEventListener('abort', resolve, { once: true }));
 }
 
-for (const auditDirectory of ['.zagent', LEGACY_STORAGE.workspaceDir]) test(`runtime watchdog keeps full history in ${auditDirectory === '.zagent' ? 'current' : 'historical'} workspace storage`, async t => {
+test('runtime watchdog keeps full history in workspace storage', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-runtime-poll-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  if (auditDirectory !== '.zagent') {
-    fs.mkdirSync(path.join(directory, auditDirectory));
-    fs.writeFileSync(path.join(directory, auditDirectory, 'thrash-audit.jsonl'), '{"previous":true}\n');
-  }
   let busy = true;
   const delivered = [];
   const fixture = fakeClient(directory, (_payload, _call, messages) => {
@@ -170,20 +165,16 @@ for (const auditDirectory of ['.zagent', LEGACY_STORAGE.workspaceDir]) test(`run
   assert.match(delivered[0].guidance, /WD THRASH WATCHDOG/);
   const event = events.find(event => event.type === 'z.thrash.watchdog');
   assert.equal(event.data.sessionID, 'workspace-session');
-  const audit = fs.readFileSync(path.join(directory, auditDirectory, 'thrash-audit.jsonl'), 'utf8');
+  const audit = fs.readFileSync(path.join(directory, '.zagent', 'thrash-audit.jsonl'), 'utf8');
   assert.match(audit, /"step":30/);
-  if (auditDirectory !== '.zagent') {
-    assert.ok(audit.startsWith('{"previous":true}\n'));
-    assert.equal(fs.existsSync(path.join(directory, '.zagent', 'thrash-audit.jsonl')), false);
-  }
 });
 
 test('normal coding preserves its final body without followups for missing, failed or stale checks and builders', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-check-pass-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  for (const outcome of ['passed', 'waived', 'failed', 'unavailable', 'stale', 'builder', 'historical']) {
+  for (const outcome of ['passed', 'waived', 'failed', 'unavailable', 'stale', 'builder']) {
     const body = '完整交付正文：实现说明、代码示例与使用方法。';
-    const write = { type: 'tool', tool: 'write', callID: 'write', state: { status: 'completed', input: {}, output: 'written', metadata: { [outcome === 'historical' ? `${LEGACY_NAMESPACE.lower}Environment` : 'zEnvironment']: { mutation: true } } } };
+    const write = { type: 'tool', tool: 'write', callID: 'write', state: { status: 'completed', input: {}, output: 'written', metadata: { zEnvironment: { mutation: true } } } };
     const savedMetadata = JSON.stringify(write.state.metadata);
     const check = { type: 'tool', tool: 'bash', callID: 'check', state: { status: 'completed', input: { command: 'node --check code.js' }, metadata: { exit: outcome === 'failed' ? 1 : 0 }, output: '' } };
     const parts = outcome === 'stale' ? [check, write] : [write, ...(['passed', 'failed'].includes(outcome) ? [check] : [])];
@@ -204,8 +195,8 @@ test('normal coding preserves its final body without followups for missing, fail
     assert.equal(result.status, 'done');
     assert.equal(fixture.calls.promptAsync.length, 1);
     assert.equal(result.text, body);
-    assert.equal(result.delivery.verification.status, ['unavailable', 'builder', 'historical'].includes(outcome) ? 'unchecked' : outcome);
-    assert.equal(JSON.stringify(write.state.metadata), savedMetadata, 'reading metadata aliases must not rewrite stored evidence');
+    assert.equal(result.delivery.verification.status, ['unavailable', 'builder'].includes(outcome) ? 'unchecked' : outcome);
+    assert.equal(JSON.stringify(write.state.metadata), savedMetadata, 'reading metadata must not rewrite stored evidence');
     assert.equal(emitted.some(event => ['z.verification.required', 'z.subagent.acceptance.started'].includes(event.type)), false);
     if (outcome === 'builder') assert.ok(result.subagents.some(agent => agent.role === 'builder' || agent.subagentType === 'builder' || agent.type === 'builder'));
   }
@@ -609,6 +600,19 @@ test('a skipped Skill disclosure cannot turn an empty assistant response into su
   assert.equal(result.status, 'error');
   assert.match(result.error, /without a final user-facing answer/);
   assert.match(result.text, /Skill 加载说明/);
+});
+
+test('a silent finish counts as done only after a mutating tool, without rewriting tool records', () => {
+  const silent = tool => [assistant('silent', [{
+    type: 'tool', tool, callID: 'completed-tool', state: { status: 'completed', input: {}, output: 'done' }
+  }])];
+  for (const tool of ['edit', 'git_commit', 'browser-click']) {
+    const messages = silent(tool);
+    const serialized = JSON.stringify(messages);
+    assert.equal(collectRunResult(messages, new Set(), [[]], [], { workMode: 'normal' }, 'session').status, 'done', tool);
+    assert.equal(JSON.stringify(messages), serialized);
+  }
+  assert.equal(collectRunResult(silent('readonly_lookup'), new Set(), [[]], [], { workMode: 'normal' }, 'session').status, 'error');
 });
 
 test('recovers the real answer when the final assistant message is a trailing empty wrapper', () => {

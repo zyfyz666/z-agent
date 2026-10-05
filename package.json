@@ -32,7 +32,7 @@
     "react-dom": "19.1.1"
   },
   "build": {
-    "appId": "io.github.zyfyz666.wdagent",
+    "appId": "io.github.zyfyz666.z",
     "productName": "Z",
     "icon": "renderer/assets/z-icon.ico",
     "directories": {
@@ -131,6 +131,7 @@
       "artifactName": "Z-${arch}-v${version}.${ext}"
     },
     "nsis": {
+      "guid": "6f2890cd-aa7c-5558-a899-2cd60e4bec90",
       "oneClick": false,
       "perMachine": true,
       "allowElevation": true,

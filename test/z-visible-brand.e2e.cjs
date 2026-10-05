@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
-const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
-const obsoleteBrandPattern = new RegExp(`\\b${LEGACY_NAMESPACE.lower}(?:[- ]?Agent)?\\b|\\b${LEGACY_NAMESPACE.title[0]}Agent\\b|\\b${LEGACY_NAMESPACE.lower}xi\\b|WD\\s+Agent`, 'i');
+const { findObsoleteBrand } = require('./helpers/obsolete-brand.cjs');
+const obsoleteBrandPattern = /\bYAgent\b|WD\s+Agent/i;
 
 const appRoot = path.resolve(__dirname, '..');
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'z-visible-brand-e2e-'));
@@ -38,6 +38,7 @@ fs.mkdirSync(outputDir, { recursive: true });
     const file = path.join(outputDir, filename);
     await page.screenshot({ path: file });
     report.screenshots.push(file);
+    assert.deepEqual(findObsoleteBrand(visible.text), [], name + ' must use current product branding');
     assert.doesNotMatch(visible.text, obsoleteBrandPattern, name + ' must use current product branding');
     return visible;
   };

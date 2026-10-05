@@ -5,14 +5,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
-const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
+const { findObsoleteBrand } = require('./helpers/obsolete-brand.cjs');
 
 const appRoot = path.resolve(__dirname, '..');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-onboarding-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'z-workbench');
 const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: userDataDir };
 delete env.ELECTRON_RUN_AS_NODE;
-const forbidden = new RegExp(`\\b${LEGACY_NAMESPACE.lower}(?:[- ]?Agent)?\\b|\\b${LEGACY_NAMESPACE.title[0]}Agent\\b|\\b${LEGACY_NAMESPACE.lower}xi\\b|WD\\s+Agent|ViaTum|抖音群|QQ\\s*群|994525685197`, 'i');
+const forbidden = /\bYAgent\b|WD\s+Agent|ViaTum|抖音群|QQ\s*群|994525685197/i;
 const report = { ok: false, pageErrors: [], checkedSurfaces: [], screenshots: [] };
 fs.mkdirSync(outputDir, { recursive: true });
 
@@ -37,6 +37,7 @@ fs.mkdirSync(outputDir, { recursive: true });
       }
       return strings.join('\n');
     });
+    assert.deepEqual(findObsoleteBrand(text), [], `${label} must not display the previous product`);
     assert.doesNotMatch(text, forbidden, `${label} must not display the previous product or community`);
     report.checkedSurfaces.push(label);
     return text;

@@ -174,15 +174,11 @@
     SetShellVarContext current
     StrCpy $ZClearDataFailed "0"
 
-    ; Z retains these pre-rename fork profiles. Never remove upstream Z
-    ; profiles or shared temporary caches, which may belong to another app.
-    Push "$APPDATA\wd-agent"
+    ; Remove only this app's own profile. Never remove other apps' profiles
+    ; or shared temporary caches.
+    Push "$APPDATA\Z"
     Call un.ZRemoveDataPath
-    Push "$APPDATA\WD Agent"
-    Call un.ZRemoveDataPath
-    Push "$LOCALAPPDATA\wd-agent"
-    Call un.ZRemoveDataPath
-    Push "$LOCALAPPDATA\WD Agent"
+    Push "$LOCALAPPDATA\Z"
     Call un.ZRemoveDataPath
 
     ${If} $ZClearDataFailed == "1"

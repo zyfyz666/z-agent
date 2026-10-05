@@ -5,16 +5,13 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const api = window.z;
-const { LEGACY_STORAGE, readCompatibleField } = window.ZLegacyCompat;
 
-function storedPreference(currentKey, previousKey) {
-  try {
-    const current = window.localStorage.getItem(currentKey);
-    if (current !== null) return current;
-    const previous = window.localStorage.getItem(previousKey);
-    if (previous !== null) window.localStorage.setItem(currentKey, previous);
-    return previous;
-  } catch { return null; }
+function storedPreference(key) {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+
+function descriptorSessionId(descriptor) {
+  return descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'zSessionId') ? descriptor.zSessionId : undefined;
 }
 
 const SUBAGENT_ROLE_LABELS = Object.freeze({
@@ -125,7 +122,7 @@ const RECENT_SESSION_PAGE_SIZE = 10;
 
 function loadWorkspaceSidebarMeta() {
   try {
-    const value = JSON.parse(storedPreference(WORKSPACE_SIDEBAR_META_KEY, LEGACY_STORAGE.sidebarMetaKey) || '{}');
+    const value = JSON.parse(storedPreference(WORKSPACE_SIDEBAR_META_KEY) || '{}');
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   } catch {
     return {};
@@ -138,7 +135,7 @@ function saveWorkspaceSidebarMeta() {
 
 function loadCollapsedWorkspaceGroups() {
   try {
-    const value = JSON.parse(storedPreference(WORKSPACE_COLLAPSED_KEY, LEGACY_STORAGE.sidebarCollapsedKey) || '[]');
+    const value = JSON.parse(storedPreference(WORKSPACE_COLLAPSED_KEY) || '[]');
     return new Set(Array.isArray(value) ? value.map(item => String(item)) : []);
   } catch {
     return new Set();
@@ -6503,7 +6500,7 @@ composerResizeHandle?.addEventListener('keydown', event => {
 window.addEventListener('resize', scheduleComposerGrow);
 
 try {
-  const storedComposerHeight = Number(storedPreference(COMPOSER_HEIGHT_KEY, LEGACY_STORAGE.composerHeightKey));
+  const storedComposerHeight = Number(storedPreference(COMPOSER_HEIGHT_KEY));
   if (Number.isFinite(storedComposerHeight) && storedComposerHeight > 0) {
     composerManualHeight = storedComposerHeight;
   }
@@ -11032,7 +11029,7 @@ async function reconcileOpenCodeActiveRuns() {
   for (const descriptor of runs) {
     try {
       // 尾部窗口足够覆盖最近一次 run 的消息,不必整取会话
-      const session = await api.getSession(String(readCompatibleField(descriptor, 'zSessionId') || ''), { messageLimit: MESSAGE_LOAD_LIMIT });
+      const session = await api.getSession(String(descriptorSessionId(descriptor) || ''), { messageLimit: MESSAGE_LOAD_LIMIT });
       if (!session) continue;
       markSessionLoadBaseline(session);
       if ((session.messages || []).some(message => message?.agentRun?.runId === descriptor.runId)) continue;
@@ -11086,7 +11083,7 @@ async function settleRecoveredOpenCodeRun(runId, sessionId, text = '') {
 }
 
 async function recoverInterruptedOpenCodeRun(descriptor = {}) {
-  const sessionId = String(readCompatibleField(descriptor, 'zSessionId') || '');
+  const sessionId = String(descriptorSessionId(descriptor) || '');
   const runId = String(descriptor.runId || '');
   if (!sessionId || !runId) return false;
   const summary = state.sessions.find(session => String(session.id) === sessionId);

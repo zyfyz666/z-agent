@@ -5,17 +5,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
-const { LEGACY_NAMESPACE, LEGACY_STORAGE } = require('../lib/legacy-compat');
-const legacyDefaultName = `${LEGACY_NAMESPACE.title}xi`;
+const { findObsoleteBrand } = require('./helpers/obsolete-brand.cjs');
 
 const appRoot = path.resolve(__dirname, '..');
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-user-name-e2e-'));
 const outputDir = path.join(appRoot, 'output', 'z-workbench');
 const screenshotPath = path.join(outputDir, 'user-name-z.png');
 fs.mkdirSync(outputDir, { recursive: true });
-fs.mkdirSync(path.join(userDataDir, LEGACY_STORAGE.stableDataDir), { recursive: true });
-// Exercise an old profile's default name without reading a real user profile.
-fs.writeFileSync(path.join(userDataDir, LEGACY_STORAGE.stableDataDir, 'config.json'), JSON.stringify({ userName: legacyDefaultName, language: 'zh-CN' }));
+fs.mkdirSync(path.join(userDataDir, 'ZData'), { recursive: true });
+// Seed a synthetic profile without a personal name; never read a real user profile.
+fs.writeFileSync(path.join(userDataDir, 'ZData', 'config.json'), JSON.stringify({ language: 'zh-CN' }));
 const pageErrors = [];
 
 async function launch() {
@@ -48,13 +47,13 @@ async function launch() {
     application = launched.application;
     let page = launched.page;
 
-    assert.equal(await page.evaluate(async () => (await window.z.getConfig()).userName), legacyDefaultName,
-      'the existing profile is loaded and its stored name is preserved until the user edits it');
+    assert.equal(await page.evaluate(async () => (await window.z.getConfig()).userName || ''), '',
+      'the seeded profile is loaded without a personal name');
     assert.equal(await page.locator('#greeting').textContent(), '下一步，交给 Z。');
-    assert.doesNotMatch(await page.locator('body').innerText(), new RegExp(legacyDefaultName, 'i'));
+    assert.deepEqual(findObsoleteBrand(await page.locator('body').innerText()), [], 'the page must not show the obsolete product name');
     await page.locator('#settingsBtn').click();
     await page.locator('#userNameInput').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('#userNameInput').inputValue(), '', 'the legacy default must not appear as a personal name');
+    assert.equal(await page.locator('#userNameInput').inputValue(), '', 'an empty profile shows no personal name');
     assert.equal(await page.locator('#tab-general #userNameInput').count(), 1, 'name is edited in General settings');
 
     await page.locator('#userNameInput').click();
@@ -94,7 +93,7 @@ async function launch() {
     assert.equal(await page.evaluate(async () => (await window.z.getConfig()).userName), 'Alice');
     assert.deepEqual(pageErrors, []);
 
-    console.log(JSON.stringify({ ok: true, screenshotPath, legacyDefaultHidden: true, personalNamePersisted: true, pageErrors }));
+    console.log(JSON.stringify({ ok: true, screenshotPath, emptyNameShown: true, personalNamePersisted: true, pageErrors }));
   } finally {
     await application?.close().catch(() => {});
     const resolved = path.resolve(userDataDir);

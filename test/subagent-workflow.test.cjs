@@ -1,8 +1,12 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const W = require('../lib/subagent/workflow-state');
 const { SubagentEventBridge } = require('../lib/subagent/event-bridge');
+const { parsePlanMarker, formatPlanMarker } = require('../lib/subagent/plan');
 const run = id => ({ runId: id || 'parent', status: 'working', timeline: [] });
 const task = (callId, status = 'running', output = '', sessionID = '') => ({ type: 'message.part.updated', data: { part: {
   type: 'tool', tool: 'task', id: `part-${callId}`, callID: callId,
@@ -189,4 +193,50 @@ test('subagent status notices stay inside the work process after the summary sta
     r.timeline.filter(item => item.type === 'subagent_status').every(item => item.stage === 'work'),
     true
   );
+});
+
+test('task plan markers parse the same way as lib/subagent/plan.js and reject quoted or malformed lines', () => {
+  const plan = { id: 'ui', dependsOn: ['api'], acceptance: 'npm test passes' };
+  const prompt = `${formatPlanMarker(plan)}\nContinue the existing task.`;
+  const info = W.taskInfo({ type: 'tool', tool: 'task', callID: 'task-plan', state: {
+    status: 'running', input: { prompt, subagent_type: 'builder' }
+  } });
+  assert.deepEqual(info.plan, plan);
+  assert.deepEqual(parsePlanMarker(prompt), plan);
+  assert.equal(info.prompt, prompt);
+  for (const text of ['other-plan: {"id":"wrong"}', 'User quoted z-plan: {"id":"wrong"}', 'z-plan: {not-json}']) {
+    assert.equal(parsePlanMarker(text), null);
+    assert.equal(W.taskInfo({ state: { input: { prompt: text } } }).plan, null);
+  }
+});
+
+test('child events update progress without rewriting the input event; unknown event types stay unhandled', () => {
+  const r = { runId: 'parent-existing', timeline: [] };
+  const event = child('task-existing', { type: 'message.part.updated', data: { part: {
+    id: 'part-existing', messageID: 'message-existing', type: 'text', text: 'Found the entry point', time: { end: 200 }
+  } } }, 'child-existing');
+  const original = JSON.stringify(event);
+  assert.equal(W.consume(r, event, 200).handled, true);
+  assert.equal(r.subagents.length, 1);
+  assert.equal(r.subagents[0].childSessionID, 'child-existing');
+  assert.ok(r.subagents[0].timeline.some(item => item.content === 'Found the entry point'));
+  assert.equal(JSON.stringify(event), original);
+  assert.equal(W.consume(r, { type: 'z.external.event', data: {} }, 300).handled, false);
+});
+
+test('the browser build of the workflow loads on its own and restores saved history and plans', () => {
+  const context = vm.createContext({});
+  const file = path.join(__dirname, '../lib/subagent/workflow-state.js');
+  vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: 'workflow-state.js' });
+  const r = { runId: 'parent-browser', timeline: [] };
+  const event = { type: 'z.subagent.history', data: {
+    childSessionID: 'child-browser', callId: 'task-browser', subagentType: 'explorer',
+    messages: [{ info: { id: 'message-browser', role: 'assistant' }, parts: [
+      { id: 'part-browser', type: 'text', text: 'Saved result', time: { end: 400 } }
+    ] }]
+  } };
+  assert.equal(context.ZSubagentWorkflow.consume(r, event, 500).handled, true);
+  assert.ok(r.subagents[0].timeline.some(item => item.content === 'Saved result'));
+  const prompt = 'z-plan: {"id":"browser-task","dependsOn":["parent-task"]}';
+  assert.equal(context.ZSubagentWorkflow.taskInfo({ state: { input: { prompt } } }).plan.id, 'browser-task');
 });

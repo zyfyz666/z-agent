@@ -81,8 +81,8 @@ async function command(page, runId, action, params = {}) {
     assert.equal(result.openedB.ok, true);
     assert.equal(result.distinctTabs, true);
     assert.deepEqual(result.scopes, [
-      'workspace:c:/yanworkspace/workspace-a',
-      'workspace:c:/yanworkspace/workspace-b'
+      'workspace:c:/zworkspace/workspace-a',
+      'workspace:c:/zworkspace/workspace-b'
     ]);
     assert.equal(result.hiddenForeignTab, true);
     assert.equal(result.backgroundA.ok, true);

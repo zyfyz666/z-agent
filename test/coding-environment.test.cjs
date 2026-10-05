@@ -62,6 +62,20 @@ test('file receipts invalidate a check after an external modification', t => {
   assert.equal(summarizeVerification(messages, { workspace: root }).status, 'passed');
   fs.writeFileSync(file, 'const x = ;');
   assert.equal(summarizeVerification(messages, { workspace: root }).status, 'stale');
+  assert.deepEqual(summarizeVerification(messages, { workspace: root }).records[0].files, messages[0].parts[0].state.metadata.zVerification.files);
+});
+
+test('a stale verification receipt downgrades an otherwise passing check', () => {
+  const messages = [{ parts: [{ type: 'tool', tool: 'bash', callID: 'test-current', state: {
+    input: { command: 'npm test' }, status: 'completed', output: 'passed',
+    metadata: { exit: 0, zVerification: { status: 'stale' } }
+  } }] }];
+  assert.equal(summarizeVerification(messages).status, 'stale');
+  const inherited = [{ parts: [{ type: 'tool', tool: 'bash', state: {
+    input: { command: 'npm test' }, status: 'completed', output: 'passed',
+    metadata: Object.assign(Object.create({ zVerification: { status: 'stale' } }), { exit: 0 })
+  } }] }];
+  assert.equal(summarizeVerification(inherited).status, 'passed');
 });
 
 test('package context stays scoped and background maps can be cancelled', async t => {

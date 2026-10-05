@@ -1,7 +1,7 @@
 'use strict';
 
-// A complete historical profile survives the source rename: provider catalog,
-// browser cookies, desktop preferences and a durable interrupted-run journal.
+// A complete profile survives a restart: provider catalog, browser cookies,
+// desktop preferences and a durable interrupted-run journal.
 // All data and credentials below are synthetic and confined to a temp profile.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -9,15 +9,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const { ZCore } = require('../lib/z-core');
-const { LEGACY_NAMESPACE, LEGACY_STORAGE } = require('../lib/legacy-compat');
 
 const appRoot = path.resolve(__dirname, '..');
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'z-legacy-profile-'));
-const dataRoot = path.join(profile, LEGACY_STORAGE.stableDataDir);
-const coreRoot = path.join(dataRoot, LEGACY_STORAGE.coreDir);
-const partition = LEGACY_STORAGE.browserPartition;
-const outputRoot = path.join(appRoot, 'output', 'legacy-profile');
-const providerId = 'conn-legacy-fixture';
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'z-profile-persistence-'));
+const dataRoot = path.join(profile, 'ZData');
+const coreRoot = path.join(dataRoot, 'z-core');
+const partition = 'persist:z-browser';
+const outputRoot = path.join(appRoot, 'output', 'profile-persistence');
+const providerId = 'conn-profile-fixture';
 const models = [
   { id: 'fixture-model-a', name: 'Fixture model A', modelType: 'text' },
   { id: 'fixture-model-b', name: 'Fixture model B', modelType: 'text' }
@@ -34,14 +33,14 @@ const catalog = {
   agentModel: { providerId, supplierId: 'official', modelId: models[0].id, modelType: 'text', name: models[0].name },
   language: 'zh-CN', theme: 'dark'
 };
-const meta = { 'legacy-project': { pinned: true, hidden: false } };
-const collapsed = ['legacy-project'];
+const keys = { meta: 'z.workspace-sidebar-meta.v1', collapsed: 'z.workspace-sidebar-collapsed.v1', height: 'z.composer.height' };
+const meta = { 'profile-project': { pinned: true, hidden: false } };
+const collapsed = ['profile-project'];
 const report = { ok: false, pageErrors: [] };
 let application;
 let page;
 
 fs.mkdirSync(coreRoot, { recursive: true });
-fs.mkdirSync(path.join(profile, 'Partitions', partition.slice('persist:'.length)), { recursive: true });
 fs.writeFileSync(path.join(dataRoot, 'config.json'), JSON.stringify(catalog));
 
 async function launch() {
@@ -75,35 +74,32 @@ async function readCatalog() {
 function seedInterruptedRun(session) {
   const sessionFile = path.join(dataRoot, 'sessions', `${session.id}.json`);
   const saved = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-  saved.messages = [{ role: 'user', content: 'Restore the historical run', ts: Date.now() - 60000 }];
+  saved.messages = [{ role: 'user', content: 'Restore the interrupted run', ts: Date.now() - 60000 }];
   fs.writeFileSync(sessionFile, JSON.stringify(saved));
-  const runId = `${LEGACY_NAMESPACE.lower}-${session.id}-legacy-run`;
+  const runId = `run-${session.id}-interrupted`;
   const core = new ZCore({ rootDir: coreRoot });
-  core.startTurn({ threadId: session.id, turnId: runId, workspace: session.workspace, title: 'Historical run',
+  core.startTurn({ threadId: session.id, turnId: runId, workspace: session.workspace, title: 'Interrupted run',
     configSnapshot: { providerId, modelId: models[0].id, modelName: models[0].name, workMode: 'normal' },
     intent: { prompt: saved.messages[0].content, workMode: 'normal' } });
   const events = [
-    { type: `${LEGACY_NAMESPACE.lower}.opencode.started`, data: { sessionID: 'ses_legacy_fixture' } },
-    { type: 'message.part.updated', data: { part: { id: 'legacy-text', type: 'text', text: 'Recovered historical reply' } } },
-    { type: 'session.next.tool.called', data: { callID: 'legacy-read', tool: 'read', input: { filePath: 'source.js' } } },
-    { type: 'session.next.tool.success', data: { callID: 'legacy-read', result: 'Previously read source' } },
-    { type: `${LEGACY_NAMESPACE.lower}.thrash.watchdog.status`, data: {
+    { type: 'z.opencode.started', data: { sessionID: 'ses_profile_fixture' } },
+    { type: 'message.part.updated', data: { part: { id: 'profile-text', type: 'text', text: 'Recovered interrupted reply' } } },
+    { type: 'session.next.tool.called', data: { callID: 'profile-read', tool: 'read', input: { filePath: 'source.js' } } },
+    { type: 'session.next.tool.success', data: { callID: 'profile-read', result: 'Previously read source' } },
+    { type: 'z.thrash.watchdog.status', data: {
       enabled: true, phase: 'observing', checks: 2, observations: 2, interventions: 0, observedSteps: 12,
       updatedAt: Date.now() - 1000, events: []
     } },
-    { type: `${LEGACY_NAMESPACE.lower}.subagent.history`, data: {
-      childSessionID: 'child-legacy', callId: 'legacy-child', subagentType: 'explorer',
+    { type: 'z.subagent.history', data: {
+      childSessionID: 'child-profile', callId: 'profile-child', subagentType: 'explorer',
       messages: [{ info: { id: 'child-message', role: 'assistant' }, parts: [
-        { id: 'child-text', type: 'text', text: 'Historical child findings', time: { end: Date.now() - 1000 } }
+        { id: 'child-text', type: 'text', text: 'Child findings', time: { end: Date.now() - 1000 } }
       ] }]
     } }
   ];
   for (const event of events) core.ingestProviderEvent(runId, event);
   core.persist();
-  // Verify the fixture contains old wire identifiers, not already-normalized
-  // events that could accidentally let a missing recovery alias pass.
-  const journal = fs.readFileSync(path.join(coreRoot, 'events.jsonl'), 'utf8');
-  assert.ok(journal.includes(`${LEGACY_NAMESPACE.lower}.thrash.watchdog.status`));
+  assert.ok(fs.readFileSync(path.join(coreRoot, 'events.jsonl'), 'utf8').includes('z.thrash.watchdog.status'));
   return { runId, sessionFile };
 }
 
@@ -115,14 +111,13 @@ function seedInterruptedRun(session) {
       providerModelIds: models.map(item => item.id), selected: models[0].id, keyPreserved: true });
     const session = await page.evaluate(() => ({ id: state.currentSession.id, workspace: state.currentSession.workspace }));
     await page.evaluate(({ keys, meta, collapsed }) => {
-      localStorage.setItem(keys.sidebarMetaKey, JSON.stringify(meta));
-      localStorage.setItem(keys.sidebarCollapsedKey, JSON.stringify(collapsed));
-      localStorage.setItem(keys.composerHeightKey, '180');
-      for (const key of ['z.workspace-sidebar-meta.v1', 'z.workspace-sidebar-collapsed.v1', 'z.composer.height']) localStorage.removeItem(key);
-    }, { keys: LEGACY_STORAGE, meta, collapsed });
+      localStorage.setItem(keys.meta, JSON.stringify(meta));
+      localStorage.setItem(keys.collapsed, JSON.stringify(collapsed));
+      localStorage.setItem(keys.height, '180');
+    }, { keys, meta, collapsed });
     await application.evaluate(async ({ session }, selectedPartition) => {
       const cookies = session.fromPartition(selectedPartition).cookies;
-      await cookies.set({ url: 'http://compat.example.test', name: 'legacy-session', value: 'preserved', expirationDate: Date.now() / 1000 + 3600 });
+      await cookies.set({ url: 'http://profile.example.test', name: 'profile-session', value: 'preserved', expirationDate: Date.now() / 1000 + 3600 });
       await cookies.flushStore();
       session.defaultSession.flushStorageData();
     }, partition);
@@ -136,14 +131,12 @@ function seedInterruptedRun(session) {
       return saved.messages?.some(message => message.agentRun?.runId === runId && message.agentRun.recoveredAfterRestart);
     }, { sessionId: session.id, runId });
     assert.deepEqual(await readCatalog(), firstCatalog, 'restarting must preserve both stored model catalogs and the selected model');
-    const preferences = await page.evaluate(keys => ({
-      meta: workspaceSidebarMeta, collapsed: [...collapsedWorkspaceGroups], height: composerManualHeight,
-      migratedMeta: JSON.parse(localStorage.getItem('z.workspace-sidebar-meta.v1')),
-      legacyMeta: JSON.parse(localStorage.getItem(keys.sidebarMetaKey))
-    }), LEGACY_STORAGE);
-    assert.deepEqual(preferences, { meta, collapsed, height: 180, migratedMeta: meta, legacyMeta: meta });
+    const preferences = await page.evaluate(() => ({
+      meta: workspaceSidebarMeta, collapsed: [...collapsedWorkspaceGroups], height: composerManualHeight
+    }));
+    assert.deepEqual(preferences, { meta, collapsed, height: 180 });
     const cookies = await application.evaluate(async ({ session }, selectedPartition) =>
-      session.fromPartition(selectedPartition).cookies.get({ url: 'http://compat.example.test', name: 'legacy-session' }), partition);
+      session.fromPartition(selectedPartition).cookies.get({ url: 'http://profile.example.test', name: 'profile-session' }), partition);
     assert.equal(cookies.length, 1);
     assert.equal(cookies[0].value, 'preserved');
     const saved = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
@@ -152,15 +145,14 @@ function seedInterruptedRun(session) {
     const run = recovered[0].agentRun;
     assert.equal(run.status, 'interrupted');
     assert.equal(run.recoveredAfterRestart, true);
-    assert.match(run.textContent, /Recovered historical reply/);
-    assert.ok(run.timeline.some(item => item.type === 'tool_result' && item.callId === 'legacy-read'));
-    assert.equal(run.watchdog?.checks, 2, 'old Observer status events survive journal recovery');
-    assert.ok(run.subagents?.some(child => child.childSessionID === 'child-legacy'), 'old subagent history survives journal recovery');
+    assert.match(run.textContent, /Recovered interrupted reply/);
+    assert.ok(run.timeline.some(item => item.type === 'tool_result' && item.callId === 'profile-read'));
+    assert.equal(run.watchdog?.checks, 2, 'Observer status events survive journal recovery');
+    assert.ok(run.subagents?.some(child => child.childSessionID === 'child-profile'), 'subagent history survives journal recovery');
     assert.equal(JSON.parse(fs.readFileSync(path.join(coreRoot, 'state.json'), 'utf8')).turns[runId].status, 'aborted');
-    assert.equal(fs.existsSync(path.join(profile, 'ZData')), false, 'opening old data must not create a parallel empty application root');
     assert.deepEqual(report.pageErrors, []);
     fs.mkdirSync(outputRoot, { recursive: true });
-    await page.screenshot({ path: path.join(outputRoot, 'legacy-profile-recovered.png') });
+    await page.screenshot({ path: path.join(outputRoot, 'profile-recovered.png') });
     report.ok = true;
     Object.assign(report, { modelsPreserved: models.length, cookiePreserved: true, preferencesPreserved: true,
       journalRecovered: true, observerChecks: run.watchdog.checks, recoveredMessages: recovered.length });
@@ -171,7 +163,7 @@ function seedInterruptedRun(session) {
     fs.writeFileSync(path.join(outputRoot, 'report.json'), JSON.stringify(report, null, 2));
     const resolved = path.resolve(profile);
     assert.equal(path.dirname(resolved), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(resolved).startsWith('z-legacy-profile-'));
+    assert.ok(path.basename(resolved).startsWith('z-profile-persistence-'));
     fs.rmSync(resolved, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -6,9 +6,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const content = require('../renderer/z-product-content');
-const { LEGACY_NAMESPACE } = require('../lib/legacy-compat');
-const legacyDefaultName = `${LEGACY_NAMESPACE.title}xi`;
-const obsoleteBrandPattern = new RegExp(`\\b${LEGACY_NAMESPACE.lower}(?:[- ]?Agent)?\\b|\\b${LEGACY_NAMESPACE.title[0]}Agent\\b|\\b${legacyDefaultName}\\b|ViaTumLab`, 'i');
+const { findObsoleteBrand } = require('./helpers/obsolete-brand.cjs');
+// Upstream organisation and the former one-letter abbreviation, which the
+// hashed product-name check does not cover.
+const formerAffiliationPattern = /\bYAgent\b|ViaTumLab/i;
+const hasObsoleteBranding = text => findObsoleteBrand(text).length > 0 || formerAffiliationPattern.test(text);
 
 function strings(value) {
   if (typeof value === 'string') return [value];
@@ -36,7 +38,7 @@ test('Z onboarding covers the complete seven-step workflow with local guidance',
 
 test('product copy has no obsolete branding, contacts or release download promises', () => {
   const copy = strings([content.guide, content.releaseNotes, content.errors]).join('\n');
-  assert.doesNotMatch(copy, obsoleteBrandPattern);
+  assert.equal(hasObsoleteBranding(copy), false);
   assert.doesNotMatch(copy, /抖音|QQ群|https?:\/\/|994525685197|1103989964|1420894553/);
   assert.equal(content.releaseNotes.title, 'Z 更新说明');
   assert.match(strings(content.releaseNotes).join('\n'), /已有监控器/);
@@ -53,18 +55,20 @@ test('all new Chinese copy has an English translation in the actual localization
     const translation = window.ZI18n.translate(text, 'en');
     assert.notEqual(translation, text, `Missing translation: ${text}`);
     assert.doesNotMatch(translation, /[\u3400-\u9fff]/u);
-    assert.doesNotMatch(translation, obsoleteBrandPattern);
+    assert.equal(hasObsoleteBranding(translation), false, translation);
   }
 });
 
-test('legacy default names disappear from presentation without changing custom names', () => {
-  for (const name of ['', null, undefined, legacyDefaultName, `  ${legacyDefaultName.toLowerCase()}  `]) {
+test('empty names fall back to the Z greeting without changing custom names', () => {
+  for (const name of ['', null, undefined, '   ', '\u0007']) {
     assert.equal(content.normalizeUserName(name), '');
     assert.equal(content.greeting(name), '下一步，交给 Z。');
   }
   assert.equal(content.normalizeUserName('default'), 'default');
-  for (const name of ['Z', 'Zxi', `${legacyDefaultName}son`, `Dr ${legacyDefaultName}`]) {
-    assert.equal(content.normalizeUserName(name), name, 'only the exact former default is hidden');
+  assert.equal(content.normalizeUserName('  Alice\u0000 '), 'Alice');
+  assert.equal(content.normalizeUserName('x'.repeat(40)), 'x'.repeat(32));
+  for (const name of ['Z', 'Zxi', 'Dr Z']) {
+    assert.equal(content.normalizeUserName(name), name, 'custom names are shown as entered');
   }
   assert.equal(content.normalizeUserName('小李'), '小李');
   assert.equal(content.greeting('小李'), '小李，下一步做什么？');
@@ -110,14 +114,21 @@ test('config normalization leaves new names empty and preserves saved personal n
   assert.equal(normalize(undefined), '');
   assert.equal(normalize(''), '');
   assert.equal(normalize(' Alice '), 'Alice');
-  assert.equal(normalize(legacyDefaultName), legacyDefaultName, 'legacy saved values are not silently rewritten in storage');
+  assert.equal(normalize('Zxi'), 'Zxi', 'saved values are not silently rewritten in storage');
   assert.equal(normalize('小李'), '小李');
 });
 
 test('brand regression checks reject every former brand variant while accepting Z', () => {
-  for (const name of [LEGACY_NAMESPACE.title, LEGACY_NAMESPACE.agentTitle,
-    LEGACY_NAMESPACE.agentHyphen, `${LEGACY_NAMESPACE.title[0]}Agent`, legacyDefaultName]) {
-    assert.match(`Welcome to ${name}.`, obsoleteBrandPattern);
+  // The original author's credit (LICENSE line 3, kept as MIT requires) is the
+  // only place the former name may appear; derive the fixtures from it.
+  const author = fs.readFileSync(path.join(__dirname, '../LICENSE'), 'utf8').split(/\r?\n/)[2].match(/^Copyright \(c\) \d{4} (\S+)$/)[1];
+  const lower = author.slice(0, 3).toLowerCase();
+  const title = lower[0].toUpperCase() + lower.slice(1);
+  for (const name of [author, title, lower.toUpperCase(), `${title}Agent`, `${title} Agent`, `${lower}-agent`, `${lower}agent`,
+    `.${lower}agent`, `${title}Data`, `persist:${lower}-browser`, `my${title}Session`, `${lower}_skills_read_skill`, 'YAgent', 'ViaTumLab']) {
+    assert.equal(hasObsoleteBranding(`Welcome to ${name}.`), true, name);
   }
-  for (const text of ['Z', 'Z Agent', 'Using Z', '下一步，交给 Z。']) assert.doesNotMatch(text, obsoleteBrandPattern);
+  for (const text of ['Z', 'Z Agent', 'Using Z', '下一步，交给 Z。', '.zagent', 'ZData', 'wd-monitor', 'thrash-watchdog', 'yarn', 'yaml']) {
+    assert.equal(hasObsoleteBranding(text), false, text);
+  }
 });
