@@ -165,7 +165,13 @@ test('registered preceding-format worktrees stay in place and remain manageable'
   const beforeRegistration = fs.readFileSync(path.join(directory, '.git'), 'utf8');
   const listed = await worktrees.listTaskWorktrees(root);
   assert.equal(listed.length, 1);
-  assert.equal(path.resolve(listed[0].path), directory);
+  // Git expands Windows short paths and junctions; compare the actual
+  // directories rather than the spelling returned by the temp environment.
+  const canonicalPath = value => {
+    const resolved = fs.realpathSync.native(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  assert.equal(canonicalPath(listed[0].path), canonicalPath(directory));
   assert.equal(listed[0].branch, branch);
   assert.equal((await worktrees.taskWorktreeStatus(root, { taskId })).dirty, false);
   await assert.rejects(() => worktrees.createTaskWorktree(root, { taskId }), error => error.code === 'WORKTREE_EXISTS');
