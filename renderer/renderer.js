@@ -7659,6 +7659,7 @@ function getAgentModelSelection(session = state.currentSession) {
       modelId: storedModelId,
       modelType: String(stored.modelType),
       name: String(stored.name || storedModelId),
+      ...(Object.hasOwn(stored, 'maxOutputTokens') ? { maxOutputTokens: stored.maxOutputTokens } : {}),
       configName: String(stored.configName || (sessionSelection && !supplierId ? '' : getAgentModelConfigName(storedProvider, supplierId))),
       capabilities: { ...(stored.capabilities && Object.keys(stored.capabilities).length
         ? stored.capabilities
@@ -7719,7 +7720,10 @@ function normalizeModelSelectionSnapshot(selection = {}) {
   const name = String(source.name || source.modelName || modelId || '').trim();
   const configName = String(source.configName || source.connectionName || '').trim();
   const capabilities = source.capabilities && typeof source.capabilities === 'object' ? { ...source.capabilities } : {};
-  return { providerId, supplierId, modelId, modelType, name, configName, capabilities };
+  const maxOutputTokens = Number(source.maxOutputTokens);
+  return { providerId, supplierId, modelId, modelType, name, configName, capabilities,
+    ...(Object.hasOwn(source, 'maxOutputTokens') ? { maxOutputTokens:
+      Number.isSafeInteger(maxOutputTokens) && maxOutputTokens > 0 ? maxOutputTokens : 0 } : {}) };
 }
 
 function modelSelectionIdentity(selection = {}) {
@@ -22492,6 +22496,65 @@ function currentModelPickerModel() {
   )) || null;
 }
 
+function renderModelOutputControl() {
+  const input = $('#modelQuickOutputTokens');
+  const summary = $('#modelQuickOutputSummary');
+  const save = $('#modelQuickOutputSave');
+  if (!input || !summary || !save) return;
+  const selection = getAgentModelSelection();
+  const stored = Number(selection.maxOutputTokens) || 0;
+  const identity = JSON.stringify([state.currentSession?.id || '', selection.providerId, selection.supplierId, selection.modelId, stored]);
+  if (input.dataset.selectionKey !== identity) {
+    input.dataset.selectionKey = identity;
+    input.value = stored > 0 ? String(stored) : '';
+  }
+  const status = window.ZConnectionControls.outputLimitState(selection, input.value, { native: true });
+  const pending = !status.error && status.requested !== stored;
+  const translate = text => document.documentElement.lang === 'en' ? window.ZI18n?.translate(text) || text : text;
+  summary.textContent = status.error || `${pending ? `${translate('待保存')} · ` : ''}${status.summary}`;
+  summary.dataset.error = String(!!status.error);
+  input.setCustomValidity(status.error || '');
+  input.removeAttribute('max');
+  if (status.automatic?.maximum > 0) input.max = String(status.automatic.maximum);
+  input.disabled = modelPickerSaving || !selection.modelId;
+  save.disabled = modelPickerSaving || !selection.modelId || !pending || !!status.error;
+}
+
+async function saveModelOutputTokens() {
+  if (modelPickerSaving) return;
+  const input = $('#modelQuickOutputTokens');
+  if (!input) return;
+  const targetSession = state.currentSession || await newSession();
+  if (!targetSession?.id) return;
+  const selection = getAgentModelSelection(targetSession);
+  const status = window.ZConnectionControls.outputLimitState(selection, input.value, { native: true });
+  if (status.error) {
+    input.setCustomValidity(status.error);
+    input.reportValidity();
+    return;
+  }
+  if (status.requested === (Number(selection.maxOutputTokens) || 0)) return;
+  const operation = Symbol('model-output-save');
+  modelPickerSaveOperation = operation;
+  modelPickerSaving = true;
+  renderModelOutputControl();
+  try {
+    if (!await selectSessionTextModel({ ...selection, maxOutputTokens: status.requested }, targetSession)) return;
+    if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession.id) return;
+    setModelPickerMenuNotice('输出额度已保存，下次请求生效');
+  } catch (error) {
+    if (modelPickerSaveOperation === operation && state.currentSession?.id === targetSession.id) {
+      setModelPickerMenuNotice(`保存失败：${error?.message || error}`);
+    }
+  } finally {
+    if (modelPickerSaveOperation === operation) {
+      modelPickerSaveOperation = null;
+      modelPickerSaving = false;
+      if (state.currentSession?.id === targetSession.id) renderModelOutputControl();
+    }
+  }
+}
+
 function resetModelPickerDraft() {
   const selection = getAgentModelSelection();
   Object.assign(modelPickerDraft, {
@@ -22596,6 +22659,7 @@ function renderModelPickerPage() {
 
 function renderModelPickerWizard() {
   renderModelPickerChoices();
+  renderModelOutputControl();
   renderReasoningSpeedControl(modelPickerDraft.reasoningSpeed, { updateBadge: false });
   renderModelPickerPage();
 }
@@ -22762,7 +22826,7 @@ async function selectModelFromMenu(option) {
   $('#modelQuickSupplier').disabled = true;
   option.setAttribute('aria-busy', 'true');
   try {
-    if (!await selectSessionTextModel(selectedModel, targetSession)) return;
+    if (!await selectSessionTextModel({ ...selectedModel, maxOutputTokens: 0 }, targetSession)) return;
     if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
     modelPickerDraft.providerId = String(selectedModel.providerId || '');
     modelPickerDraft.supplierId = String(selectedModel.supplierId || '');
@@ -22782,7 +22846,10 @@ async function selectModelFromMenu(option) {
     if (modelPickerSaveOperation === operation) {
       modelPickerSaveOperation = null;
       modelPickerSaving = false;
-      if (state.currentSession?.id === targetSession?.id) renderModelPickerChoices();
+      if (state.currentSession?.id === targetSession?.id) {
+        renderModelPickerChoices();
+        renderModelOutputControl();
+      }
     }
   }
 }
@@ -22811,7 +22878,7 @@ async function saveModelPicker() {
       || String(current.supplierId || '') !== String(selectedModel.supplierId || '')
       || String(current.modelId || '') !== String(selectedModel.id || '');
     if (modelChanged) {
-      if (!await selectSessionTextModel(selectedModel, targetSession)) return;
+      if (!await selectSessionTextModel({ ...selectedModel, maxOutputTokens: 0 }, targetSession)) return;
     }
     if (reasoningSpeed !== getReasoningSpeedMode()) {
       await selectReasoningSpeed(reasoningSpeed, { notify: false });
@@ -22868,6 +22935,7 @@ function renderModelBadge() {
     pill.setAttribute('aria-label', `当前模型 ${name}，推理强度 ${speedLabel}，点击切换`);
   }
   renderReasoningSpeedControl();
+  renderModelOutputControl();
   renderMediaModelBadge();
   renderWorkModeControl();
   renderAccessModeControl();
@@ -24241,6 +24309,14 @@ function bindUI() {
     const option = event.target.closest('[data-model-picker-model]');
     if (!option) return;
     void selectModelFromMenu(option);
+  });
+  $('#modelQuickOutputTokens')?.addEventListener('input', renderModelOutputControl);
+  $('#modelQuickOutputSave')?.addEventListener('click', () => { void saveModelOutputTokens(); });
+  $('#modelQuickOutputTokens')?.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    event.stopPropagation();
+    void saveModelOutputTokens();
   });
   $('#reasoningSpeedSlider')?.addEventListener('input', event => {
     previewReasoningSlider(event.currentTarget.value);

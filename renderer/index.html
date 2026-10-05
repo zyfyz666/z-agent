@@ -518,6 +518,15 @@
                         <input id="reasoningSpeedSlider" type="range" min="0" max="100" step="1" value="25" aria-label="推理强度" aria-valuetext="中" />
                       </div>
                       <div id="modelQuickBillingNote" class="reasoning-speed-billing is-empty"></div>
+                      <div class="z-output-limit-control">
+                        <label for="modelQuickOutputTokens">单次输出额度（tokens）</label>
+                        <div class="z-output-limit-input-row">
+                          <input id="modelQuickOutputTokens" type="number" min="0" step="1" placeholder="自动" aria-describedby="modelQuickOutputSummary modelQuickOutputHint">
+                          <button id="modelQuickOutputSave" type="button">保存</button>
+                        </div>
+                        <p id="modelQuickOutputSummary" class="z-output-limit-summary" aria-live="polite"></p>
+                        <p id="modelQuickOutputHint" class="z-output-limit-hint">留空或 0 为自动。仅当前对话，下次请求生效。</p>
+                      </div>
                     </div>
                     <div id="modelQuickModelsView" class="model-quick-view hidden" aria-label="可选模型">
                       <span class="model-quick-field-label">模型</span>
@@ -2154,6 +2163,10 @@
         <option value="max" selected>最高</option>
       </select>
       <p id="zObserverReasoningHint">与主模型独立设置，默认最高。仅用于模型观察，从下一轮任务生效。</p>
+      <label for="zObserverOutputTokens">观察者单次输出额度（tokens）</label>
+      <input id="zObserverOutputTokens" type="number" min="0" step="1" placeholder="自动" aria-describedby="zObserverOutputSummary zObserverOutputHint">
+      <p id="zObserverOutputSummary" class="z-output-limit-summary" aria-live="polite"></p>
+      <p id="zObserverOutputHint">留空或 0 为自动。与主模型独立，下轮任务生效。</p>
       <details id="zObserverDetails" hidden>
         <summary>细节模式</summary>
         <label for="zObserverEvery">检查间隔（工具动作数）</label>
@@ -2164,6 +2177,7 @@
       <footer><button id="zConnectionCancel" type="button">取消</button><button id="zConnectionSave" type="submit">保存</button></footer>
     </form>
   </dialog>
+  <script src="../lib/model-output-limits.js"></script>
   <script src="z-connection-controls.js"></script>
   <script src="wd-monitor.js"></script>
   <script src="renderer.js"></script>

@@ -147,6 +147,7 @@ test('a model change freezes the history revision and its late response cannot o
 
 test('the actual menu callback saves to its original conversation without repainting the other conversation menu', async () => {
   const f = fixture();
+  f.a.modelSelection.maxOutputTokens = 64000;
   const chosen = { ...model('chosen'), id: 'chosen' };
   Object.assign(f.context, {
     modelPickerSaving: false, modelPickerSaveOperation: null,
@@ -163,6 +164,7 @@ test('the actual menu callback saves to its original conversation without repain
   };
   const pending = f.context.selectModelFromMenu(option);
   assert.equal(f.saves[0].id, 'A');
+  assert.equal(f.saves[0].selection.maxOutputTokens, 0, 'a different model starts with its automatic output allowance');
   f.context.state.currentSession = f.b;
   f.saves[0].resolve({ ok: true, id: 'A', modelSelection: model('chosen') });
   await pending;
@@ -219,4 +221,90 @@ test('global model notifications refresh the catalog without replacing conversat
   assert.equal(f.b.modelSelection.modelId, 'b');
   assert.equal(f.context.state.config.agentModel.modelId, 'new-global');
   assert.deepEqual(f.badges, [{ session: 'A', model: 'a' }]);
+});
+
+test('output cap saves belong to the captured conversation and leave a running model snapshot intact', async () => {
+  const f = fixture();
+  f.a.modelSelection.maxOutputTokens = 24000;
+  f.b.modelSelection.maxOutputTokens = 48000;
+  const runCtx = {};
+  f.context.setRunModelPresentation(runCtx, f.context.getAgentModelSelection(f.a));
+  f.context.state.activeRuns.set('A', runCtx);
+  const pending = f.context.selectSessionTextModel({ ...f.a.modelSelection, maxOutputTokens: 64000 }, f.a);
+  assert.equal(f.saves[0].selection.maxOutputTokens, 64000);
+  f.context.state.currentSession = f.b;
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(f.a.modelSelection.maxOutputTokens, 64000);
+  assert.equal(f.b.modelSelection.maxOutputTokens, 48000);
+  assert.equal(runCtx.modelSelection.maxOutputTokens, 24000);
+  assert.equal(f.context.state.config.agentModel.maxOutputTokens, undefined);
+});
+
+test('run submission freezes the selected output cap before subsequent UI changes', async () => {
+  const f = fixture();
+  f.a.modelSelection.maxOutputTokens = 64000;
+  const runCtx = {};
+  const pending = f.context.runOpenCodeLoop(f.a, null, runCtx);
+  f.a.modelSelection.maxOutputTokens = 12000;
+  await pending;
+  assert.equal(f.calls[0].modelSelection.maxOutputTokens, 64000);
+  assert.equal(runCtx.modelSelection.maxOutputTokens, 64000);
+});
+
+function outputMenuFixture() {
+  const f = fixture();
+  f.a.modelSelection.maxOutputTokens = 24000;
+  f.b.modelSelection.maxOutputTokens = 48000;
+  const elements = new Map(['#modelQuickOutputTokens', '#modelQuickOutputSummary', '#modelQuickOutputSave'].map(id => [id, {
+    value: '', dataset: {}, disabled: false, removeAttribute(name) { delete this[name]; },
+    setCustomValidity(message) { this.validationMessage = message; }, reportValidity() {}
+  }]));
+  const notices = [];
+  Object.assign(f.context, {
+    document: { documentElement: { lang: 'zh' } },
+    window: { ZConnectionControls: { outputLimitState(_selection, value) {
+      const requested = Number(value) || 0;
+      return { requested, automatic: { maximum: 128000, verified: true }, summary: `${requested || 128000} tokens` };
+    } } },
+    modelPickerSaving: false, modelPickerSaveOperation: null,
+    $: selector => elements.get(selector),
+    setModelPickerMenuNotice: message => notices.push(message)
+  });
+  vm.runInContext(section('function renderModelOutputControl(', 'function resetModelPickerDraft('), f.context);
+  return { ...f, elements, notices, input: elements.get('#modelQuickOutputTokens') };
+}
+
+test('the quick output input keeps edits during redraw and resets to each conversation saved value', () => {
+  const f = outputMenuFixture();
+  f.context.renderModelOutputControl();
+  assert.equal(f.input.value, '24000');
+  f.input.value = '64000';
+  f.context.renderModelOutputControl();
+  f.context.renderModelOutputControl();
+  assert.equal(f.input.value, '64000');
+  assert.match(f.elements.get('#modelQuickOutputSummary').textContent, /待保存/);
+  f.context.state.currentSession = f.b;
+  f.context.renderModelOutputControl();
+  assert.equal(f.input.value, '48000');
+  f.context.state.currentSession = f.a;
+  f.context.renderModelOutputControl();
+  assert.equal(f.input.value, '24000');
+});
+
+test('the actual quick output save targets its original conversation without announcing completion in another', async () => {
+  const f = outputMenuFixture();
+  f.context.renderModelOutputControl();
+  f.input.value = '';
+  const pending = f.context.saveModelOutputTokens();
+  assert.equal(f.saves[0].id, 'A');
+  assert.equal(f.saves[0].selection.maxOutputTokens, 0);
+  f.context.state.currentSession = f.b;
+  f.context.renderModelOutputControl();
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(f.a.modelSelection.maxOutputTokens, 0);
+  assert.equal(f.b.modelSelection.maxOutputTokens, 48000);
+  assert.equal(f.input.value, '48000');
+  assert.deepEqual(f.notices, []);
 });

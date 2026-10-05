@@ -901,7 +901,7 @@ test('bounds provider reservation and tool output for stable multi-step prefill'
       { id: 'alpha', command: 'alpha', enabled: true }
     ]
   });
-  assert.equal(config.provider.openai.models['gpt-5.6-sol'].limit.output, 32_768);
+  assert.equal(config.provider.openai.models['gpt-5.6-sol'].limit.output, 128_000);
   assert.equal(config.provider.openai.models['gpt-5.6-sol'].limit.context, 1_000_000);
   assert.deepEqual(config.tool_output, { max_lines: 800, max_bytes: 98_304 });
   assert.equal(config.compaction.preserve_recent_tokens, 24_000);

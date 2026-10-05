@@ -1,6 +1,6 @@
 (function (root) {
   'use strict';
-  let host, initialized = false, entries = [], loading = 0, saving = false;
+  let host, initialized = false, entries = [], loading = 0, saving = false, outputSelectionKey = '';
   const $ = id => document.getElementById(id);
   const key = value => JSON.stringify([value.providerId, value.supplierId]);
   const t = value => document.documentElement.lang === 'en' ? root.ZI18n?.translate(value) || value : value;
@@ -11,6 +11,45 @@
     return Object.hasOwn(reasoningLabels, normalized) ? normalized : 'max';
   };
   const observer = () => host.config?.observer || { model: null, judgeEvery: 6, reasoningEffort: 'max' };
+  function outputLimitState(selection = {}, value = 0, { native = false } = {}) {
+    const raw = String(value ?? '').trim();
+    const requested = raw ? Number(raw) : 0;
+    if (!Number.isSafeInteger(requested) || requested < 0) return { error: t('请输入 0 或正整数。') };
+    const resolve = root.ZModelOutputLimits?.resolveOutputLimit;
+    if (!resolve) return { error: t('输出额度信息暂不可用，请重新打开。') };
+    const options = { modelId: selection.modelId || selection.id || '', capabilities: selection.capabilities || {},
+      contextWindow: selection.contextWindow, native };
+    const automatic = resolve({ ...options, maxOutputTokens: 0 });
+    if (requested && automatic.maximum > 0 && requested > automatic.maximum) {
+      return { requested, automatic, error: `${t(automatic.verified ? '不能超过已确认上限' : '不能超过当前额度')} ${Number(automatic.maximum).toLocaleString()} tokens` };
+    }
+    const resolution = requested ? resolve({ ...options, maxOutputTokens: requested }) : automatic;
+    const labels = { official: '官方资料', 'alias-reference': '型号参考（未确认）', declared: '连接声明',
+      legacy: '兼容默认（未确认）', unknown: '上限未确认', manual: '手动' };
+    const origin = t(labels[automatic.source] || '上限未确认');
+    const tokens = Number(resolution.tokens);
+    const amount = Number.isFinite(tokens) && tokens > 0 ? `${tokens.toLocaleString()} tokens` : t('未确认');
+    const unverified = !automatic.verified && !origin.includes(t('未确认')) ? ` · ${t('上限未确认')}` : '';
+    return { requested, automatic, resolution,
+      summary: `${t(requested ? '手动' : '自动')} · ${amount} · ${origin}${unverified}` };
+  }
+  function renderOutputControl() {
+    const input = $('zObserverOutputTokens');
+    const summary = $('zObserverOutputSummary');
+    const ruleOnly = $('zConnectionSelect').value === 'rules';
+    const entry = entries.find(item => key(item) === $('zConnectionSelect').value);
+    const selected = entry?.models.find(item => item.id === $('zConnectionModel').value);
+    const identity = ruleOnly ? 'rules' : JSON.stringify([entry?.providerId, entry?.supplierId, selected?.id]);
+    if (outputSelectionKey && outputSelectionKey !== identity) input.value = '';
+    outputSelectionKey = identity;
+    input.disabled = saving || ruleOnly || !selected;
+    input.removeAttribute('max');
+    const status = ruleOnly ? { summary: t('规则模式不调用模型。') } : outputLimitState(selected || {}, input.value);
+    if (status.automatic?.maximum > 0) input.max = String(status.automatic.maximum);
+    input.setCustomValidity(status.error || '');
+    summary.textContent = status.error || status.summary;
+    summary.dataset.error = String(!!status.error);
+  }
   function render() {
     $('zObserverName').textContent = observer().model?.name || t('规则');
     const effortLabel = observer().model ? ` · ${t('观察者思考强度')}：${t(reasoningLabels[reasoningEffort(observer().reasoningEffort)])}` : '';
@@ -22,6 +61,7 @@
     $('zObserverReasoningHint').textContent = t(ruleOnly
       ? '规则模式不调用模型；选择观察者模型后可调整思考强度。'
       : '与主模型独立设置，默认最高。仅用于模型观察，从下一轮任务生效。');
+    renderOutputControl();
   }
   function models(preferred) {
     const ruleOnly = $('zConnectionSelect').value === 'rules';
@@ -42,6 +82,11 @@
     $('zObserverEvery').disabled = false;
     $('zObserverReasoning').value = reasoningEffort(observer().reasoningEffort);
     $('zObserverReasoning').disabled = true;
+    outputSelectionKey = '';
+    $('zObserverOutputTokens').value = observer().maxOutputTokens > 0 ? String(observer().maxOutputTokens) : '';
+    $('zObserverOutputTokens').disabled = true;
+    $('zObserverOutputTokens').setCustomValidity('');
+    $('zObserverOutputSummary').textContent = '';
     $('zConnectionNotice').textContent = t('正在读取连接…');
     $('zConnectionSelect').disabled = true;
     $('zConnectionSave').disabled = true;
@@ -55,6 +100,7 @@
       const current = result.observer?.model;
       $('zObserverEvery').value = result.observer?.judgeEvery || 6;
       $('zObserverReasoning').value = reasoningEffort(result.observer?.reasoningEffort);
+      $('zObserverOutputTokens').value = result.observer?.maxOutputTokens > 0 ? String(result.observer.maxOutputTokens) : '';
       $('zConnectionSelect').replaceChildren(
         option('rules', t('仅规则观察（不调用模型）')),
         ...entries.map(entry => option(key(entry), entry.name))
@@ -75,15 +121,23 @@
     const entry = entries.find(item => key(item) === $('zConnectionSelect').value);
     const selected = entry?.models.find(item => item.id === $('zConnectionModel').value);
     if ($('zConnectionSelect').value !== 'rules' && !selected) return;
+    const output = selected ? outputLimitState(selected, $('zObserverOutputTokens').value) : { requested: 0 };
+    if (output.error) {
+      $('zConnectionNotice').textContent = output.error;
+      $('zObserverOutputTokens').reportValidity();
+      return;
+    }
     saving = true;
     $('zConnectionSave').disabled = true;
     $('zConnectionSelect').disabled = true; $('zConnectionModel').disabled = true; $('zObserverEvery').disabled = true;
     $('zObserverReasoning').disabled = true;
+    $('zObserverOutputTokens').disabled = true;
     $('zConnectionNotice').textContent = t('正在保存…');
     try {
       const result = await host.api.configureObserver({
         judgeEvery: Number($('zObserverEvery').value),
         reasoningEffort: reasoningEffort($('zObserverReasoning').value),
+        maxOutputTokens: output.requested,
         model: selected ? { providerId: entry.providerId, supplierId: entry.supplierId, modelId: selected.id } : null
       });
       if (result.error) throw new Error(result.error);
@@ -98,7 +152,7 @@
       renderReasoningControl();
     }
   }
-  root.ZConnectionControls = { mount(options) {
+  root.ZConnectionControls = { outputLimitState, mount(options) {
     host = options;
     if (!initialized) {
       initialized = true;
@@ -107,6 +161,8 @@
       $('zObserverPill').addEventListener('click', open);
       document.addEventListener('click', event => { if (event.target.closest('[data-observer-config]')) open(); });
       $('zConnectionSelect').addEventListener('change', () => models($('zConnectionModel').value));
+      $('zConnectionModel').addEventListener('change', renderOutputControl);
+      $('zObserverOutputTokens').addEventListener('input', renderOutputControl);
       $('zConnectionForm').addEventListener('submit', save);
       $('zConnectionClose').addEventListener('click', close);
       $('zConnectionCancel').addEventListener('click', close);

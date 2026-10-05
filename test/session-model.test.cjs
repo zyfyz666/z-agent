@@ -13,6 +13,7 @@ const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handof
 const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 const { isDefaultSessionTitle } = require('../lib/session-policy');
+const { normalizeOutputTokens, validateOutputTokens } = require('../lib/model-output-limits');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -55,6 +56,7 @@ function fixture(t) {
     } }, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
+    normalizeOutputTokens, validateOutputTokens,
     isDefaultSessionTitle,
     MODEL_PROVIDERS: providers,
     loadConfig: () => structuredClone(config),
@@ -152,6 +154,41 @@ test('history initialization preserves removed models and can recover a supplier
   assert.deepEqual(inferSessionModelSelection({ messages: [{ role: 'user', modelSelection: missing },
     { role: 'assistant', agentRun: { providerId: missing.providerId, modelId: missing.modelId } }] }, selection('a')),
   { ...missing, name: 'removed-model', capabilities: {} });
+});
+
+test('session output caps retain explicit values and preserve legacy omitted fields', () => {
+  const original = selection('a');
+  assert.equal(Object.hasOwn(sessionModelSnapshot(original), 'maxOutputTokens'), false);
+  assert.equal(sessionModelSnapshot({ ...original, maxOutputTokens: '64000' }).maxOutputTokens, 64000);
+  for (const value of [0, '', undefined, -1, 0.5, Infinity, 'bad']) {
+    assert.equal(sessionModelSnapshot({ ...original, maxOutputTokens: value }).maxOutputTokens, 0);
+  }
+  const restored = inferSessionModelSelection({ modelSelection: { ...original, maxOutputTokens: 24000 } }, selection('b'));
+  assert.equal(restored.maxOutputTokens, 24000);
+});
+
+test('manual output caps persist per conversation through reload, stale message saves, and run admission', async t => {
+  const f = fixture(t);
+  f.editConfig(config => { config.context.window = 1000000; });
+  const a = await f.create();
+  const b = await f.create();
+  const originalConfig = JSON.stringify(f.config());
+  const first = await f.set(a.id, { ...selection('a'), maxOutputTokens: 64000 });
+  assert.equal(first.ok, true, first.error);
+  const second = await f.set(b.id, { ...selection('b'), maxOutputTokens: 8000 });
+  assert.equal(second.ok, true, second.error);
+  await f.save({ ...a, messages: [{ role: 'user', content: 'stale run progress' }] });
+  assert.equal((await f.read(a.id)).modelSelection.maxOutputTokens, 64000);
+  assert.equal(f.disk(b.id).modelSelection.maxOutputTokens, 8000);
+  const started = await f.start({ zSessionId: a.id });
+  assert.equal(started.ok, true, started.error);
+  assert.equal(started.selection.maxOutputTokens, 64000);
+  assert.equal(started.runtime.maxOutputTokens, 64000);
+  assert.equal(JSON.stringify(f.config()), originalConfig);
+  const automatic = await f.set(a.id, { ...selection('a'), maxOutputTokens: 0 });
+  assert.equal(automatic.ok, true, automatic.error);
+  assert.equal(f.disk(a.id).modelSelection.maxOutputTokens, 0);
+  assert.equal(f.disk(b.id).modelSelection.maxOutputTokens, 8000);
 });
 
 test('new conversations snapshot the default once and A/B selection changes do not touch global or sibling settings', async t => {

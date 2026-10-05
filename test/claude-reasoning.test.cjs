@@ -10,6 +10,7 @@ function config(modelId, reasoningSpeed, extra = {}) {
   return buildOpenCodeConfig({
     providerId: 'fixture-provider', modelId, reasoningSpeed,
     baseUrl: 'http://127.0.0.1:9/v1', apiFormat: 'anthropic',
+    contextWindow: 1000000,
     capabilities: { reasoning: true }, enableSubagents: false, mcpServers: [], ...extra
   });
 }
@@ -36,7 +37,8 @@ test('namespace, dated, dotted and legacy-order Claude identities keep their exa
     const model = built.provider['fixture-provider'].models[id];
     assert.equal(model.id, id);
     assert.deepEqual(model.options, { thinking: { type: 'adaptive', display: 'summarized' }, effort: 'max' });
-    assert.equal(model.limit.output, 32768, 'this fix preserves the existing output ceiling');
+    assert.equal(model.limit.output, ['anthropic/claude-opus-4-7', 'claude-opus-4.7'].includes(id) ? 128000 : 32000,
+      'documented references use their output budget; unverified aliases retain the existing native fallback');
   }
 });
 
@@ -79,7 +81,10 @@ test('earlier thinking models get legal high/max budgets without an unsupported 
     const max = resolveProviderReasoning(id, 'max', { apiFormat: 'anthropic' });
     assert.deepEqual(high.options, { thinking: { type: 'enabled', budgetTokens: 16000 } });
     assert.deepEqual(max.options, { thinking: { type: 'enabled', budgetTokens: 31999 } });
-    assert.deepEqual(modelOptions(id, 'low'), high.options);
+    const native = config(id, 'low').provider['fixture-provider'].models[id];
+    assert.deepEqual(modelOptions(id, 'low'), { thinking: { type: 'enabled',
+      budgetTokens: ['claude-sonnet-4-5', 'claude-haiku-4-5'].includes(id) ? 16000 : 15999 } });
+    assert.ok(native.limit.output + native.options.thinking.budgetTokens <= 64000);
   }
 });
 

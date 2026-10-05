@@ -100,6 +100,7 @@ const { detectVsCode, launchVsCode } = require('./lib/vscode-launcher');
 const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
 const { normalizeObserverSettings } = require('./lib/observer-model');
+const { normalizeOutputTokens, validateOutputTokens } = require('./lib/model-output-limits');
 const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
 const { sessionConversationRevision, assertConversationRevision, rewindBoundary, createRewindBackup,
   restoreRewindSnapshot, createRewoundSession } = require('./lib/session-rewind');
@@ -3079,6 +3080,7 @@ function getOpenCodeRuntimeConfig(cfg = loadConfig(), options = {}) {
     modelId: selection.modelId,
     modelName: model.name || selection.name || selection.modelId,
     capabilities: model.capabilities || selection.capabilities || {},
+    maxOutputTokens: selection.maxOutputTokens,
     contextWindow: cfg.context?.maxTokens,
     compactionThreshold: cfg.context?.compactionThreshold,
     apiKey: connection.apiKey,
@@ -3545,7 +3547,10 @@ function normalizeAgentModelSelection(cfg) {
     modelId: currentModel.id,
     modelType: 'text',
     name: currentModel.name || currentModel.id,
-    capabilities: currentModel.capabilities || {}
+    capabilities: currentModel.capabilities || {},
+    ...(stored.providerId === providerId && stored.supplierId === supplierId
+      && storedModelId === currentModel.id && Object.hasOwn(stored, 'maxOutputTokens')
+      ? { maxOutputTokens: normalizeOutputTokens(stored.maxOutputTokens) } : {})
   };
   cfg.api.provider = providerId;
   cfg.api.providerActiveSupplierIds[providerId] = supplierId;
@@ -6005,7 +6010,7 @@ function composerConnections(cfg) {
     if (!isConfiguredSupplier(cfg, provider.id, supplier)) return [];
     const models = getProviderSupplierCatalog(provider.id, supplier)
       .filter(model => getModelType(provider.id, model) === 'text')
-      .map(model => ({ id: model.id, name: model.name || model.id }));
+      .map(model => ({ id: model.id, name: model.name || model.id, capabilities: model.capabilities || {} }));
     if (!models.length) return [];
     return [{ providerId: provider.id, supplierId: supplier.id,
       name: supplier.id === 'official' ? provider.name : `${provider.name} · ${supplier.name}`, models }];
@@ -6023,6 +6028,7 @@ function observerConnectionForRun(cfg) {
   const connection = getProviderConnectionForSupplier(cfg, selection.providerId, selection.supplierId);
   const model = getProviderModels(cfg, selection.providerId, selection.supplierId).find(item => item.id === selection.modelId);
   return { ...selection, ...connection, reasoningEffort: observer.reasoningEffort,
+    maxOutputTokens: observer.maxOutputTokens,
     capabilities: model?.capabilities || {}, apiFormat: MODEL_PROVIDERS[selection.providerId]?.apiFormat || 'openai' };
 }
 
@@ -6039,6 +6045,15 @@ ipcMain.handle('observer:configure', (_event, payload = {}) => {
     const entry = composerConnections(cfg).find(item => item.providerId === model.providerId && item.supplierId === model.supplierId);
     const selected = entry?.models.find(item => item.id === model.modelId);
     if (!selected) return { error: '请选择已启用 API 中的文本模型' };
+    if (Object.hasOwn(payload, 'maxOutputTokens')) {
+      const error = validateOutputTokens(payload.maxOutputTokens, { modelId: selected.id, capabilities: selected.capabilities });
+      if (error) return { error };
+    }
+    const previous = cfg.observer?.model;
+    if (!Object.hasOwn(payload, 'maxOutputTokens') && (previous?.providerId !== model.providerId
+      || previous?.supplierId !== model.supplierId || previous?.modelId !== model.modelId)) {
+      payload = { ...payload, maxOutputTokens: 0 };
+    }
     payload = { ...payload, model: { providerId: entry.providerId, supplierId: entry.supplierId, modelId: selected.id, name: selected.name } };
   }
   cfg.observer = normalizeObserverSettings({ ...cfg.observer, ...payload });
@@ -6852,6 +6867,15 @@ function resolveSessionModelSelection(cfg, requested) {
   const model = getProviderModels(cfg, selection.providerId, selection.supplierId)
     .find(item => item.id === selection.modelId && getModelType(selection.providerId, item) === 'text');
   if (!model) return fail();
+  if (Object.hasOwn(requested, 'maxOutputTokens')) {
+    const message = validateOutputTokens(requested.maxOutputTokens, { modelId: model.id,
+      capabilities: model.capabilities, contextWindow: cfg.context?.maxTokens });
+    if (message) {
+      const error = new Error(message);
+      error.code = 'MODEL_OUTPUT_LIMIT_INVALID';
+      throw error;
+    }
+  }
   return sessionModelSnapshot({ ...selection, name: model.name || model.id, capabilities: model.capabilities || {} });
 }
 

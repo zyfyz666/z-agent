@@ -21,17 +21,17 @@ for (const effort of levels) {
     const anthropic = observerRequest({ ...connection, reasoningEffort: effort }, {}).body;
     assert.deepEqual(anthropic.thinking, { type: 'adaptive', display: 'summarized' });
     assert.deepEqual(anthropic.output_config, { effort });
-    assert.equal(anthropic.max_tokens, 32768);
+    assert.equal(anthropic.max_tokens, 128000);
     assert.equal(anthropic.reasoning_effort, undefined);
     assert.equal(anthropic.effort, undefined);
 
     const responses = observerRequest({ ...connection, modelId: 'gpt-6', apiFormat: 'responses', reasoningEffort: effort }, {}).body;
     assert.deepEqual(responses.reasoning, { effort });
-    assert.equal(responses.max_output_tokens, 32768);
+    assert.equal(responses.max_output_tokens, 128000);
     assert.equal(responses.reasoning_effort, undefined);
     const chat = observerRequest({ ...connection, apiFormat: 'openai', reasoningEffort: effort }, {}).body;
     assert.equal(chat.reasoning_effort, effort);
-    assert.equal(chat.max_tokens, 32768);
+    assert.equal(chat.max_tokens, 128000);
     for (const body of [anthropic, responses, chat]) {
       assert.equal(body.reasoningEffort, undefined);
       assert.equal(body.reasoningEffortAdjusted, undefined);
@@ -83,7 +83,7 @@ test('known OpenAI profiles bound efforts and omit unsupported thinking controls
     for (const modelId of ['gpt-5.4', 'o3', 'openai/o4-mini']) {
       const body = observerRequest({ ...connection, apiFormat, modelId }, {}).body;
       assert.equal(body.reasoning?.effort || body.reasoning_effort, 'high');
-      if (apiFormat === 'openai') assert.equal(body.max_completion_tokens, 32768);
+      if (apiFormat === 'openai') assert.equal(body.max_completion_tokens, modelId === 'gpt-5.4' ? 128000 : 100000);
     }
     for (const modelId of ['gpt-4o', 'gpt-4.1', 'o1-mini']) {
       const body = observerRequest({ ...connection, apiFormat, modelId }, {}).body;

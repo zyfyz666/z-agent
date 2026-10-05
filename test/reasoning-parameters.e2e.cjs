@@ -137,8 +137,8 @@ const server = http.createServer((request, response) => {
             assert.equal(wire.thinking, null);
             assert.equal(wire.output_config, null);
           }
-          assert.equal(wire.max_tokens, item.id === 'opuslegacy-max' ? 48000 : 32000,
-            'the native SDK adds the legacy thinking budget to its completion output allowance');
+          assert.equal(wire.max_tokens, 64000,
+            'the native total output, including legacy thinking, respects the supplier ceiling');
           assert.equal(wire.stream, true);
         }
         console.log(JSON.stringify(item));

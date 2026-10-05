@@ -201,3 +201,55 @@ test('remote model catalogs omit models marked unavailable by the provider', () 
     { id: 'deprecated-model', status: 'deprecated' }
   ]), [{ id: 'available', name: 'available' }]);
 });
+
+test('provider output caps survive catalog normalization and reach observer requests', () => {
+  const { decorateModels } = require('../lib/model-capabilities');
+  const { observerRequest } = require('../lib/observer-model');
+  const { resolveOutputLimit } = require('../lib/model-output-limits');
+  for (const [modelId, apiFormat] of [['claude-opus-4-7', 'anthropic'], ['gpt-6-astra', 'responses']]) {
+    const raw = [{ id: modelId, capabilities: { maxOutputTokens: 16000, vision: true } }];
+    let models = parseRemoteModelCatalog({ data: raw });
+    for (let pass = 0; pass < 3; pass++) models = decorateModels('openai', normalizeRemoteModels(models));
+    const model = models[0];
+    assert.equal(model.id, modelId);
+    assert.equal(model.capabilities.maxOutputTokens, 16000);
+    assert.equal(model.capabilities.outputLimitSource, 'declared');
+    assert.equal(model.capabilities.vision, true);
+    assert.equal(resolveOutputLimit({ modelId, capabilities: model.capabilities, contextWindow: 1000000 }).tokens, 16000);
+    const body = observerRequest({ modelId, apiFormat, baseUrl: 'https://fixture.invalid/v1',
+      apiKey: 'fixture', capabilities: model.capabilities }, {}).body;
+    assert.equal(body.max_tokens || body.max_output_tokens, 16000);
+    assert.deepEqual(raw, [{ id: modelId, capabilities: { maxOutputTokens: 16000, vision: true } }]);
+  }
+});
+
+test('normalizing decorated output caps preserves their source and verification state', () => {
+  const { decorateModels } = require('../lib/model-capabilities');
+  const { resolveOutputLimit } = require('../lib/model-output-limits');
+  for (const modelId of ['gpt-6-astra', 'gpt-5.6-sol-2026-07-09', 'claude-opus-4-7[1M]']) {
+    const original = decorateModels('openai', [{ id: modelId }])[0];
+    let models = [original];
+    for (let pass = 0; pass < 3; pass++) {
+      models = normalizeRemoteModels(models);
+      assert.equal(models[0].capabilities.outputLimitSource, original.capabilities.outputLimitSource);
+      assert.equal(models[0].capabilities.outputLimitVerified, false);
+      models = decorateModels('openai', models);
+      const limit = resolveOutputLimit({ modelId, capabilities: models[0].capabilities });
+      assert.equal(limit.source, original.capabilities.outputLimitSource);
+      assert.equal(limit.verified, false);
+      assert.equal(models[0].id, modelId);
+    }
+  }
+});
+
+test('catalog output metadata accepts only positive integral caps and bounded provenance', () => {
+  for (const maxOutputTokens of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, true, [], {}, 'bad']) {
+    assert.deepEqual(normalizeRemoteModels([{ id: 'route', capabilities: {
+      maxOutputTokens, outputLimitSource: 'legacy', outputLimitVerified: false, vision: false
+    } }]), [{ id: 'route', name: 'route', capabilities: { vision: false } }]);
+  }
+  const [model] = normalizeRemoteModels([{ id: 'route', capabilities: {
+    maxOutputTokens: '4096', outputLimitSource: 'arbitrary', outputLimitVerified: 'true', contextWindow: 1000000
+  } }]);
+  assert.deepEqual(model.capabilities, { maxOutputTokens: 4096 });
+});

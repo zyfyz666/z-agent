@@ -2,6 +2,17 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installZI18n(global) {
   const ZH_EN = Object.freeze({
+    '单次输出额度（tokens）': 'Output tokens per request', '观察者单次输出额度（tokens）': 'Observer output tokens per request',
+    '留空或 0 为自动。仅当前对话，下次请求生效。': 'Blank or 0 means automatic. Applies to this conversation from the next request.',
+    '留空或 0 为自动。与主模型独立，下轮任务生效。': 'Blank or 0 means automatic. Independent of the main model; applies from the next task.',
+    '请输入 0 或正整数。': 'Enter 0 or a positive integer.', '不能超过已确认上限': 'Cannot exceed the confirmed limit',
+    '不能超过当前额度': 'Cannot exceed the current limit',
+    '输出额度信息暂不可用，请重新打开。': 'Output limit information is unavailable. Please reopen.',
+    '官方资料': 'Official documentation', '型号参考（未确认）': 'Model reference (unconfirmed)',
+    '连接声明': 'Connection declaration', '兼容默认（未确认）': 'Compatibility default (unconfirmed)',
+    '上限未确认': 'Limit unconfirmed', '未确认': 'Unconfirmed', '手动': 'Manual', '待保存': 'Unsaved',
+    '规则模式不调用模型。': 'Rule mode does not call a model.',
+    '输出额度已保存，下次请求生效': 'Output limit saved; applies from the next request',
     '运行巡检': 'Runtime checks', '等待运行巡检': 'Waiting for runtime checks', '等待任务开始': 'Waiting for a task',
     '此轮没有运行巡检记录': 'No runtime check record for this run', '等待工具返回': 'Waiting for a tool result',
     '执行中': 'Working', '等待用户授权': 'Waiting for user approval', '等待用户回复': 'Waiting for a user response',
