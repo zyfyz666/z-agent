@@ -7757,13 +7757,18 @@ async function selectSessionTextModel(selection, session = state.currentSession)
   const conversationRevision = Number(target.conversationRevision) || 0;
   const version = (sessionModelSelectionVersions.get(sessionId) || 0) + 1;
   sessionModelSelectionVersions.set(sessionId, version);
-  const requested = normalizeModelSelectionSnapshot({
-    ...selection,
-    reasoningSpeed: selection.reasoningSpeed ?? getAgentModelSelection(target).reasoningSpeed,
-    compactionThreshold: selection.compactionThreshold ?? getAgentModelSelection(target).compactionThreshold,
-    modelId: selection.modelId || selection.id,
-    modelType: 'text'
-  });
+  // Save only fields edited by this control. A second control may save before
+  // this request returns, so copying the current model would replay stale fields.
+  const normalized = normalizeModelSelectionSnapshot({ ...selection, modelId: selection.modelId || selection.id });
+  const requested = {};
+  for (const field of Object.keys(normalized)) {
+    if (Object.hasOwn(selection, field)) requested[field] = normalized[field];
+  }
+  if (Object.hasOwn(selection, 'id')) requested.modelId = normalized.modelId;
+  if (Object.hasOwn(selection, 'thinking') && !Object.hasOwn(selection, 'reasoningSpeed')) {
+    requested.reasoningSpeed = normalized.reasoningSpeed;
+  }
+  if (Object.hasOwn(requested, 'modelId')) requested.modelType = 'text';
   const result = await api.setSessionModel(sessionId, requested, conversationRevision);
   if (!result?.ok || result.id !== sessionId || !result.modelSelection) {
     throw new Error(result?.error || '对话模型保存失败');
@@ -16127,7 +16132,7 @@ async function saveContextThreshold({ restoreDefault = false } = {}) {
   setContextThresholdNotice();
   renderContextThresholdEditor();
   try {
-    const saved = await selectSessionTextModel({ ...getAgentModelSelection(session), compactionThreshold: tokens }, session);
+    const saved = await selectSessionTextModel({ compactionThreshold: tokens }, session);
     if (!saved) return false;
     if (state.currentSession?.id === sessionId) {
       if (contextThresholdDraft === draft) {
@@ -22819,7 +22824,7 @@ async function saveModelOutputTokens() {
   modelPickerSaving = true;
   renderModelOutputControl();
   try {
-    if (!await selectSessionTextModel({ ...selection, maxOutputTokens: status.requested }, targetSession)) return;
+    if (!await selectSessionTextModel({ maxOutputTokens: status.requested }, targetSession)) return;
     if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession.id) return;
     setModelPickerMenuNotice('输出额度已保存，下次请求生效');
   } catch (error) {
@@ -23157,9 +23162,13 @@ async function saveModelPicker() {
     const modelChanged = String(current.providerId || '') !== String(selectedModel.providerId || '')
       || String(current.supplierId || '') !== String(selectedModel.supplierId || '')
       || String(current.modelId || '') !== String(selectedModel.id || '');
-    if (modelChanged || reasoningSpeed !== getReasoningSpeedMode(targetSession)) {
-      if (!await selectSessionTextModel({ ...current, ...selectedModel, modelId: selectedModel.id,
-        reasoningSpeed, maxOutputTokens: modelChanged ? 0 : current.maxOutputTokens }, targetSession)) return;
+    const reasoningChanged = reasoningSpeed !== getReasoningSpeedMode(targetSession);
+    if (modelChanged || reasoningChanged) {
+      const patch = {
+        ...(modelChanged ? { ...selectedModel, modelId: selectedModel.id, maxOutputTokens: 0 } : {}),
+        ...(reasoningChanged ? { reasoningSpeed } : {})
+      };
+      if (!await selectSessionTextModel(patch, targetSession)) return;
     }
     if (modelPickerSaveOperation !== operation || state.currentSession?.id !== targetSession?.id) return;
     renderModelBadge();
@@ -23380,7 +23389,7 @@ async function selectReasoningSpeed(mode, { notify = true, session = state.curre
     if (mode === 'max' && !$('#modelPill')?.classList.contains('show-max-reasoning-notice')) showMaxReasoningNotice();
   }
   try {
-    if (!await selectSessionTextModel({ ...getAgentModelSelection(targetSession), reasoningSpeed: mode }, targetSession)) return false;
+    if (!await selectSessionTextModel({ reasoningSpeed: mode }, targetSession)) return false;
   } catch (error) {
     if (isCurrent()) clearMaxReasoningNotice();
     throw error;

@@ -316,6 +316,95 @@ test('per-conversation thresholds survive stale saves, model changes, frozen run
   assert.deepEqual(f.config(), global);
 });
 
+test('single-field model patches preserve identity and all other conversation settings', async t => {
+  const f = fixture(t);
+  const a = await f.create();
+  const initial = await f.set(a.id, { ...selection('a'), reasoningSpeed: 'high',
+    compactionThreshold: 700000, maxOutputTokens: 32000 });
+  assert.equal(initial.ok, true, initial.error);
+
+  const threshold = await f.set(a.id, { compactionThreshold: 625000 });
+  assert.equal(threshold.ok, true, threshold.error);
+  assert.equal(threshold.modelSelection.modelId, 'model-a');
+  assert.equal(threshold.modelSelection.reasoningSpeed, 'high');
+  assert.equal(threshold.modelSelection.maxOutputTokens, 32000);
+
+  const reasoning = await f.set(a.id, { reasoningSpeed: 'max' });
+  assert.equal(reasoning.ok, true, reasoning.error);
+  assert.equal(reasoning.modelSelection.modelId, 'model-a');
+  assert.equal(reasoning.modelSelection.compactionThreshold, 625000);
+  assert.equal(reasoning.modelSelection.maxOutputTokens, 32000);
+
+  const output = await f.set(a.id, { maxOutputTokens: 8000 });
+  assert.equal(output.ok, true, output.error);
+  assert.equal(output.modelSelection.modelId, 'model-a');
+  assert.equal(output.modelSelection.compactionThreshold, 625000);
+  assert.equal(output.modelSelection.reasoningSpeed, 'max');
+
+  const switched = await f.set(a.id, { providerId: 'fixture-b', supplierId: 'official',
+    modelId: 'model-b', maxOutputTokens: 0 });
+  assert.equal(switched.ok, true, switched.error);
+  assert.equal(switched.modelSelection.modelId, 'model-b');
+  assert.equal(switched.modelSelection.compactionThreshold, 625000);
+  assert.equal(switched.modelSelection.reasoningSpeed, 'max');
+  assert.equal(switched.modelSelection.maxOutputTokens, 0);
+});
+
+for (const [setting, patch, expected] of [
+  ['model', { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b' },
+    { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b', reasoningSpeed: 'medium', maxOutputTokens: 0 }],
+  ['reasoning', { reasoningSpeed: 'max' }, { modelId: 'model-a', reasoningSpeed: 'max' }]
+]) {
+  for (const thresholdFirst of [true, false]) {
+    test(`overlapping ${thresholdFirst ? `threshold then ${setting}` : `${setting} then threshold`} patches retain both changes`, async t => {
+      const f = fixture(t);
+      const a = await f.create();
+      const sibling = await f.create();
+      const beforeSibling = f.disk(sibling.id);
+      const global = f.config();
+      const threshold = { compactionThreshold: 625000 };
+      const gate = f.pauseWrite();
+      const first = f.set(a.id, thresholdFirst ? threshold : patch);
+      await gate.entered;
+      const second = f.set(a.id, thresholdFirst ? patch : threshold);
+      gate.release();
+      for (const result of await Promise.all([first, second])) assert.equal(result.ok, true, result.error);
+      const stored = f.disk(a.id).modelSelection;
+      assert.equal(stored.compactionThreshold, 625000);
+      for (const [field, value] of Object.entries(expected)) assert.equal(stored[field], value, field);
+      assert.deepEqual(f.disk(sibling.id), beforeSibling);
+      assert.deepEqual(f.config(), global);
+    });
+  }
+}
+
+test('identity patches reset an omitted output cap but still validate explicit caps for the new model', async t => {
+  const f = fixture(t);
+  f.editConfig(cfg => {
+    cfg.api.providerSuppliers['fixture-b'][0].models[0].capabilities.maxOutputTokens = 16000;
+  });
+  const a = await f.create();
+  await f.set(a.id, { maxOutputTokens: 64000, compactionThreshold: 625000, reasoningSpeed: 'high' });
+  const model = { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b' };
+  const before = f.disk(a.id);
+  const invalid = await f.set(a.id, { ...model, maxOutputTokens: 64000 });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.code, 'MODEL_OUTPUT_LIMIT_INVALID');
+  assert.deepEqual(f.disk(a.id), before);
+
+  const automatic = await f.set(a.id, model);
+  assert.equal(automatic.ok, true, automatic.error);
+  assert.equal(automatic.modelSelection.maxOutputTokens, 0);
+  assert.equal(automatic.modelSelection.compactionThreshold, 625000);
+  assert.equal(automatic.modelSelection.reasoningSpeed, 'high');
+  const explicit = await f.set(a.id, { ...model, maxOutputTokens: 8000 });
+  assert.equal(explicit.ok, true, explicit.error);
+  assert.equal(explicit.modelSelection.maxOutputTokens, 8000);
+  const sameModel = await f.set(a.id, model);
+  assert.equal(sameModel.ok, true, sameModel.error);
+  assert.equal(sameModel.modelSelection.maxOutputTokens, 8000, 'unchanged identity keeps the existing cap');
+});
+
 test('threshold IPC rejects invalid explicit values without saving them or changing the window', async t => {
   const f = fixture(t);
   const a = await f.create();

@@ -29,6 +29,7 @@ function fixture() {
   const a = { id: 'A', modelSelection: model('a'), messages: [{ role: 'user', content: 'Task A' }] };
   const b = { id: 'B', modelSelection: model('b'), messages: [] };
   const saves = [];
+  const persistedSelections = new Map();
   const badges = [];
   const calls = [];
   let completed;
@@ -39,7 +40,11 @@ function fixture() {
     api: {
       setSessionModel(id, selection, conversationRevision) {
         const pending = deferred();
-        saves.push({ id, selection, conversationRevision, ...pending });
+        const previous = persistedSelections.get(id)
+          || context.state.sessions.find(session => session.id === id)?.modelSelection || {};
+        const savedSelection = { ...previous, ...selection };
+        persistedSelections.set(id, savedSelection);
+        saves.push({ id, selection, savedSelection, conversationRevision, ...pending });
         return pending.promise;
       },
       setModelRole() { throw new Error('Text model must not mutate the global role'); },
@@ -240,7 +245,7 @@ test('output cap saves belong to the captured conversation and leave a running m
   const pending = f.context.selectSessionTextModel({ ...f.a.modelSelection, maxOutputTokens: 64000 }, f.a);
   assert.equal(f.saves[0].selection.maxOutputTokens, 64000);
   f.context.state.currentSession = f.b;
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(f.a.modelSelection.maxOutputTokens, 64000);
   assert.equal(f.b.modelSelection.maxOutputTokens, 48000);
@@ -306,9 +311,10 @@ test('the actual quick output save targets its original conversation without ann
   const pending = f.context.saveModelOutputTokens();
   assert.equal(f.saves[0].id, 'A');
   assert.equal(f.saves[0].selection.maxOutputTokens, 0);
+  assert.deepEqual(Object.keys(f.saves[0].selection), ['maxOutputTokens']);
   f.context.state.currentSession = f.b;
   f.context.renderModelOutputControl();
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(f.a.modelSelection.maxOutputTokens, 0);
   assert.equal(f.b.modelSelection.maxOutputTokens, 48000);
@@ -316,8 +322,7 @@ test('the actual quick output save targets its original conversation without ann
   assert.deepEqual(f.notices, []);
 });
 
-function reasoningFixture() {
-  const f = fixture();
+function reasoningFixture(f = fixture()) {
   f.a.modelSelection.reasoningSpeed = 'high';
   f.b.modelSelection.reasoningSpeed = 'low';
   f.context.state.config.api.reasoningSpeed = 'medium';
@@ -361,9 +366,10 @@ test('the reasoning slider persists only its captured conversation and does not 
   const pending = f.context.commitReasoningSlider(100);
   assert.equal(f.saves[0].id, 'A');
   assert.equal(f.saves[0].selection.reasoningSpeed, 'max');
+  assert.deepEqual(Object.keys(f.saves[0].selection), ['reasoningSpeed']);
   f.context.state.currentSession = f.b;
   f.context.modelPickerDraft.reasoningSpeed = 'low';
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(f.a.modelSelection.reasoningSpeed, 'max');
   assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
@@ -391,15 +397,14 @@ test('a late failed reasoning save cannot reset or display its error in another 
 test('a model-only selection keeps its conversation effort instead of inheriting another task or default', async () => {
   const f = reasoningFixture();
   const pending = f.context.selectSessionTextModel(model('other'));
-  assert.equal(f.saves[0].selection.reasoningSpeed, 'high');
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  assert.equal(Object.hasOwn(f.saves[0].selection, 'reasoningSpeed'), false);
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(f.a.modelSelection.reasoningSpeed, 'high');
   assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
 });
 
-function thresholdEditorFixture() {
-  const f = fixture();
+function thresholdEditorFixture(f = fixture()) {
   f.a.modelSelection.compactionThreshold = 250500;
   f.b.modelSelection.compactionThreshold = 800000;
   f.context.state.config.context = { maxTokens: 1000000, compactionThreshold: 800000 };
@@ -432,9 +437,10 @@ test('context drafts survive streaming redraw and save only their captured conve
   assert.equal(input.value, '400.125');
   const pending = f.context.saveContextThreshold();
   assert.equal(f.saves[0].selection.compactionThreshold, 400125);
+  assert.deepEqual(Object.keys(f.saves[0].selection), ['compactionThreshold']);
   f.context.state.currentSession = f.b;
   f.context.renderContextThresholdEditor();
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(f.a.modelSelection.compactionThreshold, 400125);
   assert.equal(f.b.modelSelection.compactionThreshold, 800000);
@@ -453,7 +459,7 @@ test('context input rejects invalid boundaries and reset copies the current defa
   f.context.state.config.context.compactionThreshold = 700000;
   const pending = f.context.saveContextThreshold({ restoreDefault: true });
   assert.equal(f.saves[0].selection.compactionThreshold, 700000);
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(f.elements.get('#contextQuickThresholdInput').value, '700');
   assert.equal(f.b.modelSelection.compactionThreshold, 800000);
@@ -467,14 +473,57 @@ test('a running context budget and frozen queued selection survive later thresho
   f.context.state.activeRuns.set('A', { runCtx, sessionRef: f.a });
   f.edit('500');
   const pending = f.context.saveContextThreshold();
-  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
   await pending;
   assert.equal(runCtx.runBudget.compressSoftThreshold, 250500);
   assert.equal(snapshot.compactionThreshold, 250500);
   assert.equal(f.a.modelSelection.compactionThreshold, 500000);
   assert.match(f.elements.get('#contextQuickThresholdHint').textContent, /250.5K.*下一次发送/);
   const modelChange = f.context.selectSessionTextModel(model('other'));
-  assert.equal(f.saves[1].selection.compactionThreshold, 500000);
-  f.saves[1].resolve({ ok: true, id: 'A', modelSelection: f.saves[1].selection });
+  assert.equal(Object.hasOwn(f.saves[1].selection, 'compactionThreshold'), false);
+  f.saves[1].resolve({ ok: true, id: 'A', modelSelection: f.saves[1].savedSelection });
   await modelChange;
+  assert.equal(f.a.modelSelection.compactionThreshold, 500000);
 });
+
+for (const otherControl of ['model', 'reasoning']) {
+  for (const thresholdFirst of [true, false]) {
+    test(`delayed ${thresholdFirst ? 'threshold then' : 'threshold after'} ${otherControl} saves preserve both edits`, async () => {
+      const f = reasoningFixture(thresholdEditorFixture());
+      f.edit('500');
+      if (otherControl === 'model') {
+        Object.assign(f.context, {
+          modelPickerSaving: false, modelPickerSaveOperation: null,
+          currentModelPickerModel: () => ({ ...model('chosen'), id: 'chosen' }),
+          setModelPickerNotice() {}, renderModelPickerPage() {}, closeModelPicker() {}
+        });
+        vm.runInContext(section('async function saveModelPicker(', 'function renderModelBadge('), f.context);
+      }
+      const saveThreshold = () => f.context.saveContextThreshold();
+      const saveOther = () => otherControl === 'model'
+        ? f.context.saveModelPicker()
+        : f.context.selectReasoningSpeed('low');
+      const first = thresholdFirst ? saveThreshold() : saveOther();
+      const second = thresholdFirst ? saveOther() : saveThreshold();
+      assert.equal(f.saves.length, 2);
+      const thresholdRequest = f.saves[thresholdFirst ? 0 : 1].selection;
+      const otherRequest = f.saves[thresholdFirst ? 1 : 0].selection;
+      assert.deepEqual(Object.keys(thresholdRequest), ['compactionThreshold']);
+      assert.equal(Object.hasOwn(otherRequest, 'compactionThreshold'), false);
+      if (otherControl === 'model') assert.equal(Object.hasOwn(otherRequest, 'reasoningSpeed'), false);
+      else assert.deepEqual(Object.keys(otherRequest), ['reasoningSpeed']);
+
+      // The main process returns the complete merged selection. Delivering its
+      // replies out of order must not replay the first request's old snapshot.
+      f.saves[1].resolve({ ok: true, id: 'A', modelSelection: f.saves[1].savedSelection });
+      await second;
+      f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].savedSelection });
+      await first;
+      assert.equal(f.a.modelSelection.compactionThreshold, 500000);
+      assert.equal(f.a.modelSelection.modelId, otherControl === 'model' ? 'chosen' : 'a');
+      assert.equal(f.a.modelSelection.reasoningSpeed, otherControl === 'reasoning' ? 'low' : 'high');
+      assert.equal(f.b.modelSelection.compactionThreshold, 800000);
+      assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
+    });
+  }
+}

@@ -7500,10 +7500,15 @@ async function setSessionModelRecord(id, requested, conversationRevision = 0) {
           code: 'SESSION_COMPACTION_THRESHOLD_INVALID' };
       }
     }
-    const modelSelection = resolveSessionModelSelection(cfg, { ...requested,
-      reasoningSpeed: requested?.reasoningSpeed ?? stored.modelSelection?.reasoningSpeed,
-      compactionThreshold: Object.hasOwn(requested || {}, 'compactionThreshold')
-        ? requested.compactionThreshold : stored.modelSelection?.compactionThreshold });
+    // Each control sends only the fields it changed. Merge inside the session
+    // write queue so independent saves retain the latest committed settings.
+    const merged = { ...stored.modelSelection, ...requested };
+    const modelChanged = ['providerId', 'supplierId', 'modelId'].some(field =>
+      String(merged[field] || '').trim() !== String(stored.modelSelection?.[field] || '').trim());
+    // Output caps belong to a particular model. Older model pickers omit this
+    // field when switching, which has always meant returning to automatic.
+    if (modelChanged && !Object.hasOwn(requested || {}, 'maxOutputTokens')) merged.maxOutputTokens = 0;
+    const modelSelection = resolveSessionModelSelection(cfg, merged);
     const data = { ...stored, modelSelection, updatedAt: Date.now() };
     await writeSessionFileAtomic(sessionPath(id), JSON.stringify(data, null, 2));
     await refreshSessionSummaryCache(id, data);
