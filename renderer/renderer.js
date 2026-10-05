@@ -47,10 +47,11 @@ function positiveContextTokens(value) {
   return Number.isSafeInteger(rounded) && rounded > 0 ? rounded : 0;
 }
 
-function configuredContextBudget(cfg = state.config) {
+function configuredContextBudget(cfg = state.config, selection = null) {
   const maxTokens = positiveContextTokens(cfg?.context?.maxTokens)
     || DEFAULT_CONTEXT_SETTINGS.maxTokens;
-  const requestedThreshold = positiveContextTokens(cfg?.context?.compactionThreshold)
+  const requestedThreshold = positiveContextTokens(selection?.compactionThreshold)
+    || positiveContextTokens(cfg?.context?.compactionThreshold)
     || DEFAULT_CONTEXT_SETTINGS.compactionThreshold;
   const compactionThreshold = requestedThreshold < maxTokens
     ? requestedThreshold
@@ -7721,6 +7722,7 @@ function getAgentModelSelection(session = state.currentSession) {
       name: String(stored.name || storedModelId),
       reasoningSpeed: normalizeSessionReasoningSpeed(stored.reasoningSpeed ?? state.config?.api?.reasoningSpeed,
         stored.thinking ?? state.config?.api?.thinking),
+      compactionThreshold: configuredContextBudget(state.config, stored).compressSoftThreshold,
       ...(Object.hasOwn(stored, 'maxOutputTokens') ? { maxOutputTokens: stored.maxOutputTokens } : {}),
       configName: String(stored.configName || (sessionSelection && !supplierId ? '' : getAgentModelConfigName(storedProvider, supplierId))),
       capabilities: { ...(stored.capabilities && Object.keys(stored.capabilities).length
@@ -7737,6 +7739,7 @@ function getAgentModelSelection(session = state.currentSession) {
     modelType: 'text',
     name: model?.name || modelId,
     reasoningSpeed: normalizeSessionReasoningSpeed(state.config?.api?.reasoningSpeed, state.config?.api?.thinking),
+    compactionThreshold: configuredContextBudget().compressSoftThreshold,
     configName: getAgentModelConfigName(
       state.config?.api?.provider,
       state.config?.api?.providerActiveSupplierIds?.[state.config?.api?.provider]
@@ -7757,6 +7760,7 @@ async function selectSessionTextModel(selection, session = state.currentSession)
   const requested = normalizeModelSelectionSnapshot({
     ...selection,
     reasoningSpeed: selection.reasoningSpeed ?? getAgentModelSelection(target).reasoningSpeed,
+    compactionThreshold: selection.compactionThreshold ?? getAgentModelSelection(target).compactionThreshold,
     modelId: selection.modelId || selection.id,
     modelType: 'text'
   });
@@ -7786,6 +7790,7 @@ function normalizeModelSelectionSnapshot(selection = {}) {
   const capabilities = source.capabilities && typeof source.capabilities === 'object' ? { ...source.capabilities } : {};
   const maxOutputTokens = Number(source.maxOutputTokens);
   return { providerId, supplierId, modelId, modelType, name, configName, capabilities,
+    ...(Object.hasOwn(source, 'compactionThreshold') ? { compactionThreshold: source.compactionThreshold } : {}),
     ...(Object.hasOwn(source, 'reasoningSpeed') || Object.hasOwn(source, 'thinking')
       ? { reasoningSpeed: normalizeSessionReasoningSpeed(source.reasoningSpeed, source.thinking) } : {}),
     ...(Object.hasOwn(source, 'maxOutputTokens') ? { maxOutputTokens:
@@ -9994,7 +9999,7 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
   } else if (event.type === 'z.model.response.started') {
     markOpenCodeResponseStarted(runCtx);
   } else if (event.type === 'z.context.budget') {
-    const configuredBudget = configuredContextBudget();
+    const configuredBudget = configuredContextBudget(state.config, runCtx.modelSelection);
     const budgetWindow = positiveContextTokens(data.contextWindow) || configuredBudget.contextWindow;
     const requestedSoftThreshold = positiveContextTokens(data.softThreshold)
       || configuredBudget.compressSoftThreshold;
@@ -11835,7 +11840,9 @@ async function rollbackMessageRun(msg, el) {
 
 function createRunCtx(sessionId, ui = true, workspace = '') {
   const controller = new AbortController();
-  const contextBudget = configuredContextBudget();
+  const session = state.currentSession?.id === sessionId ? state.currentSession
+    : state.activeRuns.get(sessionId)?.sessionRef || state.sessions.find(item => item.id === sessionId);
+  const contextBudget = configuredContextBudget(state.config, session?.modelSelection);
   return {
     sessionId: String(sessionId || ''),
     runId: createRendererRunId(sessionId),
@@ -14562,6 +14569,10 @@ function resolveAgentPresentationMode(modelId, explicitMode = '') {
 function setRunModelPresentation(runCtx, selection = {}) {
   if (!runCtx) return;
   runCtx.modelSelection = normalizeModelSelectionSnapshot(selection);
+  if (runCtx.runBudget && Number.isSafeInteger(selection.compactionThreshold) && selection.compactionThreshold > 0) {
+    runCtx.runBudget.compressSoftThreshold = Math.min(selection.compactionThreshold,
+      Math.max(1, runCtx.runBudget.contextWindow - 1));
+  }
   runCtx.providerId = String(selection.providerId || runCtx.providerId || '').trim();
   runCtx.supplierId = String(selection.supplierId || runCtx.supplierId || '').trim();
   runCtx.modelId = String(selection.modelId || selection.model || runCtx.modelId || '').trim();
@@ -16027,6 +16038,113 @@ function showTyping(show) {
 // used to display.
 let contextRingPanelOpen = false;
 const manualContextCompressionSessions = new Set();
+let contextThresholdEditorOpen = false;
+let contextThresholdDraft = { sessionId: '', value: '', savedTokens: 0, dirty: false };
+const contextThresholdSavingSessions = new Set();
+
+function positionContextRingPanel() {
+  const panel = $('#contextRingPanel');
+  if (!panel || !contextRingPanelOpen) return;
+  panel.style.setProperty('--context-panel-shift', '0px');
+  const bounds = panel.getBoundingClientRect();
+  const shift = bounds.top < 12 ? 12 - bounds.top
+    : bounds.bottom > window.innerHeight - 12 ? window.innerHeight - 12 - bounds.bottom : 0;
+  panel.style.setProperty('--context-panel-shift', `${shift}px`);
+}
+
+function setContextThresholdNotice(message = '', stateName = '') {
+  const notice = $('#contextQuickThresholdNotice');
+  if (!notice) return;
+  notice.textContent = message;
+  notice.dataset.state = stateName;
+  notice.classList.toggle('hidden', !message);
+  if (contextRingPanelOpen) requestAnimationFrame(positionContextRingPanel);
+}
+
+function renderContextThresholdEditor() {
+  const input = $('#contextQuickThresholdInput');
+  if (!input) return;
+  const session = state.currentSession;
+  const sessionId = String(session?.id || '');
+  const budget = configuredContextBudget(state.config, session?.modelSelection);
+  const changedSession = contextThresholdDraft.sessionId !== sessionId;
+  if (changedSession || (!contextThresholdDraft.dirty && contextThresholdDraft.savedTokens !== budget.compressSoftThreshold)) {
+    contextThresholdDraft = { sessionId, value: contextTokensToK(budget.compressSoftThreshold),
+      savedTokens: budget.compressSoftThreshold, dirty: false };
+    setContextThresholdNotice();
+  }
+  if (input.value !== contextThresholdDraft.value) input.value = contextThresholdDraft.value;
+  const tokens = contextKToTokens(contextThresholdDraft.value);
+  const percent = tokens / budget.contextWindow * 100;
+  const valid = tokens > 0 && tokens < budget.contextWindow;
+  const percentOutput = $('#contextQuickThresholdPercent');
+  if (percentOutput) percentOutput.textContent = tokens ? `${Number(percent.toFixed(3))}%` : '—';
+  const range = $('#contextQuickThresholdRange');
+  if (range) range.value = String(Math.max(1, Math.min(99, percent || 1)));
+  const saving = contextThresholdSavingSessions.has(sessionId);
+  input.disabled = saving || !sessionId;
+  if (range) range.disabled = input.disabled;
+  const save = $('#contextQuickThresholdSave');
+  if (save) { save.disabled = input.disabled; save.textContent = saving ? '保存中…' : '保存'; }
+  const reset = $('#contextQuickThresholdReset');
+  if (reset) reset.disabled = input.disabled;
+  input.setAttribute('aria-invalid', String(contextThresholdDraft.dirty && !valid));
+  const hint = $('#contextQuickThresholdHint');
+  if (hint) {
+    const running = sessionId && state.activeRuns.has(sessionId);
+    const current = running ? getRunCtx(sessionId)?.runBudget?.compressSoftThreshold : 0;
+    hint.textContent = !sessionId ? '先打开一个对话即可设置'
+      : running ? `当前任务使用 ${contextTokensToK(current || budget.compressSoftThreshold)}K；保存后从下一次发送生效`
+        : `仅此对话 · 容量 ${formatTokenCount(budget.contextWindow)} · 1K = 1,000 tokens`;
+  }
+}
+
+function setContextThresholdEditorOpen(open) {
+  contextThresholdEditorOpen = Boolean(open);
+  $('#contextThresholdEditor')?.classList.toggle('hidden', !contextThresholdEditorOpen);
+  $('#contextThresholdToggle')?.setAttribute('aria-expanded', String(contextThresholdEditorOpen));
+  renderContextThresholdEditor();
+  requestAnimationFrame(() => {
+    positionContextRingPanel();
+    if (contextThresholdEditorOpen) $('#contextQuickThresholdInput')?.focus({ preventScroll: true });
+  });
+}
+
+async function saveContextThreshold({ restoreDefault = false } = {}) {
+  const session = state.currentSession;
+  const sessionId = String(session?.id || '');
+  if (!sessionId || contextThresholdSavingSessions.has(sessionId)) return false;
+  const draft = contextThresholdDraft;
+  if (draft.sessionId !== sessionId) { renderContextThresholdEditor(); return false; }
+  const budget = configuredContextBudget();
+  const tokens = restoreDefault ? budget.compressSoftThreshold : contextKToTokens(draft.value);
+  if (!tokens || tokens >= budget.contextWindow) {
+    setContextThresholdNotice(`请输入大于 0 且小于 ${contextTokensToK(budget.contextWindow)}K 的界限`, 'error');
+    $('#contextQuickThresholdInput')?.setAttribute('aria-invalid', 'true');
+    return false;
+  }
+  contextThresholdSavingSessions.add(sessionId);
+  setContextThresholdNotice();
+  renderContextThresholdEditor();
+  try {
+    const saved = await selectSessionTextModel({ ...getAgentModelSelection(session), compactionThreshold: tokens }, session);
+    if (!saved) return false;
+    if (state.currentSession?.id === sessionId) {
+      if (contextThresholdDraft === draft) {
+        contextThresholdDraft = { sessionId, value: contextTokensToK(tokens), savedTokens: tokens, dirty: false };
+      }
+      updateContextInfo();
+      setContextThresholdNotice(`已保存 ${contextTokensToK(tokens)}K${state.activeRuns.has(sessionId) ? '，下次发送生效' : ''}`, 'success');
+    }
+    return true;
+  } catch (error) {
+    if (state.currentSession?.id === sessionId) setContextThresholdNotice(`保存失败：${error?.message || error}`, 'error');
+    return false;
+  } finally {
+    contextThresholdSavingSessions.delete(sessionId);
+    renderContextThresholdEditor();
+  }
+}
 
 function contextMessageTailKey(session) {
   const last = session?.messages?.at(-1);
@@ -16093,6 +16211,8 @@ function setContextRingPanelOpen(open, { refresh = true } = {}) {
   panel.setAttribute('aria-hidden', contextRingPanelOpen ? 'false' : 'true');
   button.setAttribute('aria-expanded', contextRingPanelOpen ? 'true' : 'false');
   if (contextRingPanelOpen && refresh) updateContextInfo();
+  if (contextRingPanelOpen) requestAnimationFrame(positionContextRingPanel);
+  else setContextThresholdEditorOpen(false);
 }
 
 function updateContextRing(tokens, maxTokens, compressAt, hardAt, budgetState, meta = {}) {
@@ -16153,6 +16273,26 @@ function setupContextRing() {
   if (!button || button.dataset.bound === '1') return;
   button.dataset.bound = '1';
   $('#contextCompressBtn')?.addEventListener('click', manuallyCompressContext);
+  $('#contextThresholdToggle')?.addEventListener('click', () => setContextThresholdEditorOpen(!contextThresholdEditorOpen));
+  $('#contextQuickThresholdInput')?.addEventListener('input', event => {
+    contextThresholdDraft.value = event.target.value;
+    contextThresholdDraft.dirty = true;
+    setContextThresholdNotice();
+    renderContextThresholdEditor();
+  });
+  $('#contextQuickThresholdInput')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); void saveContextThreshold(); }
+  });
+  $('#contextQuickThresholdRange')?.addEventListener('input', event => {
+    const budget = configuredContextBudget();
+    contextThresholdDraft.value = contextTokensToK(Math.round(budget.contextWindow * Number(event.target.value) / 100));
+    contextThresholdDraft.dirty = true;
+    setContextThresholdNotice();
+    renderContextThresholdEditor();
+  });
+  $('#contextQuickThresholdSave')?.addEventListener('click', () => void saveContextThreshold());
+  $('#contextQuickThresholdReset')?.addEventListener('click', () => void saveContextThreshold({ restoreDefault: true }));
+  window.addEventListener('resize', positionContextRingPanel);
   button.addEventListener('click', (event) => {
     event.stopPropagation();
     setContextRingPanelOpen(!contextRingPanelOpen);
@@ -16191,7 +16331,7 @@ function sessionEstimateTokens(session, liveContext) {
 function updateContextInfo(as, session = state.currentSession) {
   if (as && !isAgentStateForCurrentSession(as)) return;
   if (!as) as = getCurrentAgentState();
-  const modelSelection = getAgentModelSelection();
+  const modelSelection = getAgentModelSelection(session);
   const modelName = modelSelection.name || modelSelection.modelId;
   const status = String(as.status || 'idle');
   const statusLabel = { idle: '空闲', working: '执行中', done: '已完成', interrupted: '已暂停', error: '运行失败' }[status] || status;
@@ -16230,12 +16370,13 @@ function updateContextInfo(as, session = state.currentSession) {
       tokens = activeRunCtx.contextUiTokens;
     }
   }
-  const resolvedBudget = activeRunCtx?.runBudget || configuredContextBudget();
+  const savedBudget = configuredContextBudget(state.config, modelSelection);
+  const resolvedBudget = activeRunCtx?.runBudget || savedBudget;
   const maxTokens = positiveContextTokens(resolvedBudget.contextWindow)
     || DEFAULT_CONTEXT_SETTINGS.maxTokens;
   const compressAt = Math.min(
     positiveContextTokens(resolvedBudget.compressSoftThreshold)
-      || configuredContextBudget().compressSoftThreshold,
+      || savedBudget.compressSoftThreshold,
     Math.max(1, maxTokens - 1)
   );
   const hardAt = positiveContextTokens(resolvedBudget.compressHardThreshold) || maxTokens;
@@ -16245,6 +16386,7 @@ function updateContextInfo(as, session = state.currentSession) {
     Number(activeRunCtx?.contextCompressionCount) || 0
   );
   updateContextRing(tokens, maxTokens, compressAt, hardAt, budgetState, { modelName, statusLabel, compressionCount });
+  if (contextThresholdEditorOpen) renderContextThresholdEditor();
 }
 
 let rsRefreshTimer = null;

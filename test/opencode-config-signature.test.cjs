@@ -143,6 +143,15 @@ test('real builders: context settings enter the OpenCode config signature', () =
   const modelId = Object.keys(provider.models)[0];
   assert.equal(provider.models[modelId].limit.context, 2_000_000);
   assert.equal(second.compaction.threshold, 1_500_000);
+  const sameWindowDifferentThreshold = main.__test.getOpenCodeRuntimeConfig(runtimeConfig({
+    maxTokens: 1_000_000,
+    compactionThreshold: 700_000
+  }));
+  assert.notEqual(signatureOf(first), signatureOf(sameWindowDifferentThreshold),
+    'changing only the threshold selects a configuration with the new boundary');
+  const changedProvider = Object.values(sameWindowDifferentThreshold.provider).find(item => item?.models);
+  assert.equal(changedProvider.models[Object.keys(changedProvider.models)[0]].limit.context, 1_000_000);
+  assert.equal(sameWindowDifferentThreshold.compaction.threshold, 700_000);
 });
 
 test('media MCP env carries no per-run workspace and points at the registry', () => {

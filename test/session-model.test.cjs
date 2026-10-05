@@ -15,6 +15,7 @@ const rewind = require('../lib/session-rewind');
 const { isDefaultSessionTitle } = require('../lib/session-policy');
 const { normalizeOutputTokens, validateOutputTokens } = require('../lib/model-output-limits');
 const { normalizeReasoningSpeed, reasoningSpeedEnablesThinking } = require('../lib/reasoning-effort');
+const { normalizeContextSettings } = require('../lib/context-settings');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -59,6 +60,7 @@ function fixture(t) {
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
     normalizeOutputTokens, validateOutputTokens,
     normalizeReasoningSpeed, reasoningSpeedEnablesThinking,
+    normalizeContextSettings,
     isDefaultSessionTitle,
     MODEL_PROVIDERS: providers,
     loadConfig: () => structuredClone(config),
@@ -234,7 +236,7 @@ test('legacy sessions freeze current default effort once and model-only saves pr
 
 test('forks and rewinds of legacy message snapshots keep the source conversation frozen effort', () => {
   const source = { id: 'sess_source_effort', title: 'Source', workspace: '/fixture',
-    modelSelection: { ...selection('a'), reasoningSpeed: 'xhigh' }, messages: [
+    modelSelection: { ...selection('a'), reasoningSpeed: 'xhigh', compactionThreshold: 720000 }, messages: [
       { role: 'user', content: 'Earlier request', modelSelection: selection('b') },
       { role: 'assistant', content: 'Earlier response', agentRun: selection('b') }
     ] };
@@ -245,7 +247,103 @@ test('forks and rewinds of legacy message snapshots keep the source conversation
   for (const derived of [fork, rewound]) {
     assert.equal(derived.modelSelection.modelId, 'model-b');
     assert.equal(derived.modelSelection.reasoningSpeed, 'xhigh');
+    assert.equal(derived.modelSelection.compactionThreshold, 720000);
   }
+});
+
+test('compaction snapshots retain positive integer boundaries and recover the originating turn value', () => {
+  assert.equal(sessionModelSnapshot({ ...selection('a'), compactionThreshold: 725000 }).compactionThreshold, 725000);
+  for (const value of [undefined, 0, -1, 0.5, Infinity, NaN, 'invalid']) {
+    assert.equal(Object.hasOwn(sessionModelSnapshot({ ...selection('a'), compactionThreshold: value }), 'compactionThreshold'), false);
+  }
+  const inferred = inferSessionModelSelection({ messages: [
+    { role: 'user', modelSelection: { ...selection('a'), compactionThreshold: 625000 } },
+    { role: 'assistant', agentRun: selection('a') }
+  ] }, { ...selection('b'), compactionThreshold: 800000 });
+  assert.equal(inferred.compactionThreshold, 625000);
+});
+
+test('old and new conversations freeze compaction defaults once without changing history or window size', async t => {
+  const f = fixture(t);
+  const a = await f.create();
+  assert.equal(a.modelSelection.compactionThreshold, 800000);
+  const legacy = { ...a, updatedAt: 42, modelSelection: { ...selection('a'), reasoningSpeed: 'max' },
+    openCodeSessionId: 'native-preserved', messages: [{ role: 'user', content: 'Keep legacy context' }] };
+  f.seed(legacy);
+  f.editConfig(cfg => { cfg.context = { maxTokens: 1000000, compactionThreshold: 750000 }; });
+  const migrated = await f.read(a.id);
+  assert.equal(migrated.modelSelection.compactionThreshold, 750000);
+  assert.equal(f.disk(a.id).updatedAt, 42);
+  assert.deepEqual(f.disk(a.id).messages, legacy.messages);
+  assert.equal(f.disk(a.id).openCodeSessionId, 'native-preserved');
+  f.editConfig(cfg => { cfg.context.compactionThreshold = 650000; });
+  assert.equal((await f.read(a.id)).modelSelection.compactionThreshold, 750000);
+  assert.equal((await f.create()).modelSelection.compactionThreshold, 650000);
+  assert.equal(f.config().context.maxTokens, 1000000);
+});
+
+test('per-conversation thresholds survive stale saves, model changes, frozen runs and manual compression', async t => {
+  const f = fixture(t);
+  f.editConfig(cfg => { cfg.context = { maxTokens: 1000000, compactionThreshold: 800000 }; });
+  const a = await f.create();
+  const b = await f.create();
+  const global = f.config();
+  assert.equal((await f.set(a.id, { ...selection('a'), compactionThreshold: 600000 })).ok, true);
+  assert.equal((await f.set(b.id, { ...selection('b'), compactionThreshold: 900000 })).ok, true);
+  const queued = structuredClone(f.disk(a.id).modelSelection);
+  const running = await f.start({ zSessionId: a.id });
+  assert.equal(running.runtime.compactionThreshold, 600000);
+  assert.equal(running.runtime.contextWindow, 1000000);
+  const gate = f.pauseWrite();
+  const changing = f.set(a.id, { ...selection('a'), compactionThreshold: 700000 });
+  await gate.entered;
+  const staleSave = f.save({ ...a, messages: [{ role: 'user', content: 'Progress remains' }] });
+  gate.release();
+  await Promise.all([changing, staleSave]);
+  assert.equal(f.disk(a.id).modelSelection.compactionThreshold, 700000);
+  assert.equal(f.disk(b.id).modelSelection.compactionThreshold, 900000);
+  assert.equal(running.runtime.compactionThreshold, 600000);
+  assert.equal((await f.start({ zSessionId: a.id, modelSelection: queued })).runtime.compactionThreshold, 600000);
+  assert.equal((await f.start({ zSessionId: b.id })).runtime.compactionThreshold, 900000);
+  assert.equal((await f.start({ zSessionId: a.id, modelSelection: selection('a') })).runtime.compactionThreshold, 700000);
+  assert.equal((await f.set(a.id, selection('b'))).ok, true);
+  assert.equal(f.disk(a.id).modelSelection.compactionThreshold, 700000, 'changing models preserves the conversation threshold');
+  f.seed({ ...f.disk(a.id), openCodeSessionId: 'native-a' });
+  assert.equal((await f.compress(a.id)).ok, true);
+  assert.equal(f.compressionCalls[0].request.openCodeSessionId, 'native-a');
+  assert.equal(f.compressionCalls[0].runtime.compactionThreshold, 700000);
+  assert.equal(f.compressionCalls[0].request.openCodeConfig.compactionThreshold, 700000);
+  assert.deepEqual(f.config(), global);
+});
+
+test('threshold IPC rejects invalid explicit values without saving them or changing the window', async t => {
+  const f = fixture(t);
+  const a = await f.create();
+  const before = f.disk(a.id);
+  for (const value of [0, -1, 1.25, NaN, Infinity, 1000000, 1000001, Number.MAX_SAFE_INTEGER + 1, '600000', true, null, undefined]) {
+    const result = await f.set(a.id, { ...selection('a'), compactionThreshold: value });
+    assert.equal(result.ok, false, String(value));
+    assert.equal(result.code, 'SESSION_COMPACTION_THRESHOLD_INVALID');
+    assert.deepEqual(f.disk(a.id), before);
+  }
+  assert.equal((await f.set(a.id, { ...selection('a'), compactionThreshold: 1 })).ok, true);
+  assert.equal(f.disk(a.id).modelSelection.compactionThreshold, 1);
+  assert.equal((await f.set(a.id, { ...selection('a'), compactionThreshold: 999999 })).ok, true);
+});
+
+test('old frozen thresholds above a later smaller window are resolved only for execution', async t => {
+  const f = fixture(t);
+  const a = await f.create();
+  await f.set(a.id, { ...selection('a'), compactionThreshold: 900000 });
+  const frozen = structuredClone(f.disk(a.id).modelSelection);
+  f.editConfig(cfg => { cfg.context = { maxTokens: 128000, compactionThreshold: 100000 }; });
+  const started = await f.start({ zSessionId: a.id, modelSelection: frozen });
+  assert.equal(started.ok, true, started.error);
+  assert.equal(started.runtime.contextWindow, 128000);
+  assert.equal(started.runtime.compactionThreshold, 127999);
+  assert.equal(started.selection.compactionThreshold, 127999);
+  assert.equal(frozen.compactionThreshold, 900000);
+  assert.equal(f.disk(a.id).modelSelection.compactionThreshold, 900000);
 });
 
 test('manual output caps persist per conversation through reload, stale message saves, and run admission', async t => {

@@ -403,7 +403,9 @@
             </button>
             <section id="contextRingPanel" class="context-ring-panel hidden" role="dialog" aria-label="上下文状态" aria-hidden="true">
               <header class="context-ring-head">
-                <span class="context-ring-title">上下文</span>
+                <button id="contextThresholdToggle" class="context-ring-title context-threshold-toggle" type="button" aria-label="调整自动压缩界限" aria-controls="contextThresholdEditor" aria-expanded="false">
+                  <span>上下文</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+                </button>
                 <span id="contextRingPercent" class="context-ring-percent">0%</span>
               </header>
               <div class="context-ring-value">
@@ -416,6 +418,20 @@
               </div>
               <p id="contextRingHint" class="context-ring-hint">距离自动压缩还有 —</p>
               <p id="contextRingCompressCount" class="context-ring-hint">已压缩 0 次</p>
+              <div id="contextThresholdEditor" class="context-threshold-editor hidden">
+                <label for="contextQuickThresholdInput">自动压缩界限</label>
+                <div class="context-threshold-value-row">
+                  <div class="context-threshold-input-wrap"><input id="contextQuickThresholdInput" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="自动压缩界限（K tokens）" /><span>K</span></div>
+                  <output id="contextQuickThresholdPercent" for="contextQuickThresholdInput">80%</output>
+                </div>
+                <input id="contextQuickThresholdRange" type="range" min="1" max="99" step="1" aria-label="压缩界限百分比" />
+                <p id="contextQuickThresholdHint" class="context-ring-hint"></p>
+                <div class="context-threshold-actions">
+                  <button id="contextQuickThresholdReset" class="context-compress-btn" type="button">恢复默认值</button>
+                  <button id="contextQuickThresholdSave" class="context-compress-btn" type="button">保存</button>
+                </div>
+                <p id="contextQuickThresholdNotice" class="context-ring-hint hidden" role="status" aria-live="polite"></p>
+              </div>
                   <div class="context-ring-footer">
                     <p id="contextRingMeta" class="context-ring-meta">—</p>
                     <button id="contextCompressBtn" class="context-compress-btn" type="button" disabled>我来压缩</button>
@@ -1637,7 +1653,7 @@
                       </section>
                       <section class="conn-page context-config-page" data-context-config-page="1" aria-hidden="true">
                         <h4 class="conn-page-title">压缩阈值</h4>
-                        <p class="conn-page-sub">设置当前环境的压缩阈值</p>
+                        <p class="conn-page-sub">设置新对话的默认压缩界限，已有对话可在上下文面板中调整</p>
                         <div class="context-k-input-wrap">
                           <input id="contextThresholdInput" class="input mcp-pill-input conn-page-input context-k-input" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="压缩阈值" />
                           <span class="context-k-suffix" aria-hidden="true">k</span>
@@ -1806,7 +1822,7 @@
                 <h2 id="generalContextTitle">上下文</h2>
                 <div class="general-settings-group">
                   <div class="settings-form-section general-card general-setting-row">
-                    <div class="settings-group-heading"><h3>最大上下文与压缩</h3><p>不同模型最大上下文与压缩阈值不同，请手动配置</p></div>
+                    <div class="settings-group-heading"><h3>最大上下文与压缩</h3><p>设置可用上下文容量，以及新对话的默认压缩界限</p></div>
                     <button id="contextConfigOpen" class="conn-pill general-context-config-button" type="button" aria-haspopup="dialog" aria-controls="contextConfigDialog">配置上下文</button>
                   </div>
                 </div>

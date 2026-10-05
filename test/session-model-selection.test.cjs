@@ -71,6 +71,7 @@ function fixture() {
     renderModelGrid: async () => {}
   };
   vm.createContext(context);
+  vm.runInContext(section('const DEFAULT_CONTEXT_SETTINGS = Object.freeze({', 'function sanitizeContextKInput('), context);
   vm.runInContext(section('function getAgentModelConfigName(', 'function modelSelectionIdentity('), context);
   vm.runInContext(section('function setRunModelPresentation(', 'function aicssG2GlobeOpacity('), context);
   vm.runInContext(section('async function runOpenCodeLoop(', '// Reload reconciliation:'), context);
@@ -395,4 +396,85 @@ test('a model-only selection keeps its conversation effort instead of inheriting
   await pending;
   assert.equal(f.a.modelSelection.reasoningSpeed, 'high');
   assert.equal(f.b.modelSelection.reasoningSpeed, 'low');
+});
+
+function thresholdEditorFixture() {
+  const f = fixture();
+  f.a.modelSelection.compactionThreshold = 250500;
+  f.b.modelSelection.compactionThreshold = 800000;
+  f.context.state.config.context = { maxTokens: 1000000, compactionThreshold: 800000 };
+  const elements = new Map();
+  f.context.$ = selector => {
+    if (!elements.has(selector)) elements.set(selector, { value: '', textContent: '', disabled: false,
+      dataset: {}, attributes: {}, classList: { toggle() {} }, style: { setProperty() {} },
+      setAttribute(name, value) { this.attributes[name] = value; } });
+    return elements.get(selector);
+  };
+  Object.assign(f.context, { contextRingPanelOpen: false, requestAnimationFrame() {},
+    formatTokenCount: value => `${value / 1000}K`, getRunCtx: id => f.context.state.activeRuns.get(id)?.runCtx,
+    updateContextInfo: () => f.context.renderContextThresholdEditor() });
+  vm.runInContext(section('let contextThresholdEditorOpen = false;', 'function contextMessageTailKey('), f.context);
+  f.context.renderContextThresholdEditor();
+  return { ...f, elements,
+    edit(value) { f.context.$('#contextQuickThresholdInput').value = value;
+      vm.runInContext(`contextThresholdDraft.value = ${JSON.stringify(value)}; contextThresholdDraft.dirty = true`, f.context);
+      f.context.renderContextThresholdEditor(); }
+  };
+}
+
+test('context drafts survive streaming redraw and save only their captured conversation', async () => {
+  const f = thresholdEditorFixture();
+  const input = f.elements.get('#contextQuickThresholdInput');
+  assert.equal(input.value, '250.5');
+  assert.equal(f.elements.get('#contextQuickThresholdPercent').textContent, '25.05%');
+  f.edit('400.125');
+  f.context.renderContextThresholdEditor();
+  assert.equal(input.value, '400.125');
+  const pending = f.context.saveContextThreshold();
+  assert.equal(f.saves[0].selection.compactionThreshold, 400125);
+  f.context.state.currentSession = f.b;
+  f.context.renderContextThresholdEditor();
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(f.a.modelSelection.compactionThreshold, 400125);
+  assert.equal(f.b.modelSelection.compactionThreshold, 800000);
+  assert.equal(input.value, '800');
+  assert.equal(f.elements.get('#contextQuickThresholdNotice').textContent, '');
+  assert.equal(f.context.state.config.context.compactionThreshold, 800000);
+});
+
+test('context input rejects invalid boundaries and reset copies the current default', async () => {
+  const f = thresholdEditorFixture();
+  for (const value of ['', '0', '-1', 'NaN', '1000', '1001']) {
+    f.edit(value);
+    assert.equal(await f.context.saveContextThreshold(), false);
+    assert.equal(f.saves.length, 0);
+  }
+  f.context.state.config.context.compactionThreshold = 700000;
+  const pending = f.context.saveContextThreshold({ restoreDefault: true });
+  assert.equal(f.saves[0].selection.compactionThreshold, 700000);
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(f.elements.get('#contextQuickThresholdInput').value, '700');
+  assert.equal(f.b.modelSelection.compactionThreshold, 800000);
+});
+
+test('a running context budget and frozen queued selection survive later threshold edits', async () => {
+  const f = thresholdEditorFixture();
+  const snapshot = f.context.getAgentModelSelection(f.a);
+  const runCtx = { runBudget: f.context.configuredContextBudget(f.context.state.config) };
+  f.context.setRunModelPresentation(runCtx, snapshot);
+  f.context.state.activeRuns.set('A', { runCtx, sessionRef: f.a });
+  f.edit('500');
+  const pending = f.context.saveContextThreshold();
+  f.saves[0].resolve({ ok: true, id: 'A', modelSelection: f.saves[0].selection });
+  await pending;
+  assert.equal(runCtx.runBudget.compressSoftThreshold, 250500);
+  assert.equal(snapshot.compactionThreshold, 250500);
+  assert.equal(f.a.modelSelection.compactionThreshold, 500000);
+  assert.match(f.elements.get('#contextQuickThresholdHint').textContent, /250.5K.*下一次发送/);
+  const modelChange = f.context.selectSessionTextModel(model('other'));
+  assert.equal(f.saves[1].selection.compactionThreshold, 500000);
+  f.saves[1].resolve({ ok: true, id: 'A', modelSelection: f.saves[1].selection });
+  await modelChange;
 });

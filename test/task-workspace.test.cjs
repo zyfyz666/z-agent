@@ -14,6 +14,7 @@ const {
 const { findReusableBlankSession } = require('../lib/session-policy');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
+const { normalizeContextSettings } = require('../lib/context-settings');
 const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 
@@ -40,6 +41,7 @@ function fixture(t) {
     ...rewind, fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
+    normalizeContextSettings,
     loadConfig: () => ({ agentModel: { providerId: '', supplierId: '', modelId: '', modelType: 'text' } }),
     composerConnections: () => [],
     isSafeSessionId: id => /^sess_[A-Za-z0-9_-]{4,160}$/.test(String(id || '')),
