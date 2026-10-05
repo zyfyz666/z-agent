@@ -298,6 +298,166 @@
     };
   }
 
+  // Observer eye: a persistent SVG above the status card. Its expression follows
+  // the run (data-eye): resting with no task, watching a live run, pondering while
+  // the model reviews, speaking right after a reminder, closed for past runs and
+  // alarmed on errors. It is kept across renders so blinks and gaze never reset.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const FLARE_ACTIONS = new Set(['remind', 'escalate', 'halt']);
+  const TRACKING = new Set(['watching', 'resting']);
+  const shells = new WeakMap();
+  const tracked = new WeakSet();
+  const ALMOND = 'M54 66C84 30 156 30 186 66C156 98 84 98 54 66Z';
+  let eyeSerial = 0;
+
+  function eyeState(view, selection = {}) {
+    if (view.mode === 'empty') return 'resting';
+    if (view.mode !== 'live' || view.phase === 'disabled') return 'closed';
+    if (view.phase === 'error') return 'alarmed';
+    return normalizeSnapshot(selection.snapshot)?.model?.phase === 'reviewing' ? 'pondering' : 'watching';
+  }
+
+  function buildEye(document) {
+    if (typeof document.createElementNS !== 'function') return null;
+    const id = `wdEye${++eyeSerial}`;
+    const svg = (tag, attrs, parent) => {
+      const element = document.createElementNS(SVG_NS, tag);
+      for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, String(value));
+      parent?.append(element);
+      return element;
+    };
+    const root = svg('svg', { class: 'wd-eye', viewBox: '0 0 240 132', 'aria-hidden': 'true', focusable: 'false' });
+    const defs = svg('defs', {}, root);
+    const glow = svg('radialGradient', { id: `${id}Glow` }, defs);
+    svg('stop', { offset: '0', 'stop-color': 'currentColor', 'stop-opacity': '.34' }, glow);
+    svg('stop', { offset: '1', 'stop-color': 'currentColor', 'stop-opacity': '0' }, glow);
+    const iris = svg('radialGradient', { id: `${id}Iris` }, defs);
+    [['0', '.5'], ['.55', '.78'], ['1', '1']].forEach(([offset, opacity]) =>
+      svg('stop', { offset, 'stop-color': 'currentColor', 'stop-opacity': opacity }, iris));
+    svg('path', { d: ALMOND }, svg('clipPath', { id: `${id}Clip` }, defs));
+    svg('circle', { class: 'wd-eye-glow', cx: 120, cy: 66, r: 66, fill: `url(#${id}Glow)` }, root);
+    svg('circle', { class: 'wd-eye-ring', cx: 120, cy: 66, r: 63 }, root);
+    const rays = svg('g', { class: 'wd-eye-rays' }, root);
+    const at = (r, angle) => [(120 + r * Math.cos(angle)).toFixed(2), (66 + r * Math.sin(angle)).toFixed(2)];
+    for (let i = 0; i < 24; i += 1) {
+      const angle = i * Math.PI / 12;
+      const [[x1, y1], [x2, y2]] = (i % 2 ? [47, 57] : [42, 62]).map(r => at(r, angle));
+      svg('line', { x1, y1, x2, y2 }, rays);
+    }
+    svg('circle', { class: 'wd-eye-orbit', cx: 120, cy: 66, r: 54 }, root);
+    svg('path', { class: 'wd-eye-crease', d: 'M70 47C96 26 144 26 170 47' }, root);
+    // The lid squeezes this group vertically: half-open at rest, a line when closed.
+    const ball = svg('g', { class: 'wd-eye-ball' }, root);
+    svg('path', { class: 'wd-eye-white', d: ALMOND }, ball);
+    const inner = svg('g', { 'clip-path': `url(#${id}Clip)` }, ball);
+    const gaze = svg('g', { class: 'wd-eye-gaze' }, inner);
+    svg('circle', { class: 'wd-eye-iris', cx: 120, cy: 66, r: 22, fill: `url(#${id}Iris)` }, gaze);
+    const fibers = svg('g', { class: 'wd-eye-fibers' }, gaze);
+    for (let i = 0; i < 12; i += 1) {
+      const angle = i * Math.PI / 6;
+      const [[x1, y1], [x2, y2]] = [12, 19].map(r => at(r, angle));
+      svg('line', { x1, y1, x2, y2 }, fibers);
+    }
+    svg('circle', { class: 'wd-eye-pupil', cx: 120, cy: 66, r: 8.5 }, gaze);
+    svg('circle', { class: 'wd-eye-glint', cx: 127, cy: 58, r: 3 }, gaze);
+    svg('path', { class: 'wd-eye-lid', d: ALMOND }, ball);
+    return root;
+  }
+
+  function scheduleBlink(entry) {
+    const view = entry.oracle.ownerDocument?.defaultView;
+    if (!view?.setTimeout || entry.blinkTimer) return;
+    const tick = () => {
+      entry.blinkTimer = null;
+      if (!entry.oracle.isConnected) return;
+      const calm = view.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (!calm && !view.document?.hidden && ['watching', 'pondering'].includes(entry.oracle.dataset.eye)) {
+        entry.oracle.dataset.blink = 'true';
+        view.setTimeout(() => { delete entry.oracle.dataset.blink; }, 150);
+        if (Math.random() < 0.18) {
+          view.setTimeout(() => { entry.oracle.dataset.blink = 'true'; }, 330);
+          view.setTimeout(() => { delete entry.oracle.dataset.blink; }, 470);
+        }
+      }
+      entry.blinkTimer = view.setTimeout(tick, 2800 + Math.random() * 3800);
+    };
+    entry.blinkTimer = view.setTimeout(tick, 1600 + Math.random() * 2400);
+  }
+  // The eye follows the pointer while it is over the panel, only in calm states.
+  function trackPointer(host) {
+    if (tracked.has(host) || typeof host.addEventListener !== 'function') return;
+    tracked.add(host);
+    let frame = 0, last = null;
+    const update = () => {
+      frame = 0;
+      const entry = shells.get(host);
+      const stage = entry?.oracle;
+      if (!stage?.isConnected || !last || !TRACKING.has(stage.dataset.eye)) return;
+      const box = stage.getBoundingClientRect();
+      const clamp = value => Math.max(-1, Math.min(1, value));
+      const dx = clamp((last.clientX - (box.left + box.width / 2)) / (box.width * 0.75));
+      const dy = clamp((last.clientY - (box.top + box.height / 2)) / (box.height * 1.6));
+      stage.style.setProperty('--wd-gaze-x', `${(dx * 12).toFixed(1)}px`);
+      stage.style.setProperty('--wd-gaze-y', `${(dy * 6).toFixed(1)}px`);
+    };
+    host.addEventListener('pointermove', event => {
+      last = event;
+      if (!frame) frame = (host.ownerDocument.defaultView?.requestAnimationFrame || (fn => setTimeout(fn, 16)))(update);
+    });
+    host.addEventListener('pointerleave', () => {
+      last = null;
+      const stage = shells.get(host)?.oracle;
+      stage?.style.removeProperty('--wd-gaze-x');
+      stage?.style.removeProperty('--wd-gaze-y');
+    });
+  }
+
+  // header | eye | body. Only header and body children are rebuilt per render.
+  function ensureShell(host, document) {
+    const known = shells.get(host);
+    if (known && known.monitor.parentNode === host && host.children?.length === 1) return known;
+    if (known?.flareTimer) clearTimeout(known.flareTimer);
+    const make = (tag, className) => { const element = document.createElement(tag); element.className = className; return element; };
+    const entry = { monitor: make('div', 'wd-monitor'), header: make('header', 'wd-header'),
+      oracle: make('div', 'wd-oracle'), body: make('div', 'wd-body'), runKey: null, lastEventId: null };
+    entry.oracle.setAttribute('aria-hidden', 'true');
+    const eye = buildEye(document);
+    if (eye) entry.oracle.append(eye);
+    entry.monitor.append(entry.header, entry.oracle, entry.body);
+    host.replaceChildren(entry.monitor);
+    shells.set(host, entry);
+    trackPointer(host);
+    return entry;
+  }
+  function applyEye(entry, expression) {
+    const oracle = entry.oracle;
+    if (oracle.dataset.eye === expression) return;
+    oracle.dataset.eye = expression;
+    if (!TRACKING.has(expression)) {
+      oracle.style?.removeProperty?.('--wd-gaze-x');
+      oracle.style?.removeProperty?.('--wd-gaze-y');
+    }
+  }
+
+  // A reminder that arrives while the run is live makes the eye "speak" briefly:
+  // glow flares, pupil narrows, gaze turns to the conversation. Opening a panel or
+  // switching runs only records the latest event and never flares.
+  function updateEye(entry, view, selection) {
+    const base = eyeState(view, selection);
+    const latest = normalizeSnapshot(selection?.snapshot)?.events?.at(-1) || null;
+    const runKey = `${selection?.sessionId || ''}|${selection?.key || ''}`;
+    const fresh = entry.runKey === runKey && !!latest && latest.id !== entry.lastEventId;
+    const win = entry.oracle.ownerDocument?.defaultView;
+    if (entry.runKey !== runKey && entry.flareTimer) { win?.clearTimeout(entry.flareTimer); entry.flareTimer = null; }
+    Object.assign(entry, { runKey, lastEventId: latest?.id ?? null, base });
+    if (fresh && view.mode === 'live' && FLARE_ACTIONS.has(latest.action) && win?.setTimeout) {
+      if (entry.flareTimer) win.clearTimeout(entry.flareTimer);
+      entry.flareTimer = win.setTimeout(() => { entry.flareTimer = null; applyEye(entry, entry.base); }, 2600);
+    }
+    applyEye(entry, entry.flareTimer ? 'speaking' : base);
+    scheduleBlink(entry);
+  }
+
   function render(host, selection) {
     if (!host?.ownerDocument) return;
     const document = host.ownerDocument;
@@ -315,8 +475,9 @@
       values.forEach(value => list.append(node('span', 'wd-rule', value)));
       return list;
     };
-    const monitor = node('div', 'wd-monitor');
-    const header = node('header', 'wd-header');
+    const shell = ensureShell(host, document);
+    const header = shell.header;
+    header.replaceChildren();
     const mode = node('span', 'wd-mode', { live: '实时', history: '历史', empty: '待命' }[view.mode] || '待命');
     mode.dataset.mode = view.mode;
     header.append(node('span', 'wd-eyebrow', '观察者 / 运行状态'), mode);
@@ -442,13 +603,14 @@
       empty.append(orbit, node('h4', 'wd-empty-title', view.emptyTitle), node('p', 'wd-empty-description', view.emptyDescription));
       events.append(empty);
     }
-    monitor.append(header, history, health, status, stats, latest, events,
+    // The status card sits under the eye and reads as what the observer is doing.
+    shell.body.replaceChildren(status, history, health, stats, latest, events,
       node('footer', 'wd-footer', '观察者关注执行过程并发出提醒，不保证答案或解题结果正确。'));
-    host.replaceChildren(monitor);
+    updateEye(shell, view, selection);
     host.dataset.wdState = view.phase;
     host.dataset.wdSessionId = selection?.sessionId || '';
     host.dataset.wdRunKey = selection?.key || '';
   }
 
-  return { MAX_EVENTS, normalizeSnapshot, normalizeHealth, reduce, finish, availableRuns, selectSession, viewModel, ruleName, deliveryLabel, render };
+  return { MAX_EVENTS, normalizeSnapshot, normalizeHealth, reduce, finish, availableRuns, selectSession, viewModel, eyeState, ruleName, deliveryLabel, render };
 });

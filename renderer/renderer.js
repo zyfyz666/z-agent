@@ -18830,7 +18830,7 @@ function bindTaskGit() {
 const RIGHT_SIDEBAR_TOOLS = Object.freeze({
   watchdog: {
     label: '观察者',
-    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>'
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12C5.5 6.8 8.6 5 12 5s6.5 1.8 9.5 7c-3 5.2-6.1 7-9.5 7s-6.5-1.8-9.5-7Z"/><circle cx="12" cy="12" r="3.2"/></svg>'
   },
   browser: {
     label: '浏览器',

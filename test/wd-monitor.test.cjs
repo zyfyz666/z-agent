@@ -141,6 +141,17 @@ test('snapshot bounds are enforced and malformed counts stay unknown', () => {
   assert.equal(monitor.normalizeSnapshot(snapshot({ checks: 0 })).checks, 0);
 });
 
+test('observer eye expression follows the selected run', () => {
+  const eye = selection => monitor.eyeState(monitor.viewModel(selection), selection);
+  assert.equal(eye({ mode: 'empty' }), 'resting');
+  assert.equal(eye({ mode: 'live', status: 'working', snapshot: snapshot() }), 'watching');
+  assert.equal(eye({ mode: 'live', status: 'working', snapshot: snapshot({ model: { phase: 'reviewing' } }) }), 'pondering');
+  assert.equal(eye({ mode: 'live', status: 'working', snapshot: snapshot({ phase: 'error' }) }), 'alarmed');
+  assert.equal(eye({ mode: 'live', status: 'working', snapshot: snapshot({ enabled: false, phase: 'disabled' }) }), 'closed');
+  assert.equal(eye({ mode: 'history', status: 'done', snapshot: snapshot() }), 'closed');
+  assert.equal(eye({ mode: 'history', status: 'error', snapshot: snapshot() }), 'closed');
+});
+
 test('runtime text is rendered as text nodes, never parsed as markup', () => {
   const elements = [];
   const document = { createElement(tag) {

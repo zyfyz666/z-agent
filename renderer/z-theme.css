@@ -40,7 +40,7 @@
 .wd-model-state { padding: 12px; background: var(--bg-elev2); border: 1px solid var(--border); border-radius: 9px; font-size: 12px; line-height: 1.7; }
 .wd-model-state p { margin: 5px 0 0; color: var(--text-dim); overflow-wrap: anywhere; }
 .wd-config-button { font-size: 12px; margin-left: auto; }
-.wd-history { display: grid; gap: 8px; margin: -8px 0 20px; min-width: 0; }
+.wd-history { display: grid; gap: 8px; margin: 0 0 20px; min-width: 0; }
 .wd-history-select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev2); color: var(--text); font: inherit; font-size: 12px; }
 .wd-history-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wd-history-caption { margin: 0; color: var(--text-dim); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -117,10 +117,46 @@ html[data-theme="light"] {
 .rs-content { background: var(--bg-soft); }
 .wd-panel { padding: 0; overflow: auto; overscroll-behavior: contain; }
 .wd-monitor { padding: 22px 20px 16px; color: var(--text); font-family: var(--font-sans); }
-.wd-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 23px; }
+.wd-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .wd-eyebrow { font: 500 10px/1.5 var(--font-mono); letter-spacing: .07em; color: var(--text-dim); }
 .wd-mode { padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-faint); font-size: 10px; }
 .wd-mode[data-mode="live"] { color: var(--accent-text); border-color: var(--border-strong); background: var(--accent-soft); }
+/* Observer eye. data-eye sets lid, pupil, gaze and glow; motion is transform/opacity only. */
+.wd-oracle { --wd-eye: var(--accent); --wd-lid: 1; --wd-iris-y: 1; --wd-pupil: 1; --wd-gx: -6px; --wd-gy: 1px; --wd-glow: .55;
+  display: flex; justify-content: center; margin: 0 0 14px; color: var(--wd-eye); pointer-events: none; }
+.wd-eye { width: min(100%, 236px); height: auto; overflow: visible; }
+.wd-eye-glow { opacity: var(--wd-glow); transform-box: fill-box; transform-origin: center; transition: opacity .6s var(--ease-out); }
+.wd-eye-ring, .wd-eye-orbit { fill: none; stroke: currentColor; stroke-width: .8; opacity: .28; }
+.wd-eye-rays { stroke: currentColor; stroke-width: .9; stroke-linecap: round; opacity: .42;
+  transform-box: view-box; transform-origin: 120px 66px; animation: wd-eye-turn 140s linear infinite; }
+.wd-eye-orbit { stroke-dasharray: 2 7; opacity: 0; transform-box: view-box; transform-origin: 120px 66px; transition: opacity .5s var(--ease-out); }
+.wd-eye-crease { fill: none; stroke: var(--text-faint); stroke-width: 1; stroke-linecap: round; opacity: .6; }
+.wd-eye-ball { transform-box: view-box; transform-origin: 120px 64.5px; transform: scaleY(var(--wd-lid)); transition: transform .32s var(--ease-out); }
+.wd-eye-white { fill: var(--bg-elev); }
+.wd-eye-lid { fill: none; stroke: var(--text); stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+/* --wd-iris-y undoes the lid squeeze so a narrowed eye covers a round iris instead of flattening it. */
+.wd-eye-gaze { transform-box: view-box; transform-origin: 120px 64.5px; transition: transform .5s var(--ease-out);
+  transform: translate(var(--wd-gaze-x, var(--wd-gx)), var(--wd-gaze-y, var(--wd-gy))) scaleY(var(--wd-iris-y)); }
+.wd-eye-fibers { stroke: var(--z-ink); stroke-width: .7; opacity: .22; }
+.wd-eye-pupil { fill: var(--z-ink); transform-box: fill-box; transform-origin: center; transform: scale(var(--wd-pupil)); transition: transform .6s var(--ease-out); }
+.wd-eye-glint { fill: #fff; opacity: .85; }
+.wd-oracle[data-blink] .wd-eye-ball { transform: scaleY(.06); transition-duration: .08s; }
+.wd-oracle[data-eye="resting"] { --wd-lid: .58; --wd-iris-y: 1.72; --wd-pupil: 1.12; --wd-gx: 0px; --wd-gy: 3px; --wd-glow: .3; }
+.wd-oracle[data-eye="resting"] .wd-eye-glow { animation: wd-eye-breathe 6s ease-in-out infinite; }
+.wd-oracle[data-eye="pondering"] { --wd-pupil: 1.55; --wd-gx: -3px; --wd-gy: -5px; --wd-glow: .8; }
+.wd-oracle[data-eye="pondering"] .wd-eye-orbit { opacity: .6; animation: wd-eye-turn 9s linear infinite reverse; }
+.wd-oracle[data-eye="speaking"] { --wd-pupil: .62; --wd-gx: -11px; --wd-gy: 0px; --wd-glow: 1; }
+.wd-oracle[data-eye="speaking"] .wd-eye-glow { animation: wd-eye-flare 1.3s var(--ease-out) 2; }
+.wd-oracle[data-eye="closed"] { --wd-eye: var(--text-faint); --wd-lid: .06; --wd-gx: 0px; --wd-gy: 0px; --wd-glow: .12; }
+.wd-oracle[data-eye="closed"] .wd-eye-lid { stroke: var(--text-dim); }
+.wd-oracle[data-eye="alarmed"] { --wd-eye: var(--danger); --wd-pupil: .72; --wd-gx: 0px; --wd-gy: 0px; --wd-glow: .7; }
+@keyframes wd-eye-turn { to { transform: rotate(360deg); } }
+@keyframes wd-eye-breathe { 0%, 100% { opacity: .22; } 50% { opacity: .42; } }
+@keyframes wd-eye-flare { 0% { opacity: .55; transform: scale(1); } 35% { opacity: 1; transform: scale(1.14); } 100% { opacity: .7; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .wd-eye-rays, .wd-eye-orbit, .wd-eye-glow { animation: none !important; }
+  .wd-eye-ball, .wd-eye-gaze, .wd-eye-pupil, .wd-eye-glow { transition: none; }
+}
 .wd-health { padding: 15px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: var(--z-radius); background: var(--bg-elev); }
 .wd-health[data-state="overdue"], .wd-health[data-state="unknown"] { border-left: 3px solid var(--warning); }
 .wd-health-title { font-size: 14px; font-weight: 600; line-height: 1.5; margin: 0 0 8px; }
@@ -138,8 +174,7 @@ html[data-theme="light"] {
 .wd-health-event strong, .wd-health-time, .wd-health-tool { display: block; line-height: 1.8; overflow-wrap: anywhere; }
 .wd-health-time { color: var(--text-faint); font-size: 10px; }
 .wd-health-tool { color: var(--text-dim); }
-.wd-status { position: relative; padding: 20px 17px 16px; border: 1px solid var(--border); border-radius: var(--z-radius); background: var(--bg-elev); overflow: hidden; }
-.wd-status::after { content: ''; position: absolute; right: -18px; top: -23px; width: 83px; height: 83px; border: 1px solid var(--border-soft); border-radius: 50%; box-shadow: 0 0 0 12px var(--bg-elev), 0 0 0 13px var(--border-soft); pointer-events: none; }
+.wd-status { position: relative; padding: 20px 17px 16px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: var(--z-radius); background: var(--bg-elev); overflow: hidden; }
 .wd-status-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); margin-bottom: 15px; box-shadow: 0 0 0 5px var(--bg-elev2); }
 .wd-status[data-state="observing"] .wd-status-dot { background: var(--accent); box-shadow: 0 0 0 5px var(--accent-soft); }
 .wd-status[data-state="error"] .wd-status-dot { background: var(--danger); }
