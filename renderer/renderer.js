@@ -19848,7 +19848,7 @@ function openBrowserUrlInNewTab(url, { sourceWebContentsId = 0 } = {}) {
   return true;
 }
 
-function closeRightSidebarTool(tool) {
+function closeRightSidebarTool(tool, { userInitiated = true } = {}) {
   const index = openRightSidebarTabs.findIndex(tab => tab.id === tool);
   if (index < 0) return false;
   const [closedTab] = openRightSidebarTabs.splice(index, 1);
@@ -19861,7 +19861,7 @@ function closeRightSidebarTool(tool) {
     hideReviewQuickDiff();
     globalThis.ZDshReview?.close?.();
   }
-  if (closedTab.type === 'browser') destroyBrowserTabController(closedTab.id, { userInitiated: true });
+  if (closedTab.type === 'browser') destroyBrowserTabController(closedTab.id, { userInitiated });
   if (activeRightSidebarTab === tool) {
     activeRightSidebarTab = visibleTabs.at(-1)?.id || null;
   }
@@ -25458,6 +25458,7 @@ function bindUI() {
 const browserTabControllers = new Map();
 const agentBrowserTabsByRun = new Map();
 const blockedAgentBrowserRuns = new Map();
+const cancelledBrowserOperationIds = new Set();
 let lastActiveBrowserTabId = null;
 // Guest pages remain mounted while chats switch, preserving page state/history.
 // Only their tab strip and active panel change; durable metadata is per chat.
@@ -25529,18 +25530,22 @@ function setBrowserPageState(controller, url) {
   controller.emptyState?.setAttribute('aria-hidden', String(!empty));
 }
 
-function waitForBrowserDomReady(controller, timeoutMs = 5000) {
+function waitForBrowserDomReady(controller, timeoutMs = 5000, signal = null) {
+  if (signal?.aborted) return Promise.reject(new DOMException('Browser navigation cancelled', 'AbortError'));
   if (controller?.domReady) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error('浏览器标签初始化超时')), timeoutMs);
     const finish = error => {
       clearTimeout(timer);
       controller?.webview?.removeEventListener('dom-ready', onReady);
+      signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve();
     };
     const onReady = () => finish(null);
+    const onAbort = () => finish(new DOMException('Browser navigation cancelled', 'AbortError'));
     controller?.webview?.addEventListener('dom-ready', onReady, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -26066,6 +26071,56 @@ function getReusableAgentBrowserController(scope = currentBrowserScope()) {
   return candidates.at(-1) || null;
 }
 
+function scopedAgentBrowserTabs(scope) {
+  return [...browserTabControllers.values()].filter(controller => controller.agentOwned && browserControllerMatchesScope(controller, scope));
+}
+
+function browserOperationExpired(operationId, deadlineAt) {
+  if (cancelledBrowserOperationIds.has(String(operationId || ''))) return { ok: false, code: 'BROWSER_ACTION_CANCELLED', error: '内置浏览器操作已取消。' };
+  if (deadlineAt && Date.now() >= deadlineAt) return { ok: false, code: 'BROWSER_ACTION_TIMEOUT', error: '浏览器操作已过期，未开始执行。' };
+  return null;
+}
+
+async function executeBrowserTabsCommand(params, { runId, scope, operationId, deadlineAt, runCtx }) {
+  await ensureBrowserSessionState(scope.sessionId);
+  const expired = browserOperationExpired(operationId, deadlineAt);
+  if (expired) return expired;
+  const action = String(params.action || 'list');
+  const owned = scopedAgentBrowserTabs(scope);
+  const activeId = getAgentBrowserController(runId, scope)?.id || getReusableAgentBrowserController(scope)?.id || null;
+  const describe = controller => ({
+    tabId: controller.id,
+    url: controller.webview?.getURL?.() || controller.currentUrl || 'about:blank',
+    title: controller.webview?.getTitle?.() || '',
+    active: controller.id === activeId,
+    controlled: !!controller.agentControlActive,
+    available: !controller.agentControlActive || controller.agentRunId === runId
+  });
+  if (action === 'list') return { ok: true, tabs: owned.map(describe), activeTabId: activeId };
+  if (action === 'new') {
+    const target = params.target_type === 'search' ? `https://www.bing.com/search?q=${encodeURIComponent(String(params.url_or_path || ''))}` : params.url_or_path;
+    return agentOpenBuiltinBrowser(target, { runId, operationId, deadlineAt, newTab: true, runCtx: { ...(runCtx || {}), ...scope, runId } });
+  }
+  if (!['select', 'close'].includes(action)) return { ok: false, code: 'INVALID_TAB_ACTION', error: '标签操作必须为 list、new、select 或 close。' };
+  const controller = owned.find(item => item.id === String(params.tab_id || ''));
+  if (!controller) return { ok: false, code: 'BROWSER_TAB_NOT_OWNED', error: '该标签不属于当前对话的 Agent 浏览器。' };
+  if (controller.agentControlActive && controller.agentRunId !== runId) return { ok: false, code: 'BROWSER_TAB_BUSY', error: '该标签正由另一个任务操控。' };
+  if (action === 'select') {
+    setBrowserAgentControl(controller, true, { runId });
+    if (browserControllerVisibleInCurrentSession(controller)) activateRightSidebarTab(controller.id);
+    return { ok: true, tabId: controller.id, url: controller.webview?.getURL?.() || 'about:blank', selected: true };
+  }
+  await controller.agent?.releaseActions?.();
+  const expiredAfterRelease = browserOperationExpired(operationId, deadlineAt);
+  if (expiredAfterRelease) return expiredAfterRelease;
+  closeRightSidebarTool(controller.id, { userInitiated: false });
+  const remaining = scopedAgentBrowserTabs(scope).filter(item => !item.agentControlActive || item.agentRunId === runId);
+  const next = remaining.find(item => item.id === agentBrowserTabsByRun.get(runId)) || remaining.at(-1);
+  if (next) agentBrowserTabsByRun.set(runId, next.id);
+  else agentBrowserTabsByRun.delete(runId);
+  return { ok: true, tabId: controller.id, closed: true, activeTabId: next?.id || null };
+}
+
 function findRunCtxByRunId(runId) {
   const id = String(runId || '');
   if (!id) return null;
@@ -26103,7 +26158,7 @@ function updateBrowserAgentCursor(controller, detail = {}) {
   cursor.classList.toggle('is-pressing', pressing);
 }
 
-function setBrowserAgentControl(controller, active, { runId = '', userReleased = false, skipAgentRelease = false } = {}) {
+function setBrowserAgentControl(controller, active, { runId = '', userReleased = false, skipAgentRelease = false, selectAsActive = true } = {}) {
   if (!controller) return false;
   if (active) controller.annotations?.stop();
   const ownerRunId = String(runId || controller.agentRunId || '');
@@ -26135,10 +26190,10 @@ function setBrowserAgentControl(controller, active, { runId = '', userReleased =
   }
   if (active && ownerRunId) {
     blockedAgentBrowserRuns.delete(ownerRunId);
-    agentBrowserTabsByRun.set(ownerRunId, controller.id);
+    if (selectAsActive || !agentBrowserTabsByRun.has(ownerRunId)) agentBrowserTabsByRun.set(ownerRunId, controller.id);
     if (browserControllerVisibleInCurrentSession(controller)) expandRightSidebarForAgentBrowser();
   } else if (ownerRunId) {
-    agentBrowserTabsByRun.delete(ownerRunId);
+    if (agentBrowserTabsByRun.get(ownerRunId) === controller.id) agentBrowserTabsByRun.delete(ownerRunId);
     if (userReleased) blockedAgentBrowserRuns.set(ownerRunId, '用户已按 Esc 退出 Agent 网页操控。');
   }
   return true;
@@ -26179,12 +26234,13 @@ function expandRightSidebarForAgentBrowser() {
 function releaseBrowserAgentControl(runId, { userReleased = false, skipAgentRelease = false } = {}) {
   const id = String(runId || '');
   if (id && !userReleased) blockedAgentBrowserRuns.delete(id);
-  const controller = getAgentBrowserController(id);
-  if (!controller) {
+  const controllers = [...browserTabControllers.values()].filter(controller => controller.agentRunId === id && controller.agentControlActive);
+  if (!controllers.length) {
     if (userReleased && id) blockedAgentBrowserRuns.set(id, '用户已按 Esc 退出 Agent 网页操控。');
     return false;
   }
-  return setBrowserAgentControl(controller, false, { runId: id, userReleased, skipAgentRelease });
+  for (const controller of controllers) setBrowserAgentControl(controller, false, { runId: id, userReleased, skipAgentRelease });
+  return true;
 }
 
 function syncAgentBrowserVisibility() {
@@ -26271,7 +26327,8 @@ async function resolveBrowserUrl(input, runCtx) {
   return 'file:///' + encodeURI(norm.replace(/^([a-zA-Z]:)/, '$1'));
 }
 
-async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', operationId = '' } = {}) {
+async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', operationId = '', tabId = '', newTab = false, deadlineAt = 0 } = {}) {
+  if (newTab && tabId) return { ok: false, code: 'BROWSER_CONFLICTING_TAB_TARGET', error: 'new_tab 与 tab_id 不能同时指定，请选择新建标签或操作已有标签。' };
   const ownerRunId = String(runId || runCtx?.runId || '');
   if (!ownerRunId) {
     return { ok: false, error: '内置浏览器缺少当前 Agent 任务身份。', code: 'BROWSER_RUN_ID_REQUIRED' };
@@ -26287,22 +26344,29 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
     return { ok: false, error: '内置浏览器缺少所属对话身份。', code: 'BROWSER_SESSION_ID_REQUIRED' };
   }
   await ensureBrowserSessionState(scope.sessionId);
+  const expired = browserOperationExpired(operationId, deadlineAt);
+  if (expired) return expired;
   let url = '';
   try {
     url = await resolveBrowserUrl(urlOrPath, runCtx);
   } catch (error) {
     return { ok: false, error: `无法解析预览地址：${error.message}` };
   }
-  if (!url) return { ok: false, error: '请提供 URL 或文件路径' };
+  if (!url && !newTab) return { ok: false, error: '请提供 URL 或文件路径' };
 
   if (currentWindowView === 'main' && scope.sessionId === currentBrowserScope().sessionId) {
     window.ZUnderstandAnything?.close();
     switchSidebarNav('tasks');
   }
 
-  let browser = getAgentBrowserController(ownerRunId, scope);
+  let browser = null;
+  if (tabId) {
+    browser = scopedAgentBrowserTabs(scope).find(item => item.id === tabId);
+    if (!browser) return { ok: false, code: 'BROWSER_TAB_NOT_OWNED', error: '该标签不属于当前对话的 Agent 浏览器。' };
+    if (browser.agentControlActive && browser.agentRunId !== ownerRunId) return { ok: false, code: 'BROWSER_TAB_BUSY', error: '该标签正由另一个任务操控。' };
+  } else if (!newTab) browser = getAgentBrowserController(ownerRunId, scope);
   let created = false;
-  if (!browser) browser = getReusableAgentBrowserController(scope);
+  if (!browser && !newTab) browser = getReusableAgentBrowserController(scope);
   if (!browser) {
     const tab = createRightSidebarTab('browser', {
       agentRunId: ownerRunId,
@@ -26323,8 +26387,17 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
   }
   setBrowserAgentControl(browser, true, { runId: ownerRunId });
   try {
+    const expired = browserOperationExpired(operationId, deadlineAt);
+    if (expired) return expired;
+    if (!url) return { ok: true, url: 'about:blank', tabId: browser.id, dedicatedAgentTab: true, created };
     const navigation = browser.agent?.enqueueAction
-      ? await browser.agent.enqueueAction(operationId, signal => browser.navigate(url, { waitForLoad: true, signal }))
+      ? await browser.agent.enqueueAction(operationId, signal => {
+        if (browser.agent.needsFreshObservation) return {
+          ok: false, code: 'BROWSER_OBSERVATION_REQUIRED', uncertain: true, tabId: browser.id,
+          error: '上一项页面操作的结果尚未确认。请先重新读取当前页面，再决定是否导航；也可以明确新建标签。'
+        };
+        return browser.navigate(url, { waitForLoad: true, signal, deadlineAt });
+      }, { deadlineAt })
       : await browser.navigate(url, { waitForLoad: true });
     if (!navigation?.url) return navigation;
     return {
@@ -26335,7 +26408,7 @@ async function agentOpenBuiltinBrowser(urlOrPath, { runCtx = null, runId = '', o
       created
     };
   } catch (error) {
-    return { ok: false, error: `内置浏览器加载失败：${error.message}` };
+    return { ok: false, error: `内置浏览器加载失败：${error.message}`, code: error.code || (error.name === 'AbortError' ? 'BROWSER_ACTION_CANCELLED' : 'BROWSER_NAVIGATION_FAILED'), uncertain: true, tabId: browser.id };
   }
 }
 
@@ -26344,6 +26417,7 @@ async function executeBrowserAgentCommand(detail = {}) {
   const params = detail.params && typeof detail.params === 'object' ? detail.params : {};
   const runId = String(params.z_run_id || '');
   const operationId = String(detail.operationId || detail.requestId || '');
+  const deadlineAt = Number(detail.deadlineAt || params.z_deadline_at) || 0;
   const runCtx = findRunCtxByRunId(runId);
   const scope = {
     workspace: String(Object.prototype.hasOwnProperty.call(params, 'z_workspace')
@@ -26354,13 +26428,35 @@ async function executeBrowserAgentCommand(detail = {}) {
       : runCtx ? runCtx.sessionId : state.currentSession?.id || '')
   };
   if (action === 'cancel') {
-    const controller = getAgentBrowserController(runId);
-    return { ok: true, cancelled: !!controller?.agent?.cancelOperation?.(params.operation_id || operationId) };
+    const cancelledId = String(params.operation_id || operationId);
+    cancelledBrowserOperationIds.add(cancelledId);
+    if (cancelledBrowserOperationIds.size > 1000) cancelledBrowserOperationIds.delete(cancelledBrowserOperationIds.values().next().value);
+    let cancelled = false;
+    for (const controller of browserTabControllers.values()) {
+      if (controller.agentRunId === runId && browserControllerMatchesScope(controller, scope)) cancelled = !!controller.agent?.cancelOperation?.(cancelledId) || cancelled;
+    }
+    return { ok: true, cancelled };
   }
   if (action === 'release') {
-    const controller = getAgentBrowserController(runId);
-    const cancelled = controller?.agent ? await controller.agent.releaseActions() : null;
+    // The run may already be removed while another chat is displayed. Run
+    // ownership, rather than the visible chat fallback, identifies its leases.
+    const controllers = [...browserTabControllers.values()].filter(controller => runId && controller.agentRunId === runId);
+    const cancelled = await Promise.all(controllers.map(controller => controller.agent?.releaseActions()));
     return { ok: releaseBrowserAgentControl(runId, { skipAgentRelease: true }), released: true, cancelled };
+  }
+  const expired = browserOperationExpired(operationId, deadlineAt);
+  if (expired) return expired;
+  if (!runId) return { ok: false, code: 'BROWSER_RUN_ID_REQUIRED', error: '内置浏览器缺少当前 Agent 任务身份。' };
+  if (!scope.sessionId) return { ok: false, code: 'BROWSER_SESSION_ID_REQUIRED', error: '内置浏览器缺少所属对话身份。' };
+  if (blockedAgentBrowserRuns.has(runId)) return { ok: false, code: 'BROWSER_AGENT_CONTROL_RELEASED', error: blockedAgentBrowserRuns.get(runId) };
+  if (action === 'tabs') {
+    if (runCtx?.browserAnnotation) {
+      const annotated = browserTabControllers.get(runCtx.browserAnnotation.tabId);
+      if (!browserControllerMatchesScope(annotated, scope) || annotated?.webview?.getURL?.() !== runCtx.browserAnnotation.url) return { ok: false, code: 'BROWSER_ANNOTATION_PAGE_CHANGED', error: '注释原页面已关闭或跳转，请重新选择元素。' };
+      if (String(params.action || 'list') !== 'list') return { ok: false, code: 'BROWSER_ANNOTATION_TAB_LOCKED', error: '注释任务只能操作用户选定的页面，不能创建、切换或关闭标签。' };
+      return { ok: true, activeTabId: annotated.id, tabs: [{ tabId: annotated.id, url: annotated.webview.getURL(), title: annotated.webview.getTitle?.() || '', active: true, annotationTarget: true }] };
+    }
+    return executeBrowserTabsCommand(params, { runId, scope, operationId, deadlineAt, runCtx });
   }
   if (action === 'open' && !runCtx?.browserAnnotation) {
     const target = params.target_type === 'search'
@@ -26369,6 +26465,9 @@ async function executeBrowserAgentCommand(detail = {}) {
     return agentOpenBuiltinBrowser(target, {
       runId,
       operationId,
+      tabId: String(params.tab_id || ''),
+      newTab: params.new_tab === true,
+      deadlineAt,
       runCtx: {
         ...(runCtx || {}),
         runId,
@@ -26385,8 +26484,16 @@ async function executeBrowserAgentCommand(detail = {}) {
     return { ok: false, error: blockedAgentBrowserRuns.get(runId), code: 'BROWSER_AGENT_CONTROL_RELEASED' };
   }
   let controller = getAgentBrowserController(runId, scope);
+  if (params.tab_id && !runCtx?.browserAnnotation) {
+    await ensureBrowserSessionState(scope.sessionId);
+    controller = scopedAgentBrowserTabs(scope).find(item => item.id === String(params.tab_id));
+    if (!controller) return { ok: false, code: 'BROWSER_TAB_NOT_OWNED', error: '该标签不属于当前对话的 Agent 浏览器。' };
+    if (controller.agentControlActive && controller.agentRunId !== runId) return { ok: false, code: 'BROWSER_TAB_BUSY', error: '该标签正由另一个任务操控。' };
+    if (!controller.agentControlActive) setBrowserAgentControl(controller, true, { runId, selectAsActive: false });
+  }
   if (runCtx?.browserAnnotation) {
     const annotated = browserTabControllers.get(runCtx.browserAnnotation.tabId);
+    if (params.tab_id && params.tab_id !== annotated?.id) return { ok: false, code: 'BROWSER_TAB_NOT_OWNED', error: '注释任务只能操作用户选定的页面。' };
     if (!browserControllerMatchesScope(annotated, scope)) return {ok:false,error:'注释页面不属于当前任务对话'};
     if (!annotated || annotated.webview.getURL() !== runCtx.browserAnnotation.url) return {ok:false,error:'注释原页面已关闭或跳转，请重新选择元素'};
     if (annotated.agentControlActive && annotated.agentRunId !== runId) return {ok:false,error:'注释页面正被其他任务操控'};
@@ -26407,6 +26514,7 @@ async function executeBrowserAgentCommand(detail = {}) {
       setBrowserAgentControl(controller, true, { runId });
     }
   }
+  if (controller && !controller.agentControlActive && controller.agentOwned) setBrowserAgentControl(controller, true, { runId, selectAsActive: !params.tab_id });
   if (!controller) {
     return { ok: false, error: '当前任务尚未创建 Agent 专属浏览器标签页。请先调用 open_builtin_browser。', code: 'BROWSER_NOT_OPEN' };
   }
@@ -26418,7 +26526,22 @@ async function executeBrowserAgentCommand(detail = {}) {
 
   const runAgentAction = async operation => {
     try {
-      return await agent.enqueueAction(operationId, operation);
+      const expired = browserOperationExpired(operationId, deadlineAt);
+      if (expired) return expired;
+      const observations = ['snapshot', 'find', 'read_page', 'inspect_page'];
+      const readOnly = [...observations, 'wait', 'screenshot'];
+      const result = await agent.enqueueAction(operationId, async signal => {
+        // Check on dequeue, since an earlier queued action can become uncertain
+        // after this command was submitted. Never replay a write automatically.
+        if (agent.needsFreshObservation && !readOnly.includes(action)) return {
+          ok: false, code: 'BROWSER_OBSERVATION_REQUIRED', uncertain: true,
+          error: '上一项页面操作的结果尚未确认。请先成功调用 browser_snapshot、browser_find、browser_read_page 或 browser_inspect_page，再决定下一步；不要直接重复提交。'
+        };
+        const result = await operation(signal);
+        if (observations.includes(action) && result?.ok === true && !result.uncertain) agent.needsFreshObservation = false;
+        return result;
+      }, { deadlineAt });
+      return { ...result, tabId: controller.id };
     } finally {
       if (controller.agentControlActive && browserControllerVisibleInCurrentSession(controller)) {
         controller.agentInputShield?.focus({ preventScroll: true });
@@ -26427,8 +26550,9 @@ async function executeBrowserAgentCommand(detail = {}) {
   };
 
   if (action === 'open' && runCtx?.browserAnnotation) return {ok:true,tabId:controller.id,url:controller.webview.getURL(),output:'已绑定用户注释的原页面，无需重新打开。请调用 browser_apply_annotation 修改所选元素。'};
-  if (action === 'snapshot') return runAgentAction(() => agent.snapshot());
-  if (action === 'read_page') return runAgentAction(() => agent.readPage());
+  if (action === 'snapshot') return runAgentAction(() => agent.snapshot({ ...params, viewportOnly: params.viewport_only }));
+  if (action === 'find') return runAgentAction(() => agent.find(params));
+  if (action === 'read_page') return runAgentAction(() => agent.readPage(params));
   if (action === 'click') return runAgentAction(() => agent.click(params.ref, { button: params.button, clickCount: params.click_count }));
   if (action === 'type') return runAgentAction(() => agent.type(params.ref, params.text, { submit: params.submit }));
   if (action === 'select') return runAgentAction(() => agent.select(params.ref, params.value));
@@ -26446,13 +26570,13 @@ async function executeBrowserAgentCommand(detail = {}) {
   }));
   if (action === 'press') return runAgentAction(() => agent.press(params.key, { durationMs: params.duration_ms }));
   if (action === 'scroll') return runAgentAction(() => agent.scroll(params.direction, params.amount, params.ref));
-  if (action === 'wait') return runAgentAction(() => agent.wait(params.timeout_ms, params.text, params.ref, params.state));
+  if (action === 'wait') return runAgentAction(() => agent.wait(params.timeout_ms, params.text, params.ref, params.state, params));
   if (action === 'screenshot') return runAgentAction(() => agent.screenshot());
   if (action === 'inspect_page') return runAgentAction(() => agent.inspectPage());
   if (action === 'apply_annotation') {
     const note=runCtx?.browserAnnotation;
     if (!note || note.tabId!==controller.id) return {ok:false,error:'本任务没有用户选定的注释目标'};
-    return runAgentAction(()=>controller.webview.executeJavaScript('('+window.ZApplyAnnotation.toString()+')('+JSON.stringify({id:note.annotationId,url:note.url,text:params.text,styles:{...note.requestedStyles,...params.styles}})+')'));
+    return runAgentAction(()=>agent.executePage('('+window.ZApplyAnnotation.toString()+')('+JSON.stringify({id:note.annotationId,url:note.url,text:params.text,styles:{...note.requestedStyles,...params.styles}})+')'));
   }
   if (action === 'status') {
     const url = controller.webview?.getURL?.() || controller.currentUrl || '';
@@ -26465,7 +26589,8 @@ async function executeBrowserAgentCommand(detail = {}) {
       canGoForward: !!controller.webview?.canGoForward?.(),
       tabId: controller.id,
       dedicatedAgentTab: true,
-      agentControlled: controller.agentControlActive
+      agentControlled: controller.agentControlActive,
+      needsFreshObservation: !!agent.needsFreshObservation
     };
   }
   return runAgentAction(async () => {
@@ -26477,6 +26602,8 @@ async function executeBrowserAgentCommand(detail = {}) {
     } else if (action === 'forward' && !controller.webview?.canGoForward?.()) {
       return { ok: false, error: '当前页面没有可前进的历史记录。', code: 'BROWSER_CANNOT_GO_FORWARD' };
     }
+    agent.assertActionActive();
+    if (agent.activeAction) agent.activeAction.externalStarted = true;
     const navigation = agent.waitForNavigation(5_000);
     if (action === 'back') {
       controller.webview.goBack();
@@ -26485,9 +26612,10 @@ async function executeBrowserAgentCommand(detail = {}) {
     } else if (action === 'reload') {
       controller.webview?.reload?.();
     }
-    const navigationCompleted = await navigation;
+    const navigationResult = await navigation;
+    if (!navigationResult.ok) return { ...navigationResult, navigationCompleted: false, url: controller.webview?.getURL?.() || '' };
     await agent.waitForSettle(1_500);
-    return { ok: true, url: controller.webview?.getURL?.() || '', navigationCompleted, pageState: await agent.pageState() };
+    return { ok: true, url: controller.webview?.getURL?.() || '', navigationCompleted: true, pageState: await agent.pageState() };
   });
 }
 
@@ -26691,9 +26819,11 @@ function createBrowserTabController(tab) {
     void syncBrowserHorizontalScroll(controller);
   }, 320);
 
-  const loadOnce = (url, { signal } = {}) => new Promise((resolve, reject) => {
+  const loadOnce = (url, { signal, deadlineAt = 0 } = {}) => new Promise((resolve, reject) => {
     let targetNavigationStarted = false;
-    const timer = setTimeout(() => finish(new Error('加载超时（15 秒）')), 15000);
+    let settled = false;
+    const timeout = Math.max(1, Math.min(15000, deadlineAt ? deadlineAt - Date.now() : 15000));
+    const timer = setTimeout(() => finish(Object.assign(new Error('网页加载超时，请检查当前页面状态。'), { code: 'BROWSER_NAVIGATION_TIMEOUT' })), timeout);
     const cleanup = () => {
       clearTimeout(timer);
       webview.removeEventListener('did-start-navigation', onStartNavigation);
@@ -26703,6 +26833,8 @@ function createBrowserTabController(tab) {
       controller.waitingForLoad = false;
     };
     const finish = (error) => {
+      if (settled) return;
+      settled = true;
       cleanup();
       if (error) reject(error);
       else resolve({ url: webview.getURL?.() || url });
@@ -26737,14 +26869,21 @@ function createBrowserTabController(tab) {
       onAbort();
       return;
     }
+    if (deadlineAt && Date.now() >= deadlineAt) {
+      finish(Object.assign(new Error('浏览器操作已过期，未开始导航。'), { code: 'BROWSER_ACTION_TIMEOUT' }));
+      return;
+    }
+    if (controller.agent?.activeAction) controller.agent.activeAction.externalStarted = true;
     if (webview.getURL?.() === url) webview.reload();
     else webview.src = url;
   });
 
-  controller.navigate = async (input, { waitForLoad = false, retryNetwork = true, signal } = {}) => {
+  controller.navigate = async (input, { waitForLoad = false, retryNetwork = true, signal, deadlineAt = 0 } = {}) => {
     const url = normalizeBrowserAddress(input);
     if (!url) return { url: '' };
-    await waitForBrowserDomReady(controller);
+    await waitForBrowserDomReady(controller, Math.max(1, Math.min(5000, deadlineAt ? deadlineAt - Date.now() : 5000)), signal);
+    if (signal?.aborted) throw new DOMException('Browser navigation cancelled', 'AbortError');
+    if (deadlineAt && Date.now() >= deadlineAt) throw Object.assign(new Error('浏览器操作已过期，未开始导航。'), { code: 'BROWSER_ACTION_TIMEOUT' });
     setBrowserPageState(controller, url);
     updateBrowserTabLabel(tab.id, '', url);
     updateBrowserTabFavicon(tab.id, []);
@@ -26753,12 +26892,12 @@ function createBrowserTabController(tab) {
       return { url };
     }
     try {
-      return await loadOnce(url, { signal });
+      return await loadOnce(url, { signal, deadlineAt });
     } catch (error) {
-      if (retryNetwork && error.code === -100 && typeof api.browserRecoverNetwork === 'function') {
-        const recovered = await api.browserRecoverNetwork(error.url || url).catch(() => null);
+      if (!signal?.aborted && retryNetwork && error.code === -100 && typeof api.browserRecoverNetwork === 'function') {
+        const recovered = await controller.agent.boundedOperation(() => api.browserRecoverNetwork(error.url || url), { timeoutMs: 3000, signal }).catch(() => null);
         console.warn(`[browser] connection closed; refreshed system proxy (${recovered?.proxy || 'unknown'}) and retrying ${url}`);
-        return loadOnce(url, { signal });
+        return loadOnce(url, { signal, deadlineAt });
       }
       throw error;
     }

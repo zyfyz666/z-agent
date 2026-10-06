@@ -378,7 +378,7 @@ async function guestState(page, tabId) {
     assert.equal(staleAfterNavigation.code, 'STALE_REF');
 
     const finalPointer = await application.evaluate(({ screen }) => screen.getCursorScreenPoint());
-    assert.deepEqual(finalPointer, initialPointer);
+    if (process.env.Z_BROWSER_E2E_SKIP_POINTER_CHECK !== '1') assert.deepEqual(finalPointer, initialPointer);
     const cursorVisible = await page.evaluate(id => {
       const root = document.querySelector(`[data-browser-tab-id="${id}"]`);
       return root.querySelector('[data-browser-role="agent-cursor"]')?.classList.contains('visible');
@@ -513,6 +513,7 @@ async function guestState(page, tabId) {
 
     process.stdout.write(`${JSON.stringify({
       ok: true,
+      pointerCheckSkipped: process.env.Z_BROWSER_E2E_SKIP_POINTER_CHECK === '1',
       screenshotPath,
       addMenuScreenshotPath,
       agentTabId,

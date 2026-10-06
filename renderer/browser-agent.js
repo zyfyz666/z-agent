@@ -2,157 +2,9 @@
 (function (namespace) {
   'use strict';
 
-  const MAX_SNAPSHOT_ITEMS = 180;
+  let globalRefCounter = 0;
+  const MAX_SNAPSHOT_ITEMS = 500;
   const MAX_TEXT_LENGTH = 16000;
-  const SNAPSHOT_SCRIPT = ({ startRef = 1, snapshotId = '' } = {}) => String.raw`(() => {
-    const interactiveSelector = [
-      'a[href]', 'button', 'input:not([type="hidden"])', 'textarea', 'select', 'summary',
-      '[contenteditable="true"]', '[role="button"]', '[role="link"]', '[role="textbox"]',
-      '[role="checkbox"]', '[role="radio"]', '[role="switch"]', '[role="tab"]',
-      '[role="menuitem"]', '[role="option"]', '[role="combobox"]', '[role="slider"]',
-      '[tabindex]:not([tabindex="-1"])'
-    ].join(',');
-    const refs = new Map();
-    const seen = new Set();
-    const candidates = [];
-    const text = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const visible = element => {
-      if (!element || !element.isConnected) return false;
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return false;
-      let current = element;
-      while (current) {
-        const style = current.ownerDocument.defaultView.getComputedStyle(current);
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-        const root = current.getRootNode?.();
-        current = current.parentElement || root?.host || null;
-      }
-      return true;
-    };
-    const labelFor = element => {
-      const direct = text(element.getAttribute('aria-label'));
-      if (direct) return direct;
-      const ids = text(element.getAttribute('aria-labelledby'));
-      if (ids) {
-        const value = ids.split(/\s+/).map(id => element.ownerDocument.getElementById(id)?.innerText || '').join(' ');
-        if (text(value)) return text(value);
-      }
-      if (element.id) {
-        const label = element.ownerDocument.querySelector('label[for="' + CSS.escape(element.id) + '"]');
-        if (label && text(label.innerText)) return text(label.innerText);
-      }
-      const parentLabel = element.closest('label');
-      if (parentLabel && text(parentLabel.innerText)) return text(parentLabel.innerText);
-      const safeValue = element.matches?.('input[type="password"]') ? '' : text(element.value);
-      return text(element.getAttribute('placeholder')) || text(element.getAttribute('title'))
-        || text(element.getAttribute('alt')) || text(element.innerText)
-        || safeValue || text(element.getAttribute('name'));
-    };
-    const roleFor = element => {
-      const explicit = text(element.getAttribute('role'));
-      if (explicit) return explicit;
-      const tag = element.tagName.toLowerCase();
-      if (tag === 'a') return 'link';
-      if (tag === 'button' || tag === 'summary') return 'button';
-      if (tag === 'textarea') return 'textbox';
-      if (tag === 'select') return 'combobox';
-      if (tag === 'input') {
-        const type = (element.type || 'text').toLowerCase();
-        if (type === 'checkbox') return 'checkbox';
-        if (type === 'radio') return 'radio';
-        if (type === 'range') return 'slider';
-        if (['button', 'submit', 'reset'].includes(type)) return 'button';
-        return 'textbox';
-      }
-      if (element.isContentEditable) return 'textbox';
-      return 'generic';
-    };
-    const stateFor = element => {
-      const state = {};
-      if (element.disabled || element.getAttribute('aria-disabled') === 'true') state.disabled = true;
-      if (element.checked || element.getAttribute('aria-checked') === 'true') state.checked = true;
-      if (element.selected || element.getAttribute('aria-selected') === 'true') state.selected = true;
-      if (element.required || element.getAttribute('aria-required') === 'true') state.required = true;
-      if (element.readOnly || element.getAttribute('aria-readonly') === 'true') state.readonly = true;
-      const expanded = element.getAttribute('aria-expanded');
-      if (expanded === 'true' || expanded === 'false') state.expanded = expanded === 'true';
-      const pressed = element.getAttribute('aria-pressed');
-      if (pressed === 'true' || pressed === 'false') state.pressed = pressed === 'true';
-      if ('value' in element && element.value !== '') {
-        if (element.matches?.('input[type="password"]')) state.hasValue = true;
-        else state.value = String(element.value).slice(0, 240);
-      }
-      return state;
-    };
-    const topRect = element => {
-      const rect = element.getBoundingClientRect();
-      let x = rect.left;
-      let y = rect.top;
-      let view = element.ownerDocument.defaultView;
-      while (view && view !== view.top) {
-        const frame = view.frameElement;
-        if (!frame) break;
-        const frameRect = frame.getBoundingClientRect();
-        x += frameRect.left;
-        y += frameRect.top;
-        view = frame.ownerDocument.defaultView;
-      }
-      return { x, y, width: rect.width, height: rect.height };
-    };
-    const visitRoot = (root, depth = 0) => {
-      if (!root || depth > 5 || candidates.length >= ${MAX_SNAPSHOT_ITEMS * 3}) return;
-      let elements = [];
-      try { elements = [...root.querySelectorAll('*')]; } catch { return; }
-      for (const element of elements) {
-        if (candidates.length >= ${MAX_SNAPSHOT_ITEMS * 3}) break;
-        if (!seen.has(element) && element.matches?.(interactiveSelector) && visible(element)) {
-          seen.add(element);
-          candidates.push(element);
-        }
-        if (element.shadowRoot) visitRoot(element.shadowRoot, depth + 1);
-        if (element.tagName === 'IFRAME') {
-          try { visitRoot(element.contentDocument, depth + 1); } catch {}
-        }
-      }
-    };
-    visitRoot(document);
-    const elements = candidates.slice(0, ${MAX_SNAPSHOT_ITEMS});
-    const items = elements.map((element, index) => {
-      const ref = 'e' + (${Math.max(1, Number(startRef) || 1)} + index);
-      const rect = topRect(element);
-      refs.set(ref, element);
-      return {
-        ref,
-        role: roleFor(element),
-        tag: element.tagName.toLowerCase(),
-        type: String(element.getAttribute('type') || '').toLowerCase(),
-        name: labelFor(element).slice(0, 220),
-        state: stateFor(element),
-        rect: {
-          x: Math.round(rect.x + rect.width / 2),
-          y: Math.round(rect.y + rect.height / 2),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height)
-        },
-        inViewport: rect.x + rect.width > 0 && rect.y + rect.height > 0
-          && rect.x < window.innerWidth && rect.y < window.innerHeight
-      };
-    });
-    window.__zBrowserRefs = refs;
-    window.__zBrowserSnapshotId = ${JSON.stringify(String(snapshotId || ''))};
-    const bodyText = text(document.body?.innerText).slice(0, 3200);
-    return {
-      url: location.href,
-      title: document.title || '',
-      readyState: document.readyState,
-      snapshotId: window.__zBrowserSnapshotId,
-      viewport: { width: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX, scrollY: window.scrollY },
-      items,
-      bodyText,
-      truncated: candidates.length > elements.length
-    };
-  })()`;
-
   const targetScript = ref => `(() => {
     const element = window.__zBrowserRefs?.get(${JSON.stringify(String(ref || ''))});
     if (!element || !element.isConnected) return { ok: false, error: '页面已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
@@ -217,6 +69,7 @@
       this.actionGeneration = 0;
       this.actionEntries = new Map();
       this.activeAction = null;
+      this.needsFreshObservation = false;
       this.bindEvents();
     }
 
@@ -250,31 +103,34 @@
       try {
         return await callback();
       } catch (error) {
-        return { ok: false, error: `浏览器操作失败：${error?.message || error}`, code: 'BROWSER_BRIDGE_ERROR' };
+        return { ok: false, error: `浏览器操作失败：${error?.message || error}`, code: error?.code || (error?.name === 'AbortError' ? 'BROWSER_ACTION_CANCELLED' : 'BROWSER_BRIDGE_ERROR'), ...(error?.uncertain ? { uncertain: true } : {}) };
       } finally {
         if (this.busyTimer) clearTimeout(this.busyTimer);
         this.busyTimer = setTimeout(() => this.setBusy(false), 260);
       }
     }
 
-    enqueueAction(operationId, callback) {
+    enqueueAction(operationId, callback, { deadlineAt = 0 } = {}) {
       const id = String(operationId || `browser-op-${++this.actionSequence}`);
       const entry = {
         id,
         generation: this.actionGeneration,
         cancelled: false,
-        controller: new AbortController()
+        externalStarted: false,
+        controller: new AbortController(),
+        deadlineAt: Number(deadlineAt) || 0
       };
       this.actionEntries.set(id, entry);
       const execute = async () => {
         try {
-          if (entry.cancelled || entry.generation !== this.actionGeneration) return this.cancelledResult();
+          if (entry.cancelled || entry.generation !== this.actionGeneration) return this.cancelledResult(entry);
+          if (entry.deadlineAt && Date.now() >= entry.deadlineAt) return { ok: false, code: 'BROWSER_ACTION_TIMEOUT', error: '浏览器操作已过期，未执行。' };
           this.activeAction = entry;
           const result = await callback(entry.controller.signal);
-          if (entry.cancelled || entry.controller.signal.aborted) return this.cancelledResult();
+          if (entry.cancelled || entry.controller.signal.aborted) return this.cancelledResult(entry);
           return result;
         } catch (error) {
-          if (entry.cancelled || entry.controller.signal.aborted || error?.name === 'AbortError') return this.cancelledResult();
+          if (entry.cancelled || entry.controller.signal.aborted || error?.name === 'AbortError') return this.cancelledResult(entry);
           throw error;
         } finally {
           if (this.activeAction === entry) this.activeAction = null;
@@ -286,8 +142,9 @@
       return result;
     }
 
-    cancelledResult() {
-      return { ok: false, error: '内置浏览器操作已取消。', code: 'BROWSER_ACTION_CANCELLED' };
+    cancelledResult(entry = this.activeAction) {
+      if (entry?.externalStarted) this.needsFreshObservation = true;
+      return { ok: false, error: entry?.externalStarted ? '浏览器等待已取消；已下发的页面操作可能仍会完成，请先重新读取页面，勿直接重复提交。' : '内置浏览器操作已取消。', code: 'BROWSER_ACTION_CANCELLED', ...(entry?.externalStarted ? { uncertain: true } : {}) };
     }
 
     cancelOperation(operationId) {
@@ -326,7 +183,7 @@
           window.__zBrowserRefs = new Map();
           window.__zBrowserSnapshotId = '';
           return { ok: true };
-        })()`);
+        })()`, { timeoutMs: 400, signal: null });
       } catch {
         return { ok: false };
       }
@@ -351,17 +208,56 @@
       });
     }
 
+    assertActionActive() {
+      if (this.activeAction?.controller.signal.aborted) throw new DOMException('Browser action cancelled', 'AbortError');
+      if (this.activeAction?.deadlineAt && Date.now() >= this.activeAction.deadlineAt) throw Object.assign(new Error('浏览器操作已超时，请先检查页面当前状态。'), { code: 'BROWSER_ACTION_TIMEOUT', uncertain: true });
+    }
+
     validateRef(ref) {
       const value = String(ref || '');
       if (value && this.activeRefs.has(value)) return null;
       return { ok: false, error: '页面或快照已变化，请先重新调用 browser_snapshot。', code: 'STALE_REF' };
     }
 
-    async executePage(expression) {
+    async boundedOperation(operation, { timeoutMs = 8000, signal = this.activeAction?.controller?.signal } = {}) {
+      const entry = this.activeAction;
+      let dispatched = false;
+      const remaining = this.activeAction?.deadlineAt ? this.activeAction.deadlineAt - Date.now() : Infinity;
+      const timeout = Math.max(1, Math.min(Number(timeoutMs) || 8000, remaining));
+      if (signal?.aborted) throw new DOMException('Browser action cancelled', 'AbortError');
+      if (remaining <= 0) throw Object.assign(new Error('浏览器操作已超时。'), { code: 'BROWSER_ACTION_TIMEOUT' });
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (error, value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
+          if (error && dispatched && (error.name === 'AbortError' || /TIMEOUT/.test(error.code || ''))) {
+            this.needsFreshObservation = true;
+            error.uncertain = true;
+          }
+          if (error) reject(error); else resolve(value);
+        };
+        const abort = () => finish(new DOMException('Browser action cancelled', 'AbortError'));
+        const timer = setTimeout(() => finish(Object.assign(new Error(`页面在 ${Math.round(timeout)}ms 内没有响应；无法确认操作结果，请先检查页面状态，勿盲目重复提交。`), { code: 'BROWSER_PAGE_TIMEOUT', uncertain: true })), timeout);
+        signal?.addEventListener('abort', abort, { once: true });
+        Promise.resolve().then(() => {
+          if (settled || signal?.aborted) return;
+          dispatched = true;
+          if (entry) entry.externalStarted = true;
+          return operation();
+        }).then(value => finish(null, value), error => finish(error));
+      });
+    }
+
+    async executePage(expression, options = {}) {
       if (!this.webview?.getURL || !this.webview.getURL() || this.webview.getURL() === 'about:blank') {
         return { ok: false, error: '内置浏览器尚未打开页面。请先调用 open_builtin_browser。', code: 'BROWSER_NOT_OPEN' };
       }
-      return this.webview.executeJavaScript(expression, true);
+      const deadlineAt = Math.min(Date.now() + (Number(options.timeoutMs) || 8000), this.activeAction?.deadlineAt || Infinity);
+      const guarded = `(() => { if (Date.now() >= ${deadlineAt}) return { ok: false, code: 'BROWSER_PAGE_TIMEOUT', error: '页面操作已过期，未开始执行。' }; return (${expression}); })()`;
+      return this.boundedOperation(() => this.webview.executeJavaScript(guarded, true), options);
     }
 
     async target(ref) {
@@ -659,6 +555,8 @@
     }
 
     sendKey(type, descriptor) {
+      if (type !== 'keyUp') this.assertActionActive();
+      if (this.activeAction) this.activeAction.externalStarted = true;
       this.webview.sendInputEvent?.({
         type,
         keyCode: descriptor.keyCode,
@@ -684,6 +582,8 @@
     }
 
     sendMouse(type, target, options = {}) {
+      if (type !== 'mouseUp') this.assertActionActive();
+      if (this.activeAction) this.activeAction.externalStarted = true;
       this.webview.sendInputEvent?.({
         type,
         x: Math.round(target.x),
@@ -693,11 +593,13 @@
       });
     }
 
-    async snapshot() {
+    async snapshot(options = {}, mode = 'snapshot') {
       return this.withAction(async () => {
-        const startRef = this.refCounter + 1;
-        const snapshotId = `s${++this.snapshotCounter}`;
-        const result = await this.executePage(SNAPSHOT_SCRIPT({ startRef, snapshotId }));
+        const startRef = globalRefCounter + 1;
+        // Reserve before awaiting: separate chats may snapshot concurrently.
+        globalRefCounter += MAX_SNAPSHOT_ITEMS;
+        const snapshotId = `s${startRef}-${++this.snapshotCounter}`;
+        const result = await this.executePage(window.ZBrowserPageObservation[mode]({ ...options, startRef, snapshotId }));
         if (!result?.items) return result;
         this.refCounter += result.items.length;
         this.activeRefs = new Set(result.items.map(item => item.ref));
@@ -714,9 +616,11 @@
           const state = Object.entries(item.state || {}).map(([key, value]) => `${key}=${value}`).join(', ');
           lines.push(`[${item.ref}] ${item.role}${item.name ? ` "${item.name}"` : ''}${state ? ` (${state})` : ''}${item.inViewport ? '' : ' [视口外]'}`);
         }
-        if (result.truncated) lines.push(`元素较多，仅返回前 ${result.items.length} 个。可滚动页面后重新快照。`);
+        if (result.truncated) lines.push(`匹配 ${result.totalMatches} 个，当前从 offset=${result.offset} 返回 ${result.items.length} 个。${result.hasMore ? `使用 offset=${result.nextOffset} 获取下一页，或 query/role 筛选。` : ''}`);
+        if (result.inaccessibleFrames?.length) lines.push(`另有 ${result.inaccessibleFrames.length} 个框架无法读取，详见 inaccessibleFrames；不要假设这些框架内没有内容。`);
         if (result.bodyText) lines.push(`页面文本:\n${result.bodyText}`);
         return {
+          ...result,
           ok: true,
           output: lines.join('\n'),
           url: result.url,
@@ -732,16 +636,19 @@
       });
     }
 
-    async readPage() {
+    async find(options = {}) {
+      return this.snapshot(options, 'find');
+    }
+
+    async readPage(options = {}) {
+      if (options.ref) {
+        const invalid = this.validateRef(options.ref);
+        if (invalid) return invalid;
+      }
       return this.withAction(async () => {
-        const result = await this.executePage(`(() => ({
-          url: location.href,
-          title: document.title || '',
-          readyState: document.readyState,
-          text: String(document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, ${MAX_TEXT_LENGTH})
-        }))()`);
+        const result = await this.executePage(window.ZBrowserPageObservation.readPage({ ...options, snapshotId: this.lastSnapshot?.snapshotId }));
         if (!result?.url) return result;
-        return { ok: true, output: `URL: ${result.url}\n标题: ${result.title || '(无标题)'}\n状态: ${result.readyState}\n${result.text}`, ...result };
+        return { ok: true, output: `URL: ${result.url}\n标题: ${result.title || '(无标题)'}\n文本 ${result.offset}–${result.offset + result.text.length} / ${result.totalChars}${result.hasMore ? `；下一页 offset=${result.nextOffset}` : ''}\n${result.text}`, ...result };
       });
     }
 
@@ -1060,37 +967,34 @@
       });
     }
 
-    async wait(ms = 1500, text = '', ref = '', state = 'visible') {
-      const timeout = Math.max(500, Math.min(15000, Number(ms) || 1500));
+    async wait(ms = 1500, text = '', ref = '', state = 'visible', options = {}) {
+      const timeout = Math.max(100, Math.min(15000, Number(ms) || 1500));
       if (ref) {
         const invalid = this.validateRef(ref);
         if (invalid) return invalid;
       }
       return this.withAction(async () => {
         const started = Date.now();
-        const wanted = String(text || '').trim();
-        const targetRef = String(ref || '').trim();
-        while (Date.now() - started < timeout) {
-          if (!wanted && !targetRef) {
-            await this.sleep(timeout);
-            return { ok: true, output: `已等待 ${timeout}ms。`, url: this.webview.getURL?.() || '' };
-          }
-          const result = await this.executePage(`(() => {
-            const wanted = ${JSON.stringify(wanted)};
-            const ref = ${JSON.stringify(targetRef)};
-            if (wanted && String(document.body?.innerText || '').includes(wanted)) return { matched: true, reason: 'text' };
-            if (!ref) return { matched: false };
-            const element = window.__zBrowserRefs?.get(ref);
-            const visible = !!element && element.isConnected && (() => { const r = element.getBoundingClientRect(); const s = getComputedStyle(element); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; })();
-            const disabled = !!element && (element.disabled || element.getAttribute('aria-disabled') === 'true');
-            const matched = ${JSON.stringify(state)} === 'hidden' ? !visible : (${JSON.stringify(state)} === 'enabled' ? visible && !disabled : visible);
-            return { matched, reason: 'element' };
-          })()`);
-          if (result?.matched) return { ok: true, output: result.reason === 'text' ? `页面已出现文本：${wanted}` : `${targetRef} 已达到 ${state} 状态。` };
-          await this.sleep(120);
+        const condition = { ...options, text, ref, state, snapshotId: this.lastSnapshot?.snapshotId };
+        const hasCondition = ['text', 'ref', 'role', 'name', 'label', 'query'].some(key => String(condition[key] || '').trim());
+        if (!hasCondition) {
+          await this.sleep(timeout);
+          return { ok: true, output: `已等待 ${timeout}ms。`, elapsedMs: Date.now() - started, url: this.webview.getURL?.() || '' };
         }
-        const subject = wanted ? `文本：${wanted}` : `${targetRef} 的 ${state} 状态`;
-        return { ok: false, error: `等待 ${timeout}ms 后仍未找到${subject}`, code: 'WAIT_TIMEOUT' };
+        let lastResult = null;
+        do {
+          try {
+            lastResult = await this.executePage(window.ZBrowserPageObservation.waitCondition(condition), { timeoutMs: Math.max(1, timeout - (Date.now() - started)) });
+          } catch (error) {
+            if (error?.code !== 'BROWSER_PAGE_TIMEOUT') throw error;
+            lastResult = { matched: false, reason: 'page-unresponsive' };
+          }
+          if (lastResult?.code === 'STALE_REF') return { ok: false, code: 'STALE_REF', error: '等待的页面引用已失效，请使用 role/name/label 重新定位或获取新快照。' };
+          if (lastResult?.matched) return { ok: true, output: `页面已满足 ${state} 等待条件。`, condition, elapsedMs: Date.now() - started, match: lastResult };
+          const remaining = timeout - (Date.now() - started);
+          if (remaining > 0) await this.sleep(Math.min(120, remaining));
+        } while (Date.now() - started < timeout);
+        return { ok: false, error: `等待 ${timeout}ms 后页面仍未满足 ${state} 条件。`, code: 'WAIT_TIMEOUT', condition, elapsedMs: Date.now() - started, lastObservation: lastResult };
       });
     }
 
@@ -1229,9 +1133,10 @@
         const captureState = await this.executePage(`(() => ({
           title: document.title || '',
           text: String(document.body?.innerText || '').trim().slice(0, 4000),
-          url: location.href
+          url: location.href,
+          viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }
         }))()`);
-        const image = await this.webview.capturePage();
+        const image = await this.boundedOperation(() => this.webview.capturePage());
         const dataUrl = image?.toDataURL?.() || '';
         const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
         if (!match) return { ok: false, error: '内置浏览器没有返回有效截图。', code: 'SCREENSHOT_EMPTY' };
@@ -1241,7 +1146,7 @@
           url: this.webview.getURL?.() || '',
           capturedAt: new Date().toISOString(),
           captureState: captureState?.url ? captureState : null,
-          image: { mimeType: match[1], data: match[2] }
+          image: { mimeType: match[1], data: match[2], ...image.getSize?.() }
         };
       });
     }
@@ -1250,45 +1155,43 @@
       const capped = Math.max(100, Math.min(5000, Number(timeout) || 900));
       const startedAt = Date.now();
       if (this.webview?.isLoading?.()) {
-        await new Promise(resolve => {
-          let done = false;
-          const finish = () => {
-            if (done) return;
-            done = true;
-            clearTimeout(timer);
-            this.webview.removeEventListener('did-finish-load', finish);
-            this.webview.removeEventListener('did-fail-load', finish);
-            resolve();
-          };
-          const timer = setTimeout(finish, capped);
-          this.webview.addEventListener('did-finish-load', finish);
-          this.webview.addEventListener('did-fail-load', finish);
-        });
+        const navigation = await this.waitForNavigation(capped);
+        if (!navigation.ok) return { settled: false, reason: navigation.code || 'loading' };
       }
       const remaining = Math.max(0, capped - (Date.now() - startedAt));
-      if (remaining < 1) return;
-      await this.executePage(`(async () => {
-        const deadline = performance.now() + ${remaining};
-        const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
-        await nextFrame();
-        await nextFrame();
-        while (performance.now() < deadline) {
-          const active = document.getAnimations().filter(animation => {
-            if (animation.playState !== 'running' && animation.playState !== 'pending') return false;
-            const timing = animation.effect?.getTiming?.();
-            return Number.isFinite(Number(timing?.iterations));
+      if (remaining < 1) return { settled: false, reason: 'loading' };
+      try {
+        return await this.executePage(`(async () => {
+          const deadline = performance.now() + ${remaining};
+          const nextFrame = () => new Promise(resolve => {
+            let frame = 0;
+            const timer = setTimeout(() => { cancelAnimationFrame(frame); resolve(); }, 50);
+            frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
           });
-          if (!active.length) return;
-          await Promise.race([
-            Promise.allSettled(active.map(animation => animation.finished)),
-            new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - performance.now()))))
-          ]);
-        }
-      })()`);
+          await nextFrame();
+          await nextFrame();
+          while (performance.now() < deadline) {
+            const active = document.getAnimations().filter(animation => {
+              if (animation.playState !== 'running' && animation.playState !== 'pending') return false;
+              return Number.isFinite(Number(animation.effect?.getTiming?.()?.iterations));
+            });
+            if (!active.length) return { settled: true };
+            await Promise.race([
+              Promise.allSettled(active.map(animation => animation.finished)),
+              new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - performance.now()))))
+            ]);
+          }
+          return { settled: false, reason: 'animation' };
+        })()`, { timeoutMs: remaining + 100 });
+      } catch (error) {
+        if (error?.code === 'BROWSER_PAGE_TIMEOUT') return { settled: false, reason: 'page-unresponsive' };
+        throw error;
+      }
     }
 
     async waitForNavigation(timeout = 5_000) {
-      const capped = Math.max(500, Math.min(15_000, Number(timeout) || 5_000));
+      const remaining = this.activeAction?.deadlineAt ? this.activeAction.deadlineAt - Date.now() : Infinity;
+      const capped = Math.max(1, Math.min(15_000, Number(timeout) || 5_000, remaining));
       const signal = this.activeAction?.controller?.signal;
       if (signal?.aborted) throw new DOMException('Browser navigation cancelled', 'AbortError');
       return new Promise((resolve, reject) => {
@@ -1297,25 +1200,32 @@
           clearTimeout(timer);
           signal?.removeEventListener('abort', onAbort);
           this.webview?.removeEventListener('did-finish-load', onFinished);
-          this.webview?.removeEventListener('did-fail-load', onFinished);
+          this.webview?.removeEventListener('did-fail-load', onFailed);
           this.webview?.removeEventListener('did-navigate-in-page', onFinished);
         };
-        const finish = completed => {
+        const finish = result => {
           if (settled) return;
           settled = true;
           cleanup();
-          resolve(completed);
+          resolve(result);
         };
-        const onFinished = () => finish(true);
+        const onFinished = event => { if (event?.isMainFrame !== false) finish({ ok: true, completed: true }); };
+        const onFailed = event => {
+          if (event?.isMainFrame === false || event?.errorCode === -3) return;
+          finish({ ok: false, completed: false, code: 'BROWSER_NAVIGATION_FAILED', error: `网页加载失败：${event?.errorDescription || event?.errorCode || '未知错误'}` });
+        };
         const onAbort = () => {
           if (settled) return;
           settled = true;
           cleanup();
           reject(new DOMException('Browser navigation cancelled', 'AbortError'));
         };
-        const timer = setTimeout(() => finish(false), capped);
+        const timer = setTimeout(() => {
+          this.needsFreshObservation = true;
+          finish({ ok: false, completed: false, code: 'BROWSER_NAVIGATION_TIMEOUT', uncertain: true, error: '网页导航超时，请重新读取页面确认当前状态。' });
+        }, capped);
         this.webview?.addEventListener('did-finish-load', onFinished);
-        this.webview?.addEventListener('did-fail-load', onFinished);
+        this.webview?.addEventListener('did-fail-load', onFailed);
         this.webview?.addEventListener('did-navigate-in-page', onFinished);
         signal?.addEventListener('abort', onAbort, { once: true });
       });

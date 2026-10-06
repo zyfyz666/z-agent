@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Browser observation fixture</title>
+<style>
+  body { margin: 16px; font: 16px sans-serif; }
+  #long-list button { display: block; width: 180px; height: 26px; margin-bottom: 2px; }
+  #footer { padding: 12px; border: 1px solid; }
+  iframe { display: block; width: 600px; height: 170px; }
+</style>
+<h1>Observation overview</h1>
+<p>First paragraph with <strong>important text</strong>.</p>
+<p>Second paragraph remains separate.</p>
+<div id="distributed-text"><span>Distributed</span><span> phrase</span><em> complete</em></div>
+<label>Email address <input id="email" value="reader@example.test"></label>
+<label>Password <input id="password" type="password" value="PASSWORD_SENTINEL_DO_NOT_EXPOSE"></label>
+<fieldset disabled><input aria-label="Disabled through fieldset"></fieldset>
+<input aria-label="Read only field" readonly value="locked">
+<button aria-label="Save draft" disabled>Save</button>
+<input type="checkbox" aria-label="Accept terms" checked>
+<div id="hidden" style="display:none"><button>Invisible control</button><p>HIDDEN_SENTINEL</p></div>
+<div id="long-list"></div>
+<section id="footer">
+  <h2>Late section heading</h2>
+  <p id="local-paragraph">Local paragraph for reference reading.</p>
+  <button id="remove-control" aria-label="Delete row">Remove</button>
+  <button id="late-control">Control after 620 candidates</button>
+  <div id="shadow-host"></div>
+  <iframe title="Same origin frame" src="/same-frame"></iframe>
+  <iframe title="Cross origin frame" src="__CROSS_ORIGIN__/cross-frame"></iframe>
+</section>
+<div id="long-text"></div>
+<script>
+  const list = document.getElementById('long-list');
+  for (let index = 0; index < 620; index++) {
+    const button = document.createElement('button');
+    button.textContent = `Row ${index}`;
+    list.append(button);
+  }
+  const root = document.getElementById('shadow-host').attachShadow({ mode: 'open' });
+  root.innerHTML = '<p>Shadow paragraph retained.</p><span id="shadow-label">Shadow action label</span><button aria-labelledby="shadow-label">Shadow button</button>';
+  document.getElementById('long-text').innerHTML = Array.from({ length: 160 }, (_, index) => `<p>Long paragraph ${index}: ${'readable page content '.repeat(10)}</p>`).join('');
+</script>

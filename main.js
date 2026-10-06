@@ -449,9 +449,14 @@ ipcMain.on('browser:partition', event => { event.returnValue = BROWSER_PARTITION
 const configuredBrowserGuestIds = new Set();
 const browserAgentBridgeToken = crypto.randomBytes(32).toString('hex');
 const browserAgentBridgePending = new Map();
+const browserAgentBridgeOperations = new Map();
+const BROWSER_AGENT_OPERATION_TIMEOUT_MS = 40_000;
+const BROWSER_AGENT_SCREENSHOT_TIMEOUT_MS = 130_000;
 const BROWSER_AGENT_BRIDGE_MAX_BYTES = 16 * 1024 * 1024;
 const BROWSER_AGENT_BRIDGE_ACTIONS = new Set([
   'open',
+  'tabs',
+  'find',
   'snapshot',
   'read_page',
   'click',
@@ -475,6 +480,8 @@ const BROWSER_AGENT_BRIDGE_ACTIONS = new Set([
 ]);
 const OPEN_CODE_BROWSER_TOOL_ACTIONS = Object.freeze({
   open_builtin_browser: 'open',
+  browser_tabs: 'tabs',
+  browser_find: 'find',
   browser_snapshot: 'snapshot',
   browser_read_page: 'read_page',
   browser_click: 'click',
@@ -592,11 +599,12 @@ function plainBrowserBridgeError(error, fallback = 'Z 内置浏览器连接失�
   return {
     ok: false,
     error: error?.message || String(error || fallback),
-    code: error?.code || 'Z_BROWSER_BRIDGE_FAILED'
+    code: error?.code || 'Z_BROWSER_BRIDGE_FAILED',
+    ...(error?.uncertain ? { uncertain: true } : {})
   };
 }
 
-async function relayBrowserScreenshotForTextModel(result, runId, params = {}) {
+async function relayBrowserScreenshotForTextModel(result, runId, params = {}, { signal } = {}) {
   if (!result?.ok || !result.image?.data || !result.image?.mimeType) return result;
   const activeRun = openCodeActiveRuns.get(String(runId || ''));
   const deliveryContract = activeRun?.deliveryContract;
@@ -648,6 +656,7 @@ async function relayBrowserScreenshotForTextModel(result, runId, params = {}) {
   }
   let lastError = null;
   for (const [index, model] of attempts.entries()) {
+    if (signal?.aborted) throw signal.reason || new Error('Browser screenshot analysis cancelled.');
     try {
       const described = await describeImages({
         baseUrl: model.baseUrl,
@@ -656,7 +665,7 @@ async function relayBrowserScreenshotForTextModel(result, runId, params = {}) {
         attachments: relayInput.attachments,
         userPrompt: relayInput.userPrompt,
         maxTokens: deliveryContract ? 3000 : model.providerId === 'glm' ? 1024 : 3000,
-        signal: activeRun?.visionAbortController?.signal,
+        signal: signal || activeRun?.visionAbortController?.signal,
         fetchImpl: (url, options = {}) => electronNet.fetch(url, {
           ...options,
           session: session.fromPartition(BROWSER_PARTITION)
@@ -673,6 +682,7 @@ async function relayBrowserScreenshotForTextModel(result, runId, params = {}) {
       };
     } catch (error) {
       lastError = error;
+      if (signal?.aborted) throw signal.reason || error;
       if (isRecoverableVisionRelayError(error) && attempts[index + 1]) continue;
       break;
     }
@@ -686,26 +696,55 @@ async function relayBrowserScreenshotForTextModel(result, runId, params = {}) {
   };
 }
 
+function browserOperationCancellation(reason) {
+  const code = reason === 'bridge_timeout' ? 'Z_BROWSER_TIMEOUT'
+    : reason === 'app_exiting' ? 'Z_APP_EXITING' : 'BROWSER_ACTION_CANCELLED';
+  const message = code === 'Z_BROWSER_TIMEOUT' ? '内置浏览器操作超时。'
+    : code === 'Z_APP_EXITING' ? 'Z 正在退出，内置浏览器操作已终止。' : '内置浏览器操作已取消。';
+  return Object.assign(new Error(message), { code, reason });
+}
+
 function cancelDispatchedBrowserAgentOperation(operationId, reason = 'client_cancelled') {
-  const id = String(operationId || '');
-  if (!id) return false;
-  let cancelled = false;
-  for (const [requestId, pending] of browserAgentBridgePending) {
-    if (pending.operationId !== id) continue;
-    browserAgentBridgePending.delete(requestId);
-    clearTimeout(pending.timer);
-    pending.resolve({ ok: false, error: '内置浏览器操作已取消。', code: 'BROWSER_ACTION_CANCELLED' });
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('browser:agent-command', {
-        requestId: '',
-        operationId: id,
-        action: 'cancel',
-        params: { z_run_id: pending.runId, operation_id: id, reason }
-      });
-    }
-    cancelled = true;
-  }
-  return cancelled;
+  const operation = browserAgentBridgeOperations.get(String(operationId || ''));
+  if (!operation || operation.controller.signal.aborted) return false;
+  const error = browserOperationCancellation(reason);
+  // Cancelling the wait cannot retract an input/guest script already sent to
+  // Electron. Only a call still queued here is known not to have executed.
+  if (operation.dispatched) error.uncertain = true;
+  operation.controller.abort(error);
+  return true;
+}
+
+function browserAgentLockKey(runId, params) {
+  // A conversation owns its browser tabs across sequential runs. Separate
+  // conversations must not wait on each other's navigation or screenshots.
+  return params.z_session_id
+    ? `browser:agent:session:${params.z_session_id}`
+    : `browser:agent:run:${runId}`;
+}
+
+function browserAgentNetworkError(action, params) {
+  if (action !== 'open' && !(action === 'tabs' && params.action === 'new')) return null;
+  if (loadConfig().permissions?.allowNetwork !== false) return null;
+  const target = String(params.url_or_path || '').trim();
+  if (action === 'tabs' && !target) return null;
+  if (params.target_type === 'file' && !/^https?:\/\//i.test(target)) return null;
+  return { ok: false, error: '网络访问权限已关闭，只能打开本地文件。', code: 'BROWSER_NETWORK_DISABLED' };
+}
+
+function awaitBrowserOperation(operation, promise) {
+  const signal = operation.controller.signal;
+  return new Promise((resolve, reject) => {
+    const finish = (error, result) => {
+      signal.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const onAbort = () => finish(signal.reason || browserOperationCancellation('client_cancelled'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(promise).then(result => finish(null, result), error => finish(error));
+    if (signal.aborted) onAbort();
+  });
 }
 
 async function dispatchBrowserAgentCommand(action, params = {}, { operationId = '' } = {}) {
@@ -720,46 +759,122 @@ async function dispatchBrowserAgentCommand(action, params = {}, { operationId = 
     z_workspace: openCodeActiveRuns.get(authority.runId)?.workspace || '',
     z_session_id: openCodeActiveRuns.get(authority.runId)?.zSessionId || ''
   };
+  const networkError = browserAgentNetworkError(action, authorizedParams);
+  if (networkError) return networkError;
+  const browserOperationId = String(operationId || crypto.randomUUID());
+  if (browserAgentBridgeOperations.has(browserOperationId)) {
+    return { ok: false, error: '该浏览器操作已在执行。', code: 'BROWSER_OPERATION_ALREADY_ACTIVE' };
+  }
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + BROWSER_AGENT_OPERATION_TIMEOUT_MS;
+  const operation = { runId: authority.runId, controller: new AbortController(), timer: null, dispatched: false };
+  // Register before awaiting the lock: a socket can close while this call is
+  // queued, and cancellation must prevent it from executing later.
+  browserAgentBridgeOperations.set(browserOperationId, operation);
+  operation.timer = setTimeout(() => cancelDispatchedBrowserAgentOperation(browserOperationId, 'bridge_timeout'), BROWSER_AGENT_OPERATION_TIMEOUT_MS);
+  const runSignal = openCodeActiveRuns.get(authority.runId)?.visionAbortController?.signal;
+  const onRunAbort = () => cancelDispatchedBrowserAgentOperation(browserOperationId, 'run_cancelled');
+  runSignal?.addEventListener('abort', onRunAbort, { once: true });
+  if (runSignal?.aborted) onRunAbort();
+  const signal = operation.controller.signal;
   const execute = async () => {
+    if (signal.aborted) throw signal.reason;
+    if (Date.now() >= deadlineAt) throw browserOperationCancellation('bridge_timeout');
+    if (!openCodeActiveRuns.has(authority.runId) && process.env.Z_E2E_MODE !== '1') {
+      return { ok: false, error: '当前 Agent 任务已结束，浏览器操作已取消。', code: 'BROWSER_RUN_NOT_ACTIVE' };
+    }
+    const currentNetworkError = browserAgentNetworkError(action, authorizedParams);
+    if (currentNetworkError) return currentNetworkError;
     if (!mainWindow || mainWindow.isDestroyed() || !mainRendererReady) {
       return { ok: false, error: 'Z 主窗口尚未就绪，无法控制内置浏览器。', code: 'Z_RENDERER_NOT_READY' };
     }
     const requestId = crypto.randomUUID();
-    const browserOperationId = String(operationId || requestId);
-    const result = await new Promise(resolve => {
-      const timer = setTimeout(() => {
-        browserAgentBridgePending.delete(requestId);
+    return new Promise(resolve => {
+      const finish = result => {
+        if (!browserAgentBridgePending.delete(requestId)) return;
+        signal.removeEventListener('abort', onAbort);
+        resolve(result);
+      };
+      const onAbort = () => {
+        finish(plainBrowserBridgeError(signal.reason));
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('browser:agent-command', {
-            requestId: '',
-            operationId: browserOperationId,
-            action: 'cancel',
-            params: { z_run_id: authority.runId, operation_id: browserOperationId, reason: 'bridge_timeout' }
-          });
+          try {
+            mainWindow.webContents.send('browser:agent-command', {
+              requestId: '',
+              operationId: browserOperationId,
+              action: 'cancel',
+              params: { ...authorizedParams, operation_id: browserOperationId, reason: signal.reason?.reason || 'client_cancelled' }
+            });
+          } catch (error) {
+            console.warn('[browser bridge] cancellation delivery failed:', error.message);
+          }
         }
-        resolve({ ok: false, error: '内置浏览器操作超时。', code: 'Z_BROWSER_TIMEOUT' });
-      }, 40_000);
-      browserAgentBridgePending.set(requestId, { resolve, timer, operationId: browserOperationId, runId: authority.runId });
-      mainWindow.webContents.send('browser:agent-command', { requestId, operationId: browserOperationId, action, params: authorizedParams });
+      };
+      browserAgentBridgePending.set(requestId, { resolve: finish, operationId: browserOperationId, runId: authority.runId });
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        operation.dispatched = true;
+        mainWindow.webContents.send('browser:agent-command', {
+          requestId, operationId: browserOperationId, action, deadlineAt,
+          params: { ...authorizedParams, z_deadline_at: deadlineAt }
+        });
+      } catch (error) {
+        operation.dispatched = false;
+        browserAgentBridgePending.delete(requestId);
+        signal.removeEventListener('abort', onAbort);
+        resolve(plainBrowserBridgeError(error));
+      }
     });
-    return action === 'screenshot'
-      ? relayBrowserScreenshotForTextModel(result, authority.runId, authorizedParams)
-      : result;
   };
-  const mutating = new Set(['open', 'click', 'type', 'select', 'check', 'drag', 'pointer', 'press', 'scroll', 'back', 'forward', 'reload', 'apply_annotation']).has(action);
-  return resourceLocks.withLock('browser:agent', mutating ? 'write' : 'read', {
-    owner: authority.runId,
-    timeoutMs: 45_000
-  }, execute);
+  try {
+    // Snapshots invalidate refs and tab selection changes the target of later
+    // calls, so reads also serialize within the same browser conversation.
+    const result = await resourceLocks.withLock(browserAgentLockKey(authority.runId, authorizedParams), 'write', {
+      owner: authority.runId, signal, timeoutMs: BROWSER_AGENT_OPERATION_TIMEOUT_MS
+    }, execute);
+    if (signal.aborted) throw signal.reason;
+    if (action !== 'screenshot' || !result?.ok) return result;
+    clearTimeout(operation.timer);
+    const remainingMs = startedAt + BROWSER_AGENT_SCREENSHOT_TIMEOUT_MS - Date.now();
+    if (remainingMs <= 0) throw browserOperationCancellation('bridge_timeout');
+    operation.timer = setTimeout(() => cancelDispatchedBrowserAgentOperation(browserOperationId, 'bridge_timeout'), remainingMs);
+    // Image interpretation can be slow and does not touch the browser. Keep
+    // it cancellable, but release the browser lock before contacting a model.
+    return await awaitBrowserOperation(operation, relayBrowserScreenshotForTextModel(result, authority.runId, authorizedParams, { signal }));
+  } catch (error) {
+    return plainBrowserBridgeError(signal.aborted ? signal.reason : error);
+  } finally {
+    clearTimeout(operation.timer);
+    runSignal?.removeEventListener('abort', onRunAbort);
+    browserAgentBridgeOperations.delete(browserOperationId);
+  }
 }
 
 function notifyBrowserAgentRelease(runId, reason = 'run_finished') {
   const id = String(runId || '');
-  if (!id || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!id) return;
+  const activeRun = openCodeActiveRuns.get(id);
+  const runMeta = openCodeRunReconcile.get(id)?.meta;
+  const scope = {
+    z_run_id: id,
+    z_session_id: String(activeRun?.zSessionId || runMeta?.zSessionId || ''),
+    z_workspace: String(activeRun?.workspace ?? runMeta?.workspace ?? ''),
+    reason
+  };
+  for (const [operationId, operation] of browserAgentBridgeOperations) {
+    if (operation.runId === id) cancelDispatchedBrowserAgentOperation(operationId, reason);
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('browser:agent-command', {
     requestId: '',
     action: 'release',
-    params: { z_run_id: id, reason }
+    // An explicit empty scope is safer than letting a late release inherit
+    // whichever conversation the renderer happens to display now.
+    params: scope
   });
 }
 
@@ -841,8 +956,10 @@ function startBrowserAgentBridge() {
 }
 
 function stopBrowserAgentBridge() {
+  for (const operationId of browserAgentBridgeOperations.keys()) {
+    cancelDispatchedBrowserAgentOperation(operationId, 'app_exiting');
+  }
   for (const pending of browserAgentBridgePending.values()) {
-    clearTimeout(pending.timer);
     pending.resolve({ ok: false, error: 'Z 正在退出，内置浏览器操作已终止。', code: 'Z_APP_EXITING' });
   }
   browserAgentBridgePending.clear();
@@ -5418,8 +5535,6 @@ ipcMain.on('browser:agent-command-result', (event, payload = {}) => {
   const requestId = String(payload.requestId || '');
   const pending = browserAgentBridgePending.get(requestId);
   if (!pending) return;
-  browserAgentBridgePending.delete(requestId);
-  clearTimeout(pending.timer);
   const result = payload.result && typeof payload.result === 'object'
     ? payload.result
     : { ok: false, error: '内置浏览器返回了无效结果。', code: 'Z_BROWSER_INVALID_RESULT' };
