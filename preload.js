@@ -110,6 +110,8 @@ contextBridge.exposeInMainWorld('z', {
   // Sessions
   listSessions: () => ipcRenderer.invoke('session:list'),
   getSession: (id, options = {}) => ipcRenderer.invoke('session:get', id, options),
+  getSessionStorageLocation: (id) => ipcRenderer.invoke('session:storage-location', id),
+  revealSessionStorage: (id) => ipcRenderer.invoke('session:storage-reveal', id),
   getSessionBrowserState: (id) => ipcRenderer.invoke('session:browser-state-get', id),
   setSessionBrowserState: (id, browserState) => ipcRenderer.invoke('session:browser-state-set', { id, browserState }),
   setSessionModel: (id, modelSelection, conversationRevision = 0) => ipcRenderer.invoke('session:model-set', { id, modelSelection, conversationRevision }),

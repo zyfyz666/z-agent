@@ -6784,6 +6784,43 @@ function sessionPath(id) {
   return isSafeSessionId(normalized) ? path.join(sessionsDir, `${normalized}.json`) : null;
 }
 
+async function getSessionStorageLocation(id) {
+  if (typeof id !== 'string' || id !== id.trim() || !isSafeSessionId(id)) {
+    return { ok: false, code: 'INVALID_SESSION_ID', error: '对话 ID 无效。' };
+  }
+  // Resolve the running profile's storage path without reading or migrating
+  // the conversation. A task workspace is not where its history is stored.
+  const file = path.resolve(sessionPath(id));
+  try {
+    const stat = await fsp.stat(file);
+    if (!stat.isFile()) return { ok: false, code: 'SESSION_NOT_FOUND', error: '对话存储文件不存在或已被删除。' };
+    return { ok: true, id, path: file, directory: path.dirname(file), fileName: path.basename(file) };
+  } catch (error) {
+    const missing = error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
+    return { ok: false, code: missing ? 'SESSION_NOT_FOUND' : 'SESSION_STORAGE_UNAVAILABLE',
+      error: missing ? '对话存储文件不存在或已被删除。' : '无法访问对话存储文件。' };
+  }
+}
+
+async function revealSessionStorage(id) {
+  if (typeof id !== 'string' || id !== id.trim() || !isSafeSessionId(id)) {
+    return { ok: false, code: 'INVALID_SESSION_ID', error: '对话 ID 无效。' };
+  }
+  return withSessionWrite(id, async () => {
+    // Re-check existence when the user clicks Locate; deletion may have
+    // happened since the location dialog opened. This queue prevents a
+    // concurrent in-app deletion between validation and revealing the file.
+    const location = await getSessionStorageLocation(id);
+    if (!location.ok) return location;
+    try {
+      shell.showItemInFolder(location.path);
+      return { ...location, revealed: true };
+    } catch {
+      return { ok: false, code: 'SESSION_STORAGE_REVEAL_FAILED', error: '无法在文件管理器中定位对话文件。' };
+    }
+  });
+}
+
 function sanitizeSessionReviewSummaries(session) {
   if (!session || typeof session !== 'object') return session;
   const workspace = String(session.workspace || '');
@@ -7446,6 +7483,9 @@ ipcMain.handle('session:list', () => listSessionSummaries({ includeRewindBackups
 ipcMain.handle('session:get', async (_e, id, options = {}) => {
   return readSessionRecord(id, { messageLimit: options?.messageLimit });
 });
+
+ipcMain.handle('session:storage-location', (_e, id) => getSessionStorageLocation(id));
+ipcMain.handle('session:storage-reveal', (_e, id) => revealSessionStorage(id));
 
 async function getSessionBrowserStateRecord(id) {
   if (typeof id !== 'string' || id !== id.trim() || !isSafeSessionId(id)) {

@@ -1928,6 +1928,9 @@ function openSessionSidebarMenu(anchor, sessionId, position) {
     icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/></svg>',
     onSelect: () => openRenameTaskDialog(session)
   }, {
+    label: '对话存储位置', icon: ICONS.folder,
+    onSelect: () => openSessionStorageDialog(session, anchor)
+  }, {
     label: session.pinned ? '取消置顶任务' : '置顶任务',
     icon: ICONS.pin,
     onSelect: () => toggleSessionPinnedFromSidebar(session)
@@ -23985,6 +23988,77 @@ async function toggleCurrentTaskPinned() {
   toast(session.pinned ? '任务已置顶' : '已取消置顶');
 }
 
+async function openSessionStorageDialog(session = state.currentSession, anchor = document.activeElement) {
+  const sessionId = String(session?.id || '');
+  if (!sessionId) return;
+  const previous = $('#sessionStorageDialog');
+  if (previous) { previous.close(); previous.remove(); }
+  const dialog = document.createElement('dialog');
+  dialog.id = 'sessionStorageDialog';
+  dialog.className = 'session-storage-dialog';
+  dialog.setAttribute('aria-labelledby', 'sessionStorageTitle');
+  dialog.innerHTML = `<h2 id="sessionStorageTitle">对话存储位置</h2>
+    <p id="sessionStorageTaskName" class="session-storage-task-name"></p>
+    <label for="sessionStoragePath">对话记录文件</label>
+    <textarea id="sessionStoragePath" rows="3" readonly spellcheck="false" aria-busy="true"></textarea>
+    <p id="sessionStorageStatus" class="session-storage-status" role="status" aria-live="polite">正在读取存储位置…</p>
+    <div class="perm-dialog-actions">
+      <button type="button" id="sessionStorageClose" class="secondary-btn">关闭</button>
+      <button type="button" id="sessionStorageCopy" class="secondary-btn" disabled>复制路径</button>
+      <button type="button" id="sessionStorageReveal" class="primary-btn" disabled>打开所在文件夹</button>
+    </div>`;
+  dialog.dataset.sessionId = sessionId;
+  dialog.querySelector('#sessionStorageTaskName').textContent = displaySessionTitle(session.title);
+  const pathField = dialog.querySelector('#sessionStoragePath');
+  const copy = dialog.querySelector('#sessionStorageCopy');
+  const reveal = dialog.querySelector('#sessionStorageReveal');
+  const status = dialog.querySelector('#sessionStorageStatus');
+  const showStatus = (message, error = false) => {
+    if (!dialog.isConnected || !dialog.open) return;
+    status.textContent = message;
+    status.classList.toggle('error', error);
+  };
+  dialog.querySelector('#sessionStorageClose').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    if (anchor?.isConnected) anchor.focus?.();
+  });
+  dialog.addEventListener('click', event => {
+    const box = dialog.getBoundingClientRect();
+    if (event.target === dialog && (event.clientX < box.left || event.clientX > box.right
+      || event.clientY < box.top || event.clientY > box.bottom)) dialog.close();
+  });
+  copy.addEventListener('click', async () => {
+    try {
+      await copyMarkdownCode(pathField.value);
+      showStatus('路径已复制');
+    } catch { showStatus('复制失败，可以选中上方路径手动复制', true); }
+  });
+  reveal.addEventListener('click', async () => {
+    reveal.disabled = true;
+    try {
+      const result = await api.revealSessionStorage(sessionId);
+      if (!result?.ok || result.id !== sessionId) throw new Error(result?.error || '打开文件夹失败');
+      showStatus('已在文件夹中定位对话记录');
+    } catch (error) { showStatus(error?.message || '打开文件夹失败', true); }
+    finally { if (dialog.isConnected) reveal.disabled = false; }
+  });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  try {
+    const location = await api.getSessionStorageLocation(sessionId);
+    if (!dialog.isConnected || !dialog.open) return;
+    if (!location?.ok || location.id !== sessionId || !location.path) {
+      throw new Error(location?.error || '无法读取对话存储位置');
+    }
+    pathField.value = location.path;
+    copy.disabled = false;
+    reveal.disabled = false;
+    showStatus('该任务的对话记录保存在此文件。');
+  } catch (error) { showStatus(error?.message || '无法读取对话存储位置', true); }
+  finally { if (dialog.isConnected) pathField.setAttribute('aria-busy', 'false'); }
+}
+
 let renameTaskSessionId = null;
 let renameTaskDialogVersion = 0;
 let renameTaskSaving = false;
@@ -24062,6 +24136,7 @@ function bindTaskActions() {
     closeTaskActionsMenu();
     if (action === 'pin') await toggleCurrentTaskPinned();
     if (action === 'rename') openRenameTaskDialog();
+    if (action === 'storage-location') await openSessionStorageDialog(state.currentSession, moreButton);
   });
   $('#renameTaskCancel')?.addEventListener('click', closeRenameTaskDialog);
   $('#renameTaskConfirm')?.addEventListener('click', confirmTaskRename);

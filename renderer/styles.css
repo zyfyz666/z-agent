@@ -978,6 +978,26 @@ body.is-mac .sidebar-brand-name-mac { display: inline; }
   background: var(--bg-elev);
 }
 .session-backups-dialog::backdrop { background: #0006; }
+.session-storage-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 22px 24px;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 18px 56px #0005;
+}
+.session-storage-dialog::backdrop { background: #0006; }
+.session-storage-dialog h2 { margin: 0 0 10px; font-size: 17px; }
+.session-storage-task-name { margin: 0 0 18px; color: var(--text-dim); overflow-wrap: anywhere; }
+.session-storage-dialog label { display: block; margin-bottom: 8px; font-size: 12px; color: var(--text-dim); }
+#sessionStoragePath { width: 100%; min-height: 90px; padding: 10px 12px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-soft); color: var(--text); font: 12px/1.6 var(--font-mono); overflow-wrap: anywhere; }
+#sessionStoragePath:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.session-storage-status { min-height: 1.6em; margin: 10px 0 18px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+.session-storage-status.error { color: var(--danger); }
 .session-backups-dialog h2 { margin: 0 0 10px; font-size: 18px; }
 .session-backups-dialog p { color: var(--text-dim); line-height: 1.6; font-size: 13px; }
 .session-backup-list { display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
