@@ -95,6 +95,20 @@ test('each conversation keeps its model even when the global default changes or 
   assert.equal(f.context.getAgentModelSelection({ id: 'legacy' }).modelId, 'new-global');
 });
 
+test('legacy conversation capabilities recover image MIME support from their exact catalog model', () => {
+  const f = fixture();
+  f.a.modelSelection.capabilities = { imageInput: true, maxOutputTokens: 32000 };
+  f.context.state.config.api.providerSuppliers = {
+    'provider-a': [{ id: 'official', models: [{ id: 'a', capabilities: {
+      imageInput: true, imageMimeTypes: ['image/png', 'image/jpeg'], maxOutputTokens: 64000
+    } }] }]
+  };
+  const selected = f.context.getAgentModelSelection(f.a);
+  assert.deepEqual(Array.from(selected.capabilities.imageMimeTypes), ['image/png', 'image/jpeg']);
+  assert.equal(selected.capabilities.maxOutputTokens, 32000);
+  assert.equal(f.b.modelSelection.capabilities.imageMimeTypes, undefined);
+});
+
 test('a delayed save updates the captured conversation and cannot change the newly opened conversation', async () => {
   const f = fixture();
   const originalGlobal = JSON.stringify(f.context.state.config);

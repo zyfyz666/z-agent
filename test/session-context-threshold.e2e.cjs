@@ -281,7 +281,7 @@ async function waitFinished(id, action) {
     assert.match(active.hint, /下(?:次|轮)|本轮|当前/);
     assert.match(active.hint, /250(?:\.5)?|251|400/);
     await page.locator('#composerInput').fill('CTX_THRESHOLD_QUEUED_8021: Reply only with the fixture confirmation.');
-    await page.locator('#queueTurnBtn').click();
+    await page.locator('#sendBtn').click();
     await page.waitForFunction(id => state.queuedTurns.get(id)?.modelSelection?.compactionThreshold === 400_000, a.id);
     await page.waitForFunction(async id => Object.values((await z.zCoreGetState()).intents || {}).some(intent =>
       intent.threadId === id && intent.intent?.prompt?.includes('CTX_THRESHOLD_QUEUED_8021')

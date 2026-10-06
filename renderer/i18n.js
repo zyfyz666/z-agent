@@ -173,6 +173,7 @@
     '用户名': 'Username', '让 Z 记住你的名字': 'Let Z remember your name', '权限': 'Permissions',
     '上下文': 'Context', '最大上下文与压缩': 'Maximum context and compaction',
     '不同模型最大上下文与压缩阈值不同，请手动配置': 'Maximum context and compaction thresholds vary by model. Configure them manually.',
+    '引导当前任务': 'Guide current task', '将文字和附件引导给当前任务': 'Send text and attachments as guidance for the current task',
     '配置上下文': 'Configure context', '按当前环境的模型能力手动设置。': 'Set values manually for the current environment and model capabilities.',
     '最大上下文': 'Maximum context', '设置当前环境最大上下文长度': 'Set the maximum context length for the current environment',
     '压缩阈值': 'Compaction threshold', '设置当前环境的压缩阈值': 'Set the compaction threshold for the current environment',

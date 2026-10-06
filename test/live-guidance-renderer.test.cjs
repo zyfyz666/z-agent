@@ -47,6 +47,8 @@ function fixture() {
     clearComposerPayload() { cleared.push(context.state.currentSession.id); drafts[context.state.currentSession.id] = ''; },
     updateSendState() {}, refreshLiveGuidanceStatus() {},
     syncComposerSkillsFromDom() {}, syncComposerSubagentsFromDom() {},
+    normalizeModelSelectionSnapshot: value => ({ ...value }),
+    getAgentModelSelection: () => ({ modelId: 'fixture', modelType: 'text' }),
     queueCurrentComposerTurn() { queued++; return true; },
     toast: value => notices.push(value),
     persistCurrentSession: async session => { saved.push(JSON.parse(JSON.stringify(session))); },
@@ -66,9 +68,18 @@ function fixture() {
   return { context, a, b, drafts, runCtx, saved, calls, shown, cleared, notices, get queued() { return queued; } };
 }
 
-test('running Send persists pending guidance before directly delivering it to the same run', async () => {
+test('running Send defaults to queueing without injecting guidance into the current run', async () => {
   const f = fixture();
-  const pending = f.context.sendMessage();
+  await f.context.sendMessage();
+  assert.equal(f.queued, 1);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.a.messages.length, 1);
+  assert.match(f.notices.at(-1), /已排队/);
+});
+
+test('explicit guidance persists pending content before directly delivering it to the same run', async () => {
+  const f = fixture();
+  const pending = f.context.steerCurrentComposerTurn();
   assert.equal(f.calls.length, 0);
   await until(() => f.calls.length === 1);
   assert.equal(f.queued, 0);
@@ -77,9 +88,13 @@ test('running Send persists pending guidance before directly delivering it to th
   assert.equal(f.calls[0].zSessionId, 'A');
   assert.equal(f.calls[0].text, 'First guidance');
   assert.deepEqual(f.shown, [{ content: 'First guidance' }]);
-  f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
+  f.calls[0].resolve({ ok: true, accepted: true, delivered: false,
+    nativeMessageId: 'msg-guide-1', nativeSessionId: 'ses-native-a', directory: '/fixture/a' });
   await pending;
   assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.status, 'queued');
+  assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.nativeMessageId, 'msg-guide-1');
+  assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.nativeSessionId, 'ses-native-a');
+  assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.directory, '/fixture/a');
   f.context.applyLiveGuidanceStatus(f.runCtx, { type: 'z.guidance.status', data: {
     requestId: f.calls[0].requestId, status: 'delivered', deliveredAt: 123, deliveryEvidence: 'provider-response' } });
   await until(() => f.saved.at(-1).messages.at(-1).liveGuidance.status === 'delivered');
@@ -158,18 +173,18 @@ test('a stopped run retains unsent guidance with an explicit failure instead of 
   assert.equal(f.a.messages.at(-1).liveGuidance.status, 'failed');
 });
 
-test('mounting the composer keeps explicit Stop and Queue controls before removing the old action container', () => {
+test('mounting the composer keeps explicit Stop and Guide controls before removing the old action container', () => {
   const mounted = [];
-  const selectors = ['.attachment-action-wrap', '#accessModeWrap', '#workModeIndicator', '#modelPickerWrap', '#stopRunBtn', '#queueTurnBtn', '#sendBtn'];
+  const selectors = ['.attachment-action-wrap', '#accessModeWrap', '#workModeIndicator', '#modelPickerWrap', '#stopRunBtn', '#steerTurnBtn', '#sendBtn'];
   const nodes = new Map(selectors.map(selector => [selector, { selector }]));
   nodes.set('.composer-toolbar-controls', { append: node => mounted.push(node.selector) });
   nodes.set('.composer-actions', { remove() {
     assert.ok(mounted.includes('#stopRunBtn'));
-    assert.ok(mounted.includes('#queueTurnBtn'));
+    assert.ok(mounted.includes('#steerTurnBtn'));
   } });
   const context = vm.createContext({ document: { querySelector: selector => nodes.get(selector) || null } });
   vm.runInContext(section('function mountComposerToolbar()', 'function isImageAttachmentMeta('), context);
-  assert.deepEqual(mounted.slice(-3), ['#stopRunBtn', '#queueTurnBtn', '#sendBtn']);
+  assert.deepEqual(mounted.slice(-3), ['#stopRunBtn', '#steerTurnBtn', '#sendBtn']);
 });
 
 test('a failed initial save never sends an instruction that was not durably recorded', async () => {
@@ -240,7 +255,7 @@ test('stop during the initial guidance save prevents injection while retaining t
   assert.equal(f.saved.at(-1).messages.at(-1).liveGuidance.status, 'failed');
 });
 
-test('messages with attachments still queue explicitly and stopping tasks accept no guidance', async () => {
+test('messages with attachments queue by default and stopping tasks accept no guidance', async () => {
   const f = fixture();
   f.context.state.attachments = [{ name: 'reference.png' }];
   await f.context.sendMessage();
@@ -252,6 +267,26 @@ test('messages with attachments still queue explicitly and stopping tasks accept
   assert.equal(f.calls.length, 0);
   assert.equal(f.a.messages.length, 1);
 });
+
+for (const text of ['Use the attached reference', '']) {
+  test(`manual guidance includes a frozen attachment with ${text ? 'text' : 'no text'}`, async () => {
+    const f = fixture();
+    f.drafts.A = text;
+    const attachment = { name: 'reference.png', path: '/fixture/reference.png', mimeType: 'image/png', size: 72 };
+    f.context.state.attachments = [attachment];
+    const pending = f.context.steerCurrentComposerTurn();
+    attachment.name = 'changed-after-send.png';
+    await until(() => f.calls.length === 1);
+    assert.equal(f.calls[0].text, text);
+    assert.equal(f.calls[0].attachments[0].name, 'reference.png');
+    assert.equal(f.calls[0].attachments[0].path, '/fixture/reference.png');
+    assert.equal(f.saved[0].messages.at(-1).attachments[0].name, 'reference.png');
+    f.calls[0].resolve({ ok: true, accepted: true, delivered: false });
+    await pending;
+    assert.equal(f.a.messages.at(-1).liveGuidance.status, 'queued');
+    assert.equal(f.queued, 0);
+  });
+}
 
 function terminalFixture() {
   const context = {

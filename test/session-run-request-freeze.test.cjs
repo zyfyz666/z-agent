@@ -67,6 +67,7 @@ function fixture() {
     rejectStartedOpenCodeRunIfAborted: async () => {},
     syncSessionOpenCodeIdAfterRun() {}, settleAgentInteractionForRun() {},
     getComposerText: () => composerText,
+    syncComposerSkillsFromDom() {}, syncComposerSubagentsFromDom() {},
     createQueuedTurnId: () => 'guidance-during-save',
     getActiveAssistantElement: () => null,
     captureLiveGuidanceDisplayBoundary() {}, renderOpenCodeRunNow() {},

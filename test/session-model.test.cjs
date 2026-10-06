@@ -316,6 +316,16 @@ test('per-conversation thresholds survive stale saves, model changes, frozen run
   assert.deepEqual(f.config(), global);
 });
 
+test('model snapshots preserve supported image MIME types while excluding unrelated array data', () => {
+  const original = { ...selection('a'), capabilities: { imageInput: true,
+    imageMimeTypes: ['image/png', 'IMAGE/JPEG', 'image/png', 'https://invalid.example', 1],
+    privateData: ['not-model-capabilities'] } };
+  const snapshot = sessionModelSnapshot(original);
+  assert.deepEqual(snapshot.capabilities, { imageInput: true, imageMimeTypes: ['image/png', 'image/jpeg'] });
+  original.capabilities.imageMimeTypes.push('image/webp');
+  assert.deepEqual(snapshot.capabilities.imageMimeTypes, ['image/png', 'image/jpeg']);
+});
+
 test('single-field model patches preserve identity and all other conversation settings', async t => {
   const f = fixture(t);
   const a = await f.create();

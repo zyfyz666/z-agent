@@ -17,6 +17,7 @@ const markers = {
   start: 'STEER_BEGIN_4197', firstGuide: 'ENTER_GUIDANCE_4197', secondGuide: 'BUTTON_GUIDANCE_4197',
   guided: 'GUIDANCE_APPLIED_4197', pause: 'PAUSE_BEGIN_4197', pauseGuide: 'PAUSE_GUIDANCE_4197',
   partial: 'PERSISTED_PARTIAL_TEXT_4197', resume: 'RESUME_BEGIN_4197', resumed: 'RESUMED_WITH_HISTORY_4197',
+  automatic: 'PAUSE_GUIDANCE_CONTINUED_4197',
   file: 'REAL_TOOL_OUTPUT_4197', draft: 'UNSENT_DRAFT_RETAINED_4197'
 };
 const report = { ok: false, checks: [], pageErrors: [], requests: [], fixtureErrors: [] };
@@ -98,7 +99,11 @@ const server = http.createServer((request, response) => {
           pauseSlowStarted = true;
           return hold(response, 'pause', markers.partial);
         }
-        return completion(response, { content: 'Unexpected unpaused follow-up' });
+        assert.ok(userText.includes(markers.pauseGuide), 'Stop automatically sends the waiting guidance');
+        assert.equal(messages.filter(message => message.role === 'user')
+          .reduce((count, message) => count + JSON.stringify(message.content).split(markers.pauseGuide).length - 1, 0), 1,
+        'the waiting guidance reaches the model once after Stop');
+        return completion(response, { content: markers.automatic });
       }
       if (!toolCallIds.includes('call-steer-read')) return completion(response, readCall('call-steer-read'));
       if (!firstSlowStarted) {
@@ -145,6 +150,10 @@ async function composerSend(text, enter = false) {
   if (enter) await page.locator('#composerInput').press('Enter');
   else await page.locator('#sendBtn').click();
 }
+async function composerSteer(text) {
+  await page.locator('#composerInput').fill(text);
+  await page.locator('#steerTurnBtn').click();
+}
 async function waitRunning(sessionId) {
   await page.waitForFunction(id => Boolean(state.activeRuns.get(id)?.runCtx?.openCodeSessionId), sessionId, { timeout: 60_000 });
   return page.evaluate(id => {
@@ -165,10 +174,16 @@ function assertPaused(session, expectedKernelId) {
   assert.ok(session.messages.some(message => message.role === 'user' && message.content.includes(markers.start)));
   assert.ok(session.messages.some(message => message.role === 'user' && message.content.includes(markers.pause)));
   for (const marker of [markers.firstGuide, markers.secondGuide, markers.pauseGuide]) {
-    const messages = session.messages.filter(message => message.content === marker);
+    const messages = session.messages.filter(message => message.content === marker && message.liveGuidance);
     assert.equal(messages.length, 1, 'guidance message persists exactly once');
-    assert.equal(messages[0].liveGuidance?.status, marker === markers.pauseGuide ? 'failed' : 'delivered');
-    if (marker !== markers.pauseGuide) assert.equal(messages[0].liveGuidance?.deliveryEvidence, 'provider-response');
+    if (marker === markers.pauseGuide) {
+      assert.equal(messages[0].liveGuidance?.continuationStatus, 'dispatched');
+      assert.equal(session.messages.filter(message => message.content === marker && !message.liveGuidance).length, 1,
+        'the waiting guide is sent once as a new turn after Stop');
+    } else {
+      assert.equal(messages[0].liveGuidance?.status, 'delivered');
+      assert.equal(messages[0].liveGuidance?.deliveryEvidence, 'provider-response');
+    }
   }
   const interrupted = session.messages.findLast(message => message.role === 'assistant' && message.agentRun?.status === 'interrupted');
   assert.ok(interrupted, 'manual pause persists an interrupted assistant message');
@@ -213,9 +228,9 @@ function assertPaused(session, expectedKernelId) {
     const initialRun = await waitRunning(sessionA.id);
     await page.waitForFunction(() => document.body.textContent.includes('LIVE_BEFORE_GUIDANCE_4197'), null, { timeout: 60_000 });
     assert.ok(pendingStreams.has('steer'), 'the initial native model call remains active');
-    await composerSend(markers.firstGuide, true);
+    await composerSteer(markers.firstGuide);
     const firstGuide = await waitGuidance(markers.firstGuide);
-    assert.equal(await page.evaluate(id => state.queuedTurns.has(id), sessionA.id), false, 'Enter immediately steers instead of queueing');
+    assert.equal(await page.evaluate(id => state.queuedTurns.has(id), sessionA.id), false, 'manual guidance bypasses the next-turn queue');
     assert.equal(await page.evaluate(id => state.activeRuns.get(id)?.runCtx?.runId, sessionA.id), initialRun.runId);
     assert.ok(pendingStreams.has('steer'), 'guidance is acknowledged before the current model call finishes');
     const duplicate = await page.evaluate(payload => z.openCodeSteerRun(payload), {
@@ -229,9 +244,9 @@ function assertPaused(session, expectedKernelId) {
       runId: initialRun.runId, zSessionId: sessionB.id, requestId: 'wrong-session-4197', text: 'MUST_NOT_REACH_OTHER_SESSION_4197'
     });
     assert.equal(wrongSession.ok, false, 'another conversation cannot steer this run');
-    await composerSend(markers.secondGuide);
+    await composerSteer(markers.secondGuide);
     await waitGuidance(markers.secondGuide);
-    assert.equal(await page.evaluate(id => state.queuedTurns.has(id), sessionA.id), false, 'Send immediately steers instead of queueing');
+    assert.equal(await page.evaluate(id => state.queuedTurns.has(id), sessionA.id), false, 'manual guidance stays in the active run');
     const release = pendingStreams.get('steer');
     assert.ok(release && !release.destroyed);
     finish(release, readCall('call-after-guidance-read'));
@@ -244,7 +259,7 @@ function assertPaused(session, expectedKernelId) {
     assert.ok(guided.messages.some(message => message.role === 'assistant' && message.content.includes(markers.guided)));
     const savedB = await page.evaluate(id => z.getSession(id), sessionB.id);
     assert.equal(savedB.messages.length, 1, 'conversation B remains untouched');
-    report.checks.push('Enter and Send insert guidance into the active kernel run; duplicate IDs and wrong sessions are guarded');
+    report.checks.push('manual Guidance inserts messages into the active kernel run; duplicate IDs and wrong sessions are guarded');
     console.log('live steering and isolation passed');
 
     await composerSend(`${markers.pause}: Read ${fixtureFile}, then provide a slow partial response.`);
@@ -252,16 +267,18 @@ function assertPaused(session, expectedKernelId) {
     assert.equal(pauseRun.kernelSessionId, initialRun.kernelSessionId);
     await page.waitForFunction(marker => document.body.textContent.includes(marker), markers.partial, { timeout: 60_000 });
     assert.ok(pendingStreams.has('pause'));
-    await composerSend(markers.pauseGuide, true);
+    await composerSteer(markers.pauseGuide);
     await waitGuidance(markers.pauseGuide);
     assert.equal(await page.locator('#composerInput').innerText(), '');
     await page.locator('#composerInput').fill(markers.draft);
     await page.locator('#stopRunBtn').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#stopRunBtn').isVisible(), true, 'a nonempty draft keeps a separate Stop control available');
     assert.equal(await page.locator('#stopRunBtn').isEnabled(), true);
-    assert.equal(await page.locator('#queueTurnBtn').isVisible(), true, 'the explicit queue entry remains available');
+    assert.equal(await page.locator('#steerTurnBtn').isVisible(), true, 'the manual guidance entry remains available');
     await page.screenshot({ path: path.join(outputDir, 'controls.png') });
     await page.locator('#stopRunBtn').click();
+    await page.waitForFunction(marker => state.currentSession.messages.some(message => message.role === 'assistant'
+      && message.content.includes(marker)), markers.automatic, { timeout: 75_000 });
     const paused = await waitSettled(sessionA.id);
     assertPaused(paused, initialRun.kernelSessionId);
     assert.equal(await page.locator('#composerInput').innerText(), markers.draft, 'Stop preserves the unsent composer draft');
@@ -276,7 +293,7 @@ function assertPaused(session, expectedKernelId) {
     await page.evaluate(id => loadSession(id), sessionA.id);
     assertPaused(await page.evaluate(id => z.getSession(id), sessionA.id), initialRun.kernelSessionId);
     await page.waitForFunction(marker => document.body.textContent.includes(marker), markers.partial);
-    report.checks.push('separate Stop preserves a nonempty unsent draft; original/guidance messages, partial text and native tool trace survive switching and reload');
+    report.checks.push('Stop sends waiting guidance once and preserves a nonempty unsent draft; the interrupted text and native tool trace survive switching and reload');
     console.log('manual pause and reload persistence passed');
 
     await application.close(); application = null; page = null;

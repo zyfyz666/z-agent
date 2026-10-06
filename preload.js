@@ -293,6 +293,7 @@ contextBridge.exposeInMainWorld('z', {
   zCoreDeleteIntent: (intentId, reason = 'user_removed') => ipcRenderer.invoke('z:core-delete-intent', { intentId, reason }),
   openCodeInterject: (payload) => ipcRenderer.invoke('opencode:interject', payload),
   openCodeSteerRun: (payload) => ipcRenderer.invoke('opencode:steer-run', payload),
+  openCodeDetachPendingGuidance: (payload) => ipcRenderer.invoke('opencode:detach-pending-guidance', payload),
   openCodeCancelInterjection: (payload) => ipcRenderer.invoke('opencode:cancel-interjection', payload),
   readPlanFile: (targetPath) => ipcRenderer.invoke('plan:read-file', { path: targetPath }),
   downloadPlanFile: (targetPath) => ipcRenderer.invoke('plan:download-file', { path: targetPath }),

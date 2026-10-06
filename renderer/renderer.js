@@ -112,7 +112,7 @@ const state = {
   selectedSkills: [],
   selectedSubagents: [],
   composerDrafts: new Map(), // sessionId -> { text, skills, attachments, caretOffset }
-  queuedTurns: new Map(),    // sessionId -> { id, text, attachments, skillCalls, modelSelection }
+  queuedTurns: new Map(),    // sessionId -> first frozen turn, with followingTurns in send order
   activeRuns: new Map()    // sessionId -> { sessionRef, runCtx, assistantEl } 所有运行中的任务（完全独立）
 };
 
@@ -1589,18 +1589,20 @@ async function hydrateQueuedTurns() {
       if (!recoverable || !record.threadId) continue;
       const intent = record.intent && typeof record.intent === 'object' ? record.intent : {};
       const session = state.sessions.find(item => String(item.id) === String(record.threadId));
-      if (!session || state.queuedTurns.has(String(record.threadId))) continue;
+      if (!session) continue;
       const conversationRevision = Number(record.conversationRevision ?? intent.conversationRevision) || 0;
       if (conversationRevision !== (Number(session.conversationRevision) || 0)) continue;
-      state.queuedTurns.set(String(record.threadId), {
+      insertQueuedTurn({
         id: String(record.id),
         sessionRef: session,
         conversationRevision,
         text: String(intent.prompt || ''),
         attachments: Array.isArray(intent.attachments) ? intent.attachments.map(item => ({ ...item })) : [],
         skillCalls: Array.isArray(intent.skillCalls) ? intent.skillCalls.map(item => ({ ...item })) : [],
+        subagentRoles: Array.isArray(intent.subagentRoles) ? [...intent.subagentRoles] : [],
         modelSelection: intent.modelSelection && typeof intent.modelSelection === 'object' ? { ...intent.modelSelection } : getAgentModelSelection(session),
-        queuedAt: Number(record.createdAt) || Date.now()
+        queuedAt: Number(intent.queuedAt) || Number(record.createdAt) || Date.now(),
+        ...(intent.guidanceContinuation ? { guidanceContinuation: { ...intent.guidanceContinuation } } : {})
       });
     }
   } catch (error) {
@@ -6778,21 +6780,22 @@ function updateSendState(composerText = getComposerText()) {
   const runCtx = getRunCtx(state.currentSession?.id);
   const hasText = composerHasText(composerText);
   const hasPayload = hasText || state.attachments.length > 0 || state.selectedSkills.length > 0 || state.selectedSubagents.length > 0;
-  const needsQueuedTurn = state.attachments.length > 0 || state.selectedSkills.length > 0 || state.selectedSubagents.length > 0;
   syncConversationSubmitButton(sendBtn, {
     active: !!runCtx,
     stopping: !!runCtx?.shouldAbort,
-    queueing: !!runCtx && hasPayload && needsQueuedTurn,
-    steering: !!runCtx && hasText && !needsQueuedTurn,
+    queueing: !!runCtx && hasPayload,
     sendDisabled: !!promptOptimizationRun || !hasPayload || sessionRewindRequests.has(state.currentSession?.id),
     sendTitle: '发送',
-    queueTitle: state.queuedTurns.has(String(state.currentSession?.id || '')) ? '更新排队对话' : '排队发送',
+    queueTitle: '排队发送',
     stopTitle: '中止任务'
   });
-  const queueButton = $('#queueTurnBtn');
-  if (queueButton) {
-    queueButton.classList.toggle('hidden', !runCtx);
-    queueButton.disabled = !runCtx || !!runCtx.shouldAbort || !hasPayload;
+  const steerButton = $('#steerTurnBtn');
+  if (steerButton) {
+    const supportsGuidance = !state.selectedSkills.length && !state.selectedSubagents.length
+      && (!runCtx?.modelSelection?.modelType || runCtx.modelSelection.modelType === 'text');
+    steerButton.classList.toggle('hidden', !runCtx);
+    steerButton.disabled = !runCtx || !!runCtx.shouldAbort || !hasPayload || !supportsGuidance;
+    steerButton.title = supportsGuidance ? '将文字和附件引导给当前任务' : '技能、子代理和媒体生成任务请使用排队发送';
   }
   const stopButton = $('#stopRunBtn');
   if (stopButton) {
@@ -6818,12 +6821,188 @@ sendBtn.addEventListener('click', () => {
   }
 });
 
-$('#queueTurnBtn')?.addEventListener('click', () => { queueCurrentComposerTurn(); });
+$('#steerTurnBtn')?.addEventListener('click', () => { void steerCurrentComposerTurn(); });
 $('#stopRunBtn')?.addEventListener('click', abortTask);
 
 function createQueuedTurnId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `queued-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function queuedTurnsForSession(sessionId) {
+  const head = state.queuedTurns.get(String(sessionId || ''));
+  return head ? [head, ...(head.followingTurns || [])] : [];
+}
+
+function replaceQueuedTurns(sessionId, turns) {
+  const unique = turns.filter((turn, index) => turns.findIndex(item => item.id === turn.id) === index);
+  for (const turn of unique) delete turn.followingTurns;
+  if (!unique.length) {
+    state.queuedTurns.delete(String(sessionId));
+    return;
+  }
+  unique[0].followingTurns = unique.slice(1);
+  state.queuedTurns.set(String(sessionId), unique[0]);
+}
+
+function insertQueuedTurn(queued) {
+  const sessionId = String(queued.sessionRef?.id || '');
+  if (!sessionId) return queued;
+  const turns = queuedTurnsForSession(sessionId);
+  const existing = turns.find(item => item.id === queued.id);
+  if (existing) return existing;
+  turns.push(queued);
+  // Guidance promoted after cancellation keeps its original position among
+  // messages queued before and after it. Sort is stable for equal timestamps.
+  turns.sort((left, right) => (Number(left.queuedAt) || 0) - (Number(right.queuedAt) || 0));
+  replaceQueuedTurns(sessionId, turns);
+  return queued;
+}
+
+function removeQueuedTurn(sessionId, queued) {
+  const turns = queuedTurnsForSession(sessionId);
+  const remaining = turns.filter(item => item !== queued && item.id !== queued?.id);
+  if (remaining.length === turns.length) return false;
+  replaceQueuedTurns(sessionId, remaining);
+  return true;
+}
+
+function persistQueuedTurn(queued) {
+  const conversationRevision = Number(queued.conversationRevision) || 0;
+  const pending = invokeZCore('zCoreEnqueueIntent', {
+    threadId: String(queued.sessionRef.id), intentId: queued.id, conversationRevision,
+    intent: {
+      conversationRevision, prompt: queued.text, attachments: queued.attachments || [],
+      skillCalls: queued.skillCalls || [], selectedSkills: queued.skillCalls || [],
+      subagentRoles: queued.subagentRoles || [], modelSelection: queued.modelSelection,
+      workMode: queued.modelSelection?.modelType || 'text', queuedAt: queued.queuedAt,
+      ...(queued.guidanceContinuation ? { guidanceContinuation: queued.guidanceContinuation } : {})
+    }
+  }).then(result => {
+    queued.persistenceError = result?.ok === false ? String(result.error || '排队消息保存失败') : '';
+    if (result?.code === 'SESSION_REVISION_CHANGED') {
+      removeQueuedTurn(String(queued.sessionRef.id), queued);
+      syncQueuedTurnUi();
+      updateSendState();
+    }
+    return result;
+  }).catch(error => {
+    queued.persistenceError = String(error?.message || error);
+    console.warn('[z-core] queued intent save failed:', error);
+    return { ok: false, error: queued.persistenceError };
+  });
+  Object.defineProperty(queued, 'persistPromise', { value: pending, writable: true, configurable: true });
+  return pending;
+}
+
+function enqueueQueuedTurn(queued) {
+  const stored = insertQueuedTurn(queued);
+  if (stored === queued && !queued.persistPromise) void persistQueuedTurn(queued);
+  return stored;
+}
+
+function queuedGuidanceSource(queued) {
+  return queued?.sessionRef?.messages?.find(message =>
+    message.liveGuidance?.requestId === queued.guidanceContinuation?.requestId
+    && message.liveGuidance.runId === queued.guidanceContinuation?.runId);
+}
+
+async function updateQueuedGuidanceContinuation(queued, phase, error = '') {
+  if (!queued?.guidanceContinuation) return;
+  const message = queuedGuidanceSource(queued);
+  if (!message) return;
+  message.liveGuidance.continuationIntentId = queued.id;
+  message.liveGuidance.continuationStatus = phase;
+  message.liveGuidance.continuationError = error;
+  if (queued.guidanceDetached) message.liveGuidance.nativeDetached = true;
+  refreshLiveGuidanceStatus(queued.sessionRef, message);
+  await saveCurrentSession(queued.sessionRef);
+}
+
+function captureStoppedGuidanceContinuations(runCtx) {
+  const session = runCtx.sessionRef || state.activeRuns.get(runCtx.sessionId)?.sessionRef;
+  if (!session) return;
+  let captured = false;
+  for (const message of session.messages || []) {
+    const guidance = message.liveGuidance;
+    if (guidance?.runId !== runCtx.runId || guidance.deliveryEvidence === 'provider-response'
+      || !['pending', 'queued'].includes(guidance.status) || guidance.continuationIntentId) continue;
+    const id = createQueuedTurnId();
+    guidance.continuationIntentId = id;
+    guidance.continuationStatus = 'pending';
+    enqueueQueuedTurn({
+      id, sessionRef: session, conversationRevision: Number(session.conversationRevision) || 0,
+      text: String(message.content || ''), attachments: (message.attachments || []).map(item => ({ ...item })),
+      skillCalls: (message.skillCalls || []).map(item => ({ ...item })),
+      subagentRoles: [...(message.subagentRoles || [])],
+      modelSelection: normalizeModelSelectionSnapshot(message.modelSelection || runCtx.modelSelection || getAgentModelSelection(session)),
+      queuedAt: Number(message.ts) || Date.now(),
+      guidanceContinuation: { runId: runCtx.runId, requestId: guidance.requestId,
+        ...(guidance.nativeMessageId ? { nativeMessageId: guidance.nativeMessageId } : {}) }
+    });
+    refreshLiveGuidanceStatus(session, message);
+    captured = true;
+  }
+  if (captured) void saveCurrentSession(session).catch(error => console.warn('[guidance] continuation save failed:', error));
+}
+
+async function prepareQueuedGuidanceContinuations(session) {
+  const sessionId = String(session.id);
+  const groups = new Map();
+  let ready = true;
+  for (const queued of queuedTurnsForSession(sessionId)) {
+    if (!queued.guidanceContinuation || queued.guidanceDetached) continue;
+    queued.sessionRef = session;
+    const guidance = queuedGuidanceSource(queued)?.liveGuidance;
+    if (guidance?.deliveryEvidence === 'provider-response') {
+      removeQueuedTurn(sessionId, queued);
+      await invokeZCore('zCoreDeleteIntent', queued.id, 'guidance_already_delivered').catch(() => {});
+      continue;
+    }
+    if (guidance?.nativeDetached === true) {
+      queued.guidanceDetached = true;
+      continue;
+    }
+    if (Number(queued.retryAfter) > Date.now()) { ready = false; continue; }
+    const runId = queued.guidanceContinuation.runId;
+    if (!groups.has(runId)) groups.set(runId, []);
+    groups.get(runId).push(queued);
+  }
+  for (const [runId, queuedTurns] of groups) {
+    let result;
+    try {
+      result = typeof api?.openCodeDetachPendingGuidance === 'function'
+        ? await api.openCodeDetachPendingGuidance({ runId, zSessionId: sessionId,
+          requestIds: queuedTurns.map(queued => queued.guidanceContinuation.requestId) })
+        : { error: '当前内核不支持停止后引导状态核实' };
+    } catch (error) { result = { error: String(error?.message || error) }; }
+    for (const queued of queuedTurns) {
+      const item = result?.items?.find(item => item.requestId === queued.guidanceContinuation.requestId);
+      const guidance = queuedGuidanceSource(queued)?.liveGuidance;
+      if (item?.status === 'delivered' || guidance?.deliveryEvidence === 'provider-response') {
+        if (guidance) {
+          Object.assign(guidance, { status: 'delivered', deliveryEvidence: 'provider-response', continuationStatus: 'delivered' });
+          refreshLiveGuidanceStatus(session, queuedGuidanceSource(queued));
+          await saveCurrentSession(session);
+        }
+        removeQueuedTurn(sessionId, queued);
+        await invokeZCore('zCoreDeleteIntent', queued.id, 'guidance_already_delivered').catch(() => {});
+      } else if (['detached', 'not-inserted'].includes(item?.status)) {
+        queued.guidanceDetached = true;
+        await updateQueuedGuidanceContinuation(queued, 'queued');
+      } else {
+        ready = false;
+        const error = item?.error || result?.error || '等待原任务停止并核实引导是否送达';
+        queued.retryAfter = Date.now() + (item?.status === 'pending' ? 1000 : 5000);
+        await updateQueuedGuidanceContinuation(queued, item?.status === 'pending' ? 'pending' : 'failed', error);
+        if (item?.status !== 'pending' && !queued.guidanceDetachWarningShown) {
+          queued.guidanceDetachWarningShown = true;
+          if (state.currentSession?.id === sessionId) toast(`已保留后续消息，暂未重发引导：${error}`);
+        }
+      }
+    }
+  }
+  return ready;
 }
 
 function syncQueuedTurnUi() {
@@ -6833,13 +7012,23 @@ function syncQueuedTurnUi() {
   const queued = sessionId ? state.queuedTurns.get(sessionId) : null;
   host.classList.toggle('hidden', !queued);
   host.dataset.sessionId = queued ? sessionId : '';
+  const count = queuedTurnsForSession(sessionId).length;
+  host.dataset.queueCount = String(count);
+  const label = host.querySelector('.queued-turn-label');
+  if (label) label.textContent = count > 1 ? `${count} 条排队对话` : '排队对话';
+  const verifyingGuidance = !!queued?.guidanceContinuation && !queued.guidanceDetached
+    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true;
+  for (const selector of ['#queuedTurnEdit', '#queuedTurnRemove']) {
+    const button = $(selector);
+    if (button) button.disabled = verifyingGuidance;
+  }
   const detail = queued
     ? [queued.text, ...(queued.attachments || []).map(item => item.name), ...(queued.skillCalls || []).map(item => `$${item.name || item.id}`), ...(queued.subagentRoles || []).map(id => `￥${SUBAGENT_ROLE_LABELS[id] || id}`)]
         .filter(Boolean)
         .join(' · ')
     : '';
-  host.title = detail || '排队对话';
-  host.setAttribute('aria-label', detail ? `排队对话：${detail}` : '排队对话');
+  host.title = detail ? `${count > 1 ? '下一条：' : ''}${detail}` : '排队对话';
+  host.setAttribute('aria-label', detail ? `${count} 条排队对话，下一条：${detail}` : '排队对话');
 }
 
 function clearComposerPayload() {
@@ -6881,6 +7070,19 @@ function renderLiveGuidanceStatus(element, guidance) {
     element.querySelector('.msg-body')?.after(status);
   }
   status.dataset.status = guidance.status;
+  if ((guidance.continuationIntentId || guidance.continuationStatus) && guidance.deliveryEvidence !== 'provider-response') {
+    status.dataset.status = `continuation-${guidance.continuationStatus || 'pending'}`;
+    const phase = guidance.continuationStatus;
+    status.textContent = phase === 'dispatched' ? '已转为后续对话'
+      : phase === 'dispatching' ? '正在作为后续对话发送'
+        : phase === 'failed' ? '等待继续：引导状态尚未确认'
+          : phase === 'removed' ? '已取消后续发送'
+            : phase === 'edited' ? '已移回输入框'
+              : phase === 'queued' ? '等待后续发送' : '停止后继续';
+    status.title = guidance.continuationError
+      || '这条引导尚未送达原任务，已保留，停止完成后将按发送顺序作为后续对话继续。';
+    return;
+  }
   status.textContent = guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response' ? '已经引导'
     : guidance.status === 'delivered' ? '引导记录（送达未确认）'
     : guidance.status === 'failed' ? `送达未确认：${guidance.error || '本轮没有收到模型接口回执'}`
@@ -6909,9 +7111,18 @@ function applyLiveGuidanceStatus(runCtx, event) {
   const guidance = message.liveGuidance;
   if (guidance.status === 'delivered' && guidance.deliveryEvidence === 'provider-response') return true;
   if (data.status === 'delivered' && data.deliveryEvidence !== 'provider-response') return true;
+  if (data.status === 'failed' && guidance.continuationIntentId) return true;
   Object.assign(guidance, { status: data.status,
     ...(data.status === 'delivered' ? { deliveryEvidence: data.deliveryEvidence, deliveredAt: data.deliveredAt, error: '' }
       : { error: String(data.error || '未确认送入模型') }) });
+  if (data.status === 'delivered' && guidance.continuationIntentId) {
+    guidance.continuationStatus = 'delivered';
+    const queued = queuedTurnsForSession(session.id).find(item => item.id === guidance.continuationIntentId);
+    if (queued) removeQueuedTurn(session.id, queued);
+    void invokeZCore('zCoreDeleteIntent', guidance.continuationIntentId, 'guidance_already_delivered').catch(() => {});
+    syncQueuedTurnUi();
+    updateSendState();
+  }
   refreshLiveGuidanceStatus(session, message);
   if (!runCtx.replayingHistory) void saveCurrentSession(session).catch(() => {});
   return true;
@@ -6919,7 +7130,8 @@ function applyLiveGuidanceStatus(runCtx, event) {
 
 function settleLiveGuidanceStatuses(runCtx) {
   for (const message of runCtx?.sessionRef?.messages || []) {
-    if (message.liveGuidance?.runId !== runCtx.runId || !['pending', 'queued'].includes(message.liveGuidance.status)) continue;
+    if (message.liveGuidance?.runId !== runCtx.runId || message.liveGuidance.continuationIntentId
+      || !['pending', 'queued'].includes(message.liveGuidance.status)) continue;
     message.liveGuidance.status = 'failed';
     message.liveGuidance.error = '任务已停止或结束，未确认送入模型';
     refreshLiveGuidanceStatus(runCtx.sessionRef, message);
@@ -6932,17 +7144,23 @@ async function steerCurrentComposerTurn() {
   const entry = state.activeRuns.get(sessionId);
   const runCtx = entry?.runCtx;
   const session = entry?.sessionRef || selectedSession;
+  syncComposerSkillsFromDom();
+  syncComposerSubagentsFromDom();
   const text = getComposerText().trim();
-  if (!sessionId || !runCtx?.runId || runCtx.shouldAbort || !text) return false;
-  if (state.attachments.length || state.selectedSkills.length || state.selectedSubagents.length) return false;
+  const attachments = state.attachments.map(item => ({ ...item }));
+  if (!sessionId || !runCtx?.runId || runCtx.shouldAbort || (!text && !attachments.length)) return false;
+  if (state.selectedSkills.length || state.selectedSubagents.length) return false;
+  const modelSelection = normalizeModelSelectionSnapshot(runCtx.modelSelection || getAgentModelSelection(session));
+  if (modelSelection.modelType && modelSelection.modelType !== 'text') return false;
   const runId = String(runCtx.runId);
   const requestId = `guidance-${createQueuedTurnId()}`;
-  const message = { role: 'user', content: text, ts: Date.now(), liveGuidance: { requestId, runId, status: 'pending' } };
+  const message = { role: 'user', content: text, attachments, modelSelection, ts: Date.now(),
+    liveGuidance: { requestId, runId, status: 'pending' } };
   captureLiveGuidanceDisplayBoundary(runCtx, message);
   session.messages = session.messages || [];
   session.messages.push(message);
   if (state.currentSession?.id === sessionId) {
-    appendMessage('user', text, [], true, session.messages.length - 1, message.ts, null, null, [], null, message.liveGuidance);
+    appendMessage('user', text, attachments, true, session.messages.length - 1, message.ts, null, null, [], null, message.liveGuidance);
     renderOpenCodeRunNow(runCtx);
     clearComposerPayload();
     updateSendState();
@@ -6952,18 +7170,21 @@ async function steerCurrentComposerTurn() {
     if (state.activeRuns.get(sessionId)?.runCtx !== runCtx || runCtx.shouldAbort) {
       throw new Error('当前任务已停止或结束，指令已保留');
     }
-    const result = await api.openCodeSteerRun({ runId, zSessionId: sessionId, requestId, text });
+    const result = await api.openCodeSteerRun({ runId, zSessionId: sessionId, requestId, text, attachments });
     if (!result?.ok || result.accepted !== true) throw new Error(result?.error || '当前任务未确认接收，请重试或排队发送');
+    for (const field of ['nativeMessageId', 'nativeSessionId', 'directory']) {
+      if (typeof result[field] === 'string' && result[field]) message.liveGuidance[field] = result[field];
+    }
     // A late queue acknowledgement must never overwrite a provider receipt or
     // a terminal event that arrived while this IPC call was still pending.
-    if (message.liveGuidance.status === 'pending') message.liveGuidance.status = 'queued';
+    if (message.liveGuidance.status === 'pending' && !message.liveGuidance.continuationIntentId) message.liveGuidance.status = 'queued';
     if (result.delivered === true && result.deliveryEvidence === 'provider-response') {
       message.liveGuidance.status = 'delivered';
       message.liveGuidance.deliveryEvidence = result.deliveryEvidence;
       message.liveGuidance.deliveredAt = result.deliveredAt;
     }
   } catch (error) {
-    if (message.liveGuidance.deliveryEvidence !== 'provider-response') {
+    if (message.liveGuidance.deliveryEvidence !== 'provider-response' && !message.liveGuidance.continuationIntentId) {
       message.liveGuidance.status = 'failed';
       message.liveGuidance.error = String(error?.message || error || '引导失败');
     }
@@ -6973,7 +7194,7 @@ async function steerCurrentComposerTurn() {
   catch (error) {
     if (state.currentSession?.id === sessionId) toast(`引导记录保存失败：${error?.message || error}`);
   }
-  return ['queued', 'delivered'].includes(message.liveGuidance.status);
+  return ['queued', 'delivered'].includes(message.liveGuidance.status) || !!message.liveGuidance.continuationIntentId;
 }
 
 function queueCurrentComposerTurn() {
@@ -7001,28 +7222,7 @@ function queueCurrentComposerTurn() {
     modelSelection,
     queuedAt: Date.now()
   };
-  state.queuedTurns.set(sessionId, queuedTurn);
-  void invokeZCore('zCoreEnqueueIntent', {
-    threadId: sessionId,
-    intentId: queuedId,
-    conversationRevision: queuedTurn.conversationRevision,
-    intent: {
-      conversationRevision: queuedTurn.conversationRevision,
-      prompt: text,
-      attachments,
-      skillCalls,
-      selectedSkills: skillCalls,
-      subagentRoles,
-      modelSelection,
-      workMode: modelSelection.modelType || 'text',
-    }
-  }).then(result => {
-    if (result?.code === 'SESSION_REVISION_CHANGED' && state.queuedTurns.get(sessionId) === queuedTurn) {
-      state.queuedTurns.delete(sessionId);
-      if (state.currentSession?.id === sessionId) { syncQueuedTurnUi(); updateSendState(); }
-    }
-    if (!result?.ok) console.warn('[z-core] queued intent persistence failed:', result?.error || 'unknown error');
-  }).catch(error => console.warn('[z-core] queued intent persistence failed:', error));
+  enqueueQueuedTurn(queuedTurn);
   clearComposerPayload();
   syncQueuedTurnUi();
   updateSendState();
@@ -7033,8 +7233,14 @@ function editCurrentQueuedTurn() {
   const sessionId = String(state.currentSession?.id || '');
   const queued = state.queuedTurns.get(sessionId);
   if (!queued) return;
+  if (queued.guidanceContinuation && !queued.guidanceDetached
+    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true) {
+    toast('正在确认原任务中的引导状态，确认后即可编辑');
+    return;
+  }
   void invokeZCore('zCoreDeleteIntent', queued.id, 'user_edited').catch(() => {});
-  state.queuedTurns.delete(sessionId);
+  removeQueuedTurn(sessionId, queued);
+  void updateQueuedGuidanceContinuation(queued, 'edited').catch(() => {});
   setComposerText(queued.text || '', { preserveSkills: false });
   setComposerSkills(queued.skillCalls || []);
   setComposerSubagents(queued.subagentRoles || []);
@@ -7052,8 +7258,14 @@ function editCurrentQueuedTurn() {
 function removeCurrentQueuedTurn() {
   const sessionId = String(state.currentSession?.id || '');
   const queued = sessionId ? state.queuedTurns.get(sessionId) : null;
-  if (!sessionId || !state.queuedTurns.delete(sessionId)) return;
+  if (queued?.guidanceContinuation && !queued.guidanceDetached
+    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true) {
+    toast('正在确认原任务中的引导状态，确认后即可移除');
+    return;
+  }
+  if (!sessionId || !queued || !removeQueuedTurn(sessionId, queued)) return;
   void invokeZCore('zCoreDeleteIntent', queued?.id, 'user_removed').catch(() => {});
+  void updateQueuedGuidanceContinuation(queued, 'removed').catch(() => {});
   syncQueuedTurnUi();
   updateSendState();
 }
@@ -7228,19 +7440,11 @@ function abortSessionById(sessionId) {
     try { context.runAbortController?.abort(); } catch {}
     try { context.abortController?.abort(); } catch {}
   }
-  // Stopping a task also cancels its pending queued turn: letting a queued
-  // message auto-dispatch right after the user pressed stop reads as the
-  // app ignoring the stop.
-  const queuedSessionId = String(sessionId || '');
-  const queuedTurn = state.queuedTurns.get(queuedSessionId);
-  if (queuedTurn) {
-    state.queuedTurns.delete(queuedSessionId);
-    void invokeZCore('zCoreDeleteIntent', queuedTurn.id, 'run_aborted').catch(() => {});
-    if (state.currentSession?.id === sessionId) {
-      syncQueuedTurnUi();
-      updateSendState();
-    }
-  }
+  // Stop ends the active operation, while preserving later user inputs. The
+  // dispatcher waits for terminal persistence and confirms native guidance
+  // removal before any unreceived guidance becomes a separate turn.
+  captureStoppedGuidanceContinuations(runCtx);
+  if (state.currentSession?.id === sessionId) syncQueuedTurnUi();
   for (const context of contexts) settleAgentInteractionForRun(context, { permissionDecision: 'deny' });
   if (runCtx.runId && window.z.cancelImageGeneration) {
     window.z.cancelImageGeneration(runCtx.runId).catch(() => {});
@@ -7725,9 +7929,7 @@ function getAgentModelSelection(session = state.currentSession) {
       compactionThreshold: configuredContextBudget(state.config, stored).compressSoftThreshold,
       ...(Object.hasOwn(stored, 'maxOutputTokens') ? { maxOutputTokens: stored.maxOutputTokens } : {}),
       configName: String(stored.configName || (sessionSelection && !supplierId ? '' : getAgentModelConfigName(storedProvider, supplierId))),
-      capabilities: { ...(stored.capabilities && Object.keys(stored.capabilities).length
-        ? stored.capabilities
-        : (catalogModel?.capabilities || {})) }
+      capabilities: { ...(catalogModel?.capabilities || {}), ...(stored.capabilities || {}) }
     };
   }
   const modelId = String(state.config?.api?.model || '');
@@ -7989,7 +8191,7 @@ function mountComposerToolbar() {
     document.querySelector('#workModeIndicator'),
     document.querySelector('#modelPickerWrap'),
     document.querySelector('#stopRunBtn'),
-    document.querySelector('#queueTurnBtn'),
+    document.querySelector('#steerTurnBtn'),
     document.querySelector('#sendBtn')
   ];
   controls.forEach(control => {
@@ -8521,9 +8723,7 @@ async function sendMessage() {
   if (!text && state.attachments.length === 0 && state.selectedSkills.length === 0 && state.selectedSubagents.length === 0) return;
   if (isCurrentSessionExecutionActive()) {
     if (getRunCtx(state.currentSession?.id)?.shouldAbort) toast('上一任务正在完成中止清理，请稍候');
-    else if (state.attachments.length || state.selectedSkills.length || state.selectedSubagents.length) {
-      if (queueCurrentComposerTurn()) toast('含附件、技能或子代理的消息已排队，将在当前任务完成后执行');
-    } else await steerCurrentComposerTurn();
+    else if (queueCurrentComposerTurn()) toast('已排队，将在当前任务结束后发送；也可手动选择引导');
     return;
   }
   const attachments = state.attachments.slice();
@@ -11323,8 +11523,7 @@ async function getZCoreIntentRecord(intentId) {
 
 function discardStaleQueuedTurn(sessionId, queued, result) {
   if (result?.code !== 'SESSION_REVISION_CHANGED') return false;
-  if (state.queuedTurns.get(sessionId) === queued) {
-    state.queuedTurns.delete(sessionId);
+  if (removeQueuedTurn(sessionId, queued)) {
     if (state.currentSession?.id === sessionId) toast('对话历史已变化，旧排队消息未发送');
   }
   return true;
@@ -11336,6 +11535,7 @@ function scheduleQueuedTurnDispatch(session) {
   queuedTurnDispatching.add(sessionId);
   queueMicrotask(async () => {
     let queued = null;
+    let removedForDispatch = false;
     try {
       if (isSessionExecutionActive(sessionId)) return;
       queued = state.queuedTurns.get(sessionId);
@@ -11343,9 +11543,21 @@ function scheduleQueuedTurnDispatch(session) {
       if (Number(queued.retryAfter) > Date.now()) return;
 
       const targetSession = queued.sessionRef || session;
+      if (typeof ensureFullSessionLoaded === 'function') await ensureFullSessionLoaded(targetSession);
+      if (isSessionExecutionActive(sessionId)) return;
+      if (!(await prepareQueuedGuidanceContinuations(targetSession))) return;
+      queued = state.queuedTurns.get(sessionId);
+      if (!queued) return;
+      queued.sessionRef = targetSession;
       if ((Number(queued.conversationRevision) || 0) !== (Number(targetSession.conversationRevision) || 0)) {
-        state.queuedTurns.delete(sessionId);
+        removeQueuedTurn(sessionId, queued);
         return;
+      }
+      if (queued.persistPromise) await queued.persistPromise;
+      if (!queuedTurnsForSession(sessionId).some(item => item.id === queued.id)) return;
+      if (queued.persistenceError) {
+        const saved = await persistQueuedTurn(queued);
+        if (saved?.ok === false) { queued.retryAfter = Date.now() + 1000; return; }
       }
       const hasZCoreIntentBridge = typeof api?.zCoreConsumeIntent === 'function';
       if (hasZCoreIntentBridge) {
@@ -11358,7 +11570,7 @@ function scheduleQueuedTurnDispatch(session) {
             // second time; a consumed record remains recoverable by its owner.
             const persisted = findPersistedIntentSubmission(targetSession, queued.id);
             if (record.status === 'dispatched' || persisted?.complete) {
-              state.queuedTurns.delete(sessionId);
+              removeQueuedTurn(sessionId, queued);
               if (persisted?.complete && record.status === 'consumed') {
                 await invokeZCore('zCoreAckIntent', queued.id).catch(() => {});
               }
@@ -11397,12 +11609,15 @@ function scheduleQueuedTurnDispatch(session) {
 
       const persistedSubmission = findPersistedIntentSubmission(targetSession, queued.id);
       if (persistedSubmission?.complete) {
-        state.queuedTurns.delete(sessionId);
+        removeQueuedTurn(sessionId, queued);
+        await updateQueuedGuidanceContinuation(queued, 'dispatched');
         await invokeZCore('zCoreAckIntent', queued.id).catch(() => {});
         return;
       }
 
-      state.queuedTurns.delete(sessionId);
+      removeQueuedTurn(sessionId, queued);
+      removedForDispatch = true;
+      await updateQueuedGuidanceContinuation(queued, 'dispatching');
       if (state.currentSession?.id === sessionId) {
         syncQueuedTurnUi();
         updateSendState();
@@ -11420,16 +11635,19 @@ function scheduleQueuedTurnDispatch(session) {
         });
       const completedSubmission = findPersistedIntentSubmission(targetSession, queued.id);
       if (result?.ok === true || completedSubmission?.complete) {
+        await updateQueuedGuidanceContinuation(queued, 'dispatched');
         await invokeZCore('zCoreAckIntent', queued.id).catch(() => {});
-      } else if (!state.queuedTurns.has(sessionId)) {
-        state.queuedTurns.set(sessionId, queued);
+      } else {
+        insertQueuedTurn(queued);
+        await updateQueuedGuidanceContinuation(queued, 'queued');
         const requeued = await invokeZCore('zCoreRequeueIntent', queued.id).catch(() => null);
         discardStaleQueuedTurn(sessionId, queued, requeued);
       }
     } catch (error) {
       console.error('[queued-turn] dispatch failed:', error);
-      if (queued && !state.queuedTurns.has(sessionId)) {
-        state.queuedTurns.set(sessionId, queued);
+      if (queued && removedForDispatch) {
+        insertQueuedTurn(queued);
+        await updateQueuedGuidanceContinuation(queued, 'queued').catch(() => {});
         const requeued = await invokeZCore('zCoreRequeueIntent', queued.id).catch(() => null);
         discardStaleQueuedTurn(sessionId, queued, requeued);
       }

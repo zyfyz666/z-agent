@@ -336,6 +336,7 @@ test('queued requests freeze the current conversation revision in durable intent
     invokeZCore: (_method, payload) => { payloads.push(payload); return response.promise; },
     clearComposerPayload() {}, syncQueuedTurnUi() {}, updateSendState() {}, console: { warn() {} }
   });
+  vm.runInContext(section('function queuedTurnsForSession(', 'function syncQueuedTurnUi('), context);
   vm.runInContext(section('function queueCurrentComposerTurn(', 'function editCurrentQueuedTurn('), context);
   assert.equal(context.queueCurrentComposerTurn(), true);
   session.conversationRevision = 4;
@@ -357,6 +358,7 @@ test('queue hydration retains matching revised intents and excludes discarded hi
     } }) },
     getAgentModelSelection: () => ({ modelId: 'selected' }), console
   });
+  vm.runInContext(section('function queuedTurnsForSession(', 'function syncQueuedTurnUi('), context);
   vm.runInContext(section('async function hydrateQueuedTurns(', 'async function listRecoveredZCoreTurns('), context);
   await context.hydrateQueuedTurns();
   assert.equal(context.state.queuedTurns.get('fresh').conversationRevision, 2);
@@ -368,6 +370,7 @@ test('stale consume or requeue errors stop only the matching local queue and nev
   const old = { id: 'old', conversationRevision: 1 };
   const current = { id: 'new', conversationRevision: 2 };
   const context = vm.createContext({ state: { currentSession: { id: 'source' }, queuedTurns: new Map([['source', old]]) }, toast: text => notices.push(text) });
+  vm.runInContext(section('function queuedTurnsForSession(', 'function syncQueuedTurnUi('), context);
   vm.runInContext(section('function discardStaleQueuedTurn(', 'function scheduleQueuedTurnDispatch('), context);
   assert.equal(context.discardStaleQueuedTurn('source', old, { code: 'SESSION_REVISION_CHANGED' }), true);
   assert.equal(context.state.queuedTurns.size, 0);

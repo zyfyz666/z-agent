@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
+const os = require('node:os');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const start = source.indexOf('const openCodeSteeringRequests =');
@@ -18,10 +19,12 @@ function fixture(deliver) {
   const active = { zSessionId: 'sess_alpha', visionAbortController: new AbortController() };
   const runs = new Map([['run-a', active]]);
   const kernels = new Set(['run-a']);
-  let handler;
+  const handlers = new Map();
   const context = vm.createContext({
     crypto,
+    require: name => require(path.join('..', name)),
     openCodeActiveRuns: runs,
+    openCodeRunReconcile: new Map([['run-a', { meta: { zSessionId: 'sess_alpha' } }]]),
     openCodeSidecar: {
       hasRun: id => kernels.has(id),
       async deliverInterjection(runId, analysis) {
@@ -33,10 +36,11 @@ function fixture(deliver) {
     loadConfig() { throw new Error('live steering must not select another model'); },
     saveConfig() { throw new Error('live steering must not write configuration'); },
     readSessionRecord() { throw new Error('the frontend owns durable user-message persistence'); },
-    ipcMain: { handle(name, callback) { assert.equal(name, 'opencode:steer-run'); handler = callback; } }
+    ipcMain: { handle(name, callback) { handlers.set(name, callback); } }
   });
   vm.runInContext(source.slice(start, end), context);
-  return { calls, active, runs, kernels, send: payload => handler(null, payload), context };
+  return { calls, active, runs, kernels, send: payload => handlers.get('opencode:steer-run')(null, payload),
+    detach: payload => handlers.get('opencode:detach-pending-guidance')(null, payload), context };
 }
 
 test('live guidance directly reaches the active kernel with exact session ownership and no auxiliary classification', async () => {
@@ -135,6 +139,95 @@ test('missing kernel acknowledgement and thrown delivery errors are explicit fai
   }
 });
 
+test('attachments are immutable, included in idempotence, and relayed using the active run model', async t => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'z-live-guidance-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const image = path.join(temporary, 'diagram.png');
+  fs.writeFileSync(image, Buffer.from([137, 80, 78, 71]));
+  const f = fixture();
+  f.context.filesDir = temporary;
+  const cfg = { permissions: { allowFileRead: true }, api: { visionRelayEnabled: true } };
+  const selection = { modelId: 'active-text-model' };
+  f.active.guidanceConfig = cfg;
+  f.active.selection = selection;
+  let relayed = 0;
+  f.context.relayImagesForTextModel = async (actualCfg, actualSelection, request) => {
+    assert.equal(actualCfg, cfg); assert.equal(actualSelection, selection);
+    assert.equal(request.attachments[0].path, image);
+    relayed += 1;
+    return { prompt: `${request.prompt}\nVisual description`, attachments: [] };
+  };
+  const payload = request({ text: '', attachments: [{ path: image, name: 'diagram.png', mimeType: 'image/png' }] });
+  const snapshot = JSON.parse(JSON.stringify(payload));
+  const pending = f.send(payload);
+  payload.attachments[0].path = 'do-not-read-this';
+  const result = await pending;
+  assert.equal(result.accepted, true);
+  assert.match(f.calls[0].analysis.guidance, /Visual description/);
+  assert.equal(await f.send(snapshot), result);
+  assert.equal(relayed, 1);
+  assert.equal((await f.send({ ...snapshot, attachments: [{ ...snapshot.attachments[0], name: 'different.png' }] })).code, 'STEERING_REQUEST_CONFLICT');
+});
+
+test('missing, outside-upload, and denied attachments fail before delivery', async t => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'z-guidance-invalid-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const uploads = path.join(temporary, 'uploads'); fs.mkdirSync(uploads);
+  const outside = path.join(temporary, 'outside.txt'); fs.writeFileSync(outside, 'private');
+  for (const kind of ['missing', 'outside', 'denied']) {
+    const f = fixture(); f.context.filesDir = uploads;
+    f.active.guidanceConfig = { permissions: { allowFileRead: kind !== 'denied' } };
+    const result = await f.send(request({ attachments: [{ path: kind === 'missing' ? path.join(uploads, 'missing.txt') : outside }] }));
+    assert.equal(result.ok, false, kind); assert.equal(f.calls.length, 0, kind);
+  }
+});
+
+test('stopping during image preparation cannot insert guidance into the cancelled run', async t => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'z-guidance-cancel-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const file = path.join(temporary, 'photo.png'); fs.writeFileSync(file, 'fixture');
+  const f = fixture(); f.context.filesDir = temporary;
+  f.active.guidanceConfig = { permissions: { allowFileRead: true } };
+  let finishRelay;
+  f.context.relayImagesForTextModel = () => new Promise(resolve => { finishRelay = resolve; });
+  const pending = f.send(request({ attachments: [{ path: file, mimeType: 'image/png' }] }));
+  await Promise.resolve();
+  f.active.visionAbortController.abort();
+  finishRelay({ prompt: 'description', attachments: [] });
+  assert.equal((await pending).code, 'STEERING_STALE');
+  assert.equal(f.calls.length, 0);
+  f.runs.clear(); f.kernels.clear();
+  assert.equal((await f.detach({ ...request(), requestIds: ['message-1'] })).items[0].status, 'not-inserted');
+});
+
+test('stop continuation ownership is checked and insertion acknowledgement must finish first', async () => {
+  let finish;
+  const f = fixture(() => new Promise(resolve => { finish = resolve; }));
+  const pending = f.send(request()); await Promise.resolve();
+  f.runs.clear(); f.kernels.clear();
+  const payload = { runId: 'run-a', zSessionId: 'sess_alpha', requestIds: ['message-1'] };
+  assert.equal((await f.detach({ ...payload, zSessionId: 'sess_wrong' })).items[0].status, 'failed');
+  assert.equal((await f.detach(payload)).items[0].status, 'pending');
+  finish({ ok: true, accepted: true, delivered: false }); await pending;
+  f.context.openCodeSidecar.detachPendingGuidance = async value => {
+    assert.equal(value.runId, 'run-a');
+    return [{ requestId: 'message-1', status: 'detached' }];
+  };
+  assert.equal((await f.detach(payload)).items[0].status, 'detached');
+});
+
+test('expired or unknown receipt caches never make a previously submitted guide safe to resend', async () => {
+  const payload = { runId: 'run-a', zSessionId: 'sess_alpha', requestIds: ['message-1'] };
+  const f = fixture(); await f.send(request());
+  vm.runInContext('openCodeSteeringRequests.clear()', f.context);
+  assert.equal((await f.send(request())).code, 'STEERING_RECEIPT_EXPIRED');
+  f.runs.clear(); f.kernels.clear();
+  assert.equal((await f.detach(payload)).items[0].status, 'failed');
+  assert.equal((await f.detach({ ...payload, requestIds: ['never-submitted'] })).items[0].status, 'not-inserted');
+  vm.runInContext('openCodeGuidanceRuns.clear()', f.context);
+  assert.equal((await f.detach({ ...payload, requestIds: ['never-submitted'] })).items[0].status, 'failed');
+});
+
 test('preload sends live-guidance and session-model payloads through their dedicated IPC channels', async () => {
   let api;
   const calls = [];
@@ -148,10 +241,12 @@ test('preload sends live-guidance and session-model payloads through their dedic
   });
   const payload = request();
   await api.openCodeSteerRun(payload);
+  await api.openCodeDetachPendingGuidance({ runId: 'run-a', zSessionId: 'sess_alpha', requestIds: ['message-1'] });
   await api.setSessionModel('sess_alpha', { providerId: 'fixture-a', supplierId: 'official', modelId: 'model-a' });
   await api.setSessionModel('sess_alpha', { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b' }, 3);
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     ['opencode:steer-run', payload],
+    ['opencode:detach-pending-guidance', { runId: 'run-a', zSessionId: 'sess_alpha', requestIds: ['message-1'] }],
     ['session:model-set', { id: 'sess_alpha', modelSelection: { providerId: 'fixture-a', supplierId: 'official', modelId: 'model-a' }, conversationRevision: 0 }],
     ['session:model-set', { id: 'sess_alpha', modelSelection: { providerId: 'fixture-b', supplierId: 'official', modelId: 'model-b' }, conversationRevision: 3 }]
   ]);

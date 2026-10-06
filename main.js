@@ -9845,8 +9845,10 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       executionDirectory,
       visionAbortController,
       selection,
+      guidanceConfig: cfg,
       prompt
     });
+    rememberOpenCodeGuidanceRun(runId, zSessionId);
     openCodeRunAdmissions.delete(runId);
     admissionPending = false;
     refreshAgentRuntimeActivity();
@@ -10470,6 +10472,17 @@ async function cancelOpenCodeRun(runId) {
 }
 
 const openCodeSteeringRequests = new Map();
+const openCodeGuidanceRuns = new Map();
+const { normalizeGuidanceAttachments, validateGuidanceAttachments } = require('./lib/live-guidance');
+
+function rememberOpenCodeGuidanceRun(runId, zSessionId) {
+  if (!openCodeGuidanceRuns.has(runId)) openCodeGuidanceRuns.set(runId, { zSessionId, requestIds: new Set() });
+  for (const oldRunId of openCodeGuidanceRuns.keys()) {
+    if (openCodeGuidanceRuns.size <= 100) break;
+    if (!openCodeActiveRuns.has(oldRunId)) openCodeGuidanceRuns.delete(oldRunId);
+  }
+  return openCodeGuidanceRuns.get(runId);
+}
 
 function steerOpenCodeRun(payload = {}) {
   const runId = String(payload.runId || '').trim();
@@ -10478,11 +10491,14 @@ function steerOpenCodeRun(payload = {}) {
   const text = String(payload.text || '').trim();
   const identity = { runId, zSessionId, requestId };
   const failure = (error, code = 'STEERING_UNAVAILABLE') => ({ ...identity, ok: false, delivered: false, error, code });
-  if (!runId || !zSessionId || !requestId || !text) {
+  let attachments;
+  try { attachments = normalizeGuidanceAttachments(payload.attachments); }
+  catch (error) { return Promise.resolve(failure(error.message, 'INVALID_STEERING_ATTACHMENT')); }
+  if (!runId || !zSessionId || !requestId || (!text && !attachments.length)) {
     return Promise.resolve(failure('缺少任务、会话、消息 ID 或引导内容。', 'INVALID_STEERING_REQUEST'));
   }
   const key = JSON.stringify([runId, zSessionId, requestId]);
-  const fingerprint = crypto.createHash('sha256').update(text).digest('hex');
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ text, attachments })).digest('hex');
   const previous = openCodeSteeringRequests.get(key);
   if (previous) {
     return previous.fingerprint === fingerprint ? previous.promise
@@ -10494,15 +10510,36 @@ function steerOpenCodeRun(payload = {}) {
   if (String(active.zSessionId || '') !== zSessionId) {
     return Promise.resolve(failure('该运行不属于当前会话，引导未送达。', 'STEERING_SESSION_MISMATCH'));
   }
+  const runRecord = rememberOpenCodeGuidanceRun(runId, zSessionId);
+  // This small run ledger outlives the response cache. A missing cached
+  // response must never turn a previously submitted message into a new one.
+  if (runRecord.requestIds.has(requestId)) return Promise.resolve(failure('原引导回执已过期，已阻止重复发送。', 'STEERING_RECEIPT_EXPIRED'));
+  runRecord.requestIds.add(requestId);
   const isLive = () => openCodeActiveRuns.get(runId) === active && openCodeSidecar === sidecar
     && !active.cancelRequested && !active.visionAbortController?.signal?.aborted && sidecar.hasRun(runId);
   // Install the promise before the first delivery, so concurrent retries
   // share a single direct injection instead of calling an auxiliary model.
+  let requestEntry;
   const promise = Promise.resolve().then(async () => {
     if (!isLive()) return failure('当前任务已结束或正在停止，引导未送达。', 'STEERING_STALE');
     try {
+      let guidance = text || '请结合本次附件继续当前任务。';
+      let preparedAttachments = attachments;
+      if (attachments.length) {
+        const cfg = active.guidanceConfig;
+        if (!cfg) return failure('当前任务缺少附件权限快照，请在下一轮发送附件。', 'STEERING_ATTACHMENT_UNAVAILABLE');
+        preparedAttachments = validateGuidanceAttachments(attachments, { filesDir, permissions: cfg.permissions });
+        const prepared = await relayImagesForTextModel(cfg, active.selection || {}, {
+          prompt: guidance, attachments: preparedAttachments
+        }, runId, (type, data) => sendOpenCodeRendererEvent(runId, { type, data }), active.visionAbortController?.signal);
+        guidance = prepared.prompt;
+        preparedAttachments = prepared.attachments;
+        if (!isLive()) return failure('读取附件期间任务已结束或停止，引导未送达。', 'STEERING_STALE');
+      }
+      requestEntry.insertionAttempted = true;
       const delivery = await sidecar.deliverInterjection(runId, {
-        kind: 'guidance', guidance: text, requestId, requestFinish: false, hardCancel: false, source: 'user'
+        kind: 'guidance', guidance, requestId, requestFinish: false, hardCancel: false, source: 'user',
+        ...(preparedAttachments.length ? { attachments: preparedAttachments } : {})
       });
       if (delivery?.ok !== true || delivery.accepted !== true) {
         return failure(delivery?.error || '内核未确认收到引导。', 'STEERING_DELIVERY_FAILED');
@@ -10511,12 +10548,15 @@ function steerOpenCodeRun(payload = {}) {
       if (!isLive() && !delivered) return failure('引导发送期间任务已结束或停止，未确认送达。', 'STEERING_STALE');
       return { ...identity, ok: true, accepted: true, delivered,
         deliveredAt: delivery.deliveredAt, deliveryEvidence: delivery.deliveryEvidence,
+        nativeMessageId: delivery.nativeMessageId, nativeSessionId: delivery.nativeSessionId, directory: delivery.directory,
         version: delivery.version, phase: delivery.phase };
     } catch (error) {
       return failure(error?.message || String(error), 'STEERING_DELIVERY_FAILED');
     }
   });
-  openCodeSteeringRequests.set(key, { runId, fingerprint, promise });
+  requestEntry = { runId, zSessionId, fingerprint, promise, insertionAttempted: false, settled: false };
+  openCodeSteeringRequests.set(key, requestEntry);
+  promise.finally(() => { requestEntry.settled = true; });
   // Retain every live run's receipt. Old completed-run receipts can expire
   // without allowing reinjection, since a completed run fails the live check.
   if (openCodeSteeringRequests.size > 512) {
@@ -10529,6 +10569,40 @@ function steerOpenCodeRun(payload = {}) {
 }
 
 ipcMain.handle('opencode:steer-run', (_event, payload = {}) => steerOpenCodeRun(payload));
+
+ipcMain.handle('opencode:detach-pending-guidance', async (_event, payload = {}) => {
+  const runId = String(payload.runId || '').trim();
+  const zSessionId = String(payload.zSessionId || '').trim();
+  const requestIds = [...new Set((Array.isArray(payload.requestIds) ? payload.requestIds : []).map(value => String(value || '').trim()).filter(Boolean))];
+  const result = items => ({ ok: true, runId, zSessionId, items });
+  const rows = (status, error) => requestIds.map(requestId => ({ requestId, status, ...(error ? { error } : {}) }));
+  if (!runId || !zSessionId || !requestIds.length) return { ok: false, error: '缺少原运行、会话或引导消息 ID。', items: [] };
+  const runRecord = openCodeGuidanceRuns.get(runId);
+  const knownOwner = runRecord?.zSessionId || openCodeActiveRuns.get(runId)?.zSessionId || openCodeRunReconcile.get(runId)?.meta?.zSessionId
+    || [...openCodeSteeringRequests.values()].find(entry => entry.runId === runId)?.zSessionId;
+  if (!knownOwner || knownOwner !== zSessionId) return result(rows('failed', '无法验证原运行属于此会话，已保留待续接消息。'));
+  if ([...openCodeActiveRuns.values()].some(run => run.zSessionId === zSessionId) || openCodeSidecar?.hasRun(runId)) {
+    return result(rows('pending', '原任务仍在停止，请稍后重试。'));
+  }
+  const items = [];
+  for (const requestId of requestIds) {
+    const entry = openCodeSteeringRequests.get(JSON.stringify([runId, zSessionId, requestId]));
+    if (entry && !entry.settled) { items.push({ requestId, status: 'pending' }); continue; }
+    if (!entry) {
+      items.push(runRecord && !runRecord.requestIds.has(requestId)
+        ? { requestId, status: 'not-inserted' }
+        : { requestId, status: 'failed', error: '原引导回执已过期或未知，已阻止重复发送。' });
+      continue;
+    }
+    if (!entry.insertionAttempted) { items.push({ requestId, status: 'not-inserted' }); continue; }
+    try {
+      if (!openCodeSidecar) throw new Error('原内核已不可用，无法确认引导是否送达。');
+      const [item] = await openCodeSidecar.detachPendingGuidance({ runId, zSessionId, requestIds: [requestId] });
+      items.push(item || { requestId, status: 'failed', error: '内核未返回引导确认结果。' });
+    } catch (error) { items.push({ requestId, status: 'failed', error: error?.message || String(error) }); }
+  }
+  return result(items);
+});
 
 ipcMain.handle('opencode:interject', async (event, payload = {}) => {
   const runId = String(payload.runId || '');

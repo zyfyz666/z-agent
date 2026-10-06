@@ -22,8 +22,10 @@ const markers = {
   background: 'TEXT_WHILE_OTHER_CONVERSATION_OPEN_6438', done: 'GUIDED_FINISH_6438',
   pause: 'TIMELINE_PAUSE_6438', pauseBefore: 'TEXT_BEFORE_PAUSE_GUIDANCE_6438',
   pauseGuide: 'SENT_GUIDE_PAUSE_6438', pauseAfter: 'TEXT_AFTER_PAUSE_GUIDANCE_6438',
+  pauseAcknowledged: 'PAUSE_GUIDANCE_ACKNOWLEDGED_6438',
   branch: 'TIMELINE_BRANCH_6438', branchBefore: 'TEXT_BEFORE_BRANCH_GUIDANCE_6438',
   branchGuide: 'SENT_GUIDE_BRANCH_6438', branchAfter: 'TEXT_AFTER_BRANCH_GUIDANCE_6438',
+  branchAcknowledged: 'BRANCH_GUIDANCE_ACKNOWLEDGED_6438',
   file: 'TIMELINE_REAL_TOOL_OUTPUT_6438'
 };
 const report = { ok: false, checks: [], snapshots: [], requests: [], pageErrors: [], fixtureErrors: [] };
@@ -34,6 +36,8 @@ let fixtureFile;
 let started = false;
 let pauseStarted = false;
 let branchStarted = false;
+let pauseAcknowledged = false;
+let branchAcknowledged = false;
 let modelCalls = 0;
 let completedReplies = 0;
 let sessionA;
@@ -89,14 +93,24 @@ const server = http.createServer((request, response) => {
       report.requests.push({ stage, first: userText.includes(markers.first), second: userText.includes(markers.second),
         pauseGuide: userText.includes(markers.pauseGuide) });
       if (stage === 'branch') {
-        assert.equal(branchStarted, false, 'the branch stops without a model follow-up');
-        branchStarted = true;
-        return hold(response, 'branch', markers.branchBefore);
+        if (!branchStarted) {
+          branchStarted = true;
+          return hold(response, 'branch', markers.branchBefore);
+        }
+        assert.equal(branchAcknowledged, false, 'delivered branch guidance is not resubmitted after Stop');
+        assert.ok(userText.includes(markers.branchGuide));
+        branchAcknowledged = true;
+        return hold(response, 'branch-delivered', markers.branchAcknowledged);
       }
       if (stage === 'pause') {
-        assert.equal(pauseStarted, false, 'interruption stops the held response without a follow-up');
-        pauseStarted = true;
-        return hold(response, 'pause', markers.pauseBefore);
+        if (!pauseStarted) {
+          pauseStarted = true;
+          return hold(response, 'pause', markers.pauseBefore);
+        }
+        assert.equal(pauseAcknowledged, false, 'delivered guidance is not resubmitted after Stop');
+        assert.ok(userText.includes(markers.pauseGuide));
+        pauseAcknowledged = true;
+        return hold(response, 'pause-delivered', markers.pauseAcknowledged);
       }
       if (!started) {
         started = true;
@@ -144,11 +158,19 @@ async function send(text, enter = false) {
 async function waitText(marker) {
   await page.waitForFunction(marker => document.querySelector('#messages')?.textContent.includes(marker), marker, { timeout: 60_000 });
 }
-async function guidance(marker, enter = false) {
-  await send(marker, enter);
+async function guidance(marker) {
+  await page.locator('#composerInput').fill(marker);
+  await page.locator('#steerTurnBtn').click();
   await page.waitForFunction(marker => state.currentSession.messages.some(message => message.content === marker
     && ['queued', 'delivered'].includes(message.liveGuidance?.status)), marker, { timeout: 30_000 });
   return page.evaluate(marker => state.currentSession.messages.find(message => message.content === marker), marker);
+}
+async function confirmGuidanceBeforeStop(key, marker, acknowledged) {
+  finish(streams.get(key), { tool_calls: [{ index: 0, id: `call-${key}-guidance-read`, type: 'function',
+    function: { name: 'read', arguments: JSON.stringify({ filePath: fixtureFile }) } }] });
+  await page.waitForFunction(marker => state.currentSession.messages.some(message => message.content === marker
+    && message.liveGuidance?.status === 'delivered'), marker, { timeout: 40_000 });
+  await waitText(acknowledged);
 }
 async function settled(id) {
   await page.waitForFunction(id => !state.activeRuns.has(id), id, { timeout: 75_000 });
@@ -227,7 +249,7 @@ function boundary(session, messageIndex) {
     await send(`${markers.start}: Show your progress, then read ${fixtureFile} before finishing.`);
     await waitText(markers.before);
     const runId = await page.evaluate(id => state.activeRuns.get(id).runCtx.runId, sessionA.id);
-    const firstGuidance = await guidance(markers.first, true);
+    const firstGuidance = await guidance(markers.first);
     append('complete', markers.middle);
     await waitText(markers.middle);
     await page.reload();
@@ -272,10 +294,12 @@ function boundary(session, messageIndex) {
 
     await send(`${markers.pause}: Continue slowly so I can give guidance before stopping.`);
     await waitText(markers.pauseBefore);
-    await guidance(markers.pauseGuide, true);
+    await guidance(markers.pauseGuide);
     append('pause', markers.pauseAfter);
     const pauseOrder = [...completeOrder, markers.pauseBefore, markers.pauseGuide, markers.pauseAfter];
     await assertOrder('guidance in a second live run', pauseOrder);
+    await confirmGuidanceBeforeStop('pause', markers.pauseGuide, markers.pauseAcknowledged);
+    pauseOrder.push(markers.pauseAcknowledged);
     await page.locator('#composerInput').fill('UNSENT_TIMELINE_DRAFT_6438');
     await page.locator('#stopRunBtn').click();
     const paused = await settled(sessionA.id);
@@ -305,10 +329,12 @@ function boundary(session, messageIndex) {
       'inherited branch history has no live run handles');
     await send(`${markers.branch}: Continue this independent branch slowly.`);
     await waitText(markers.branchBefore);
-    await guidance(markers.branchGuide, true);
+    await guidance(markers.branchGuide);
     append('branch', markers.branchAfter);
     const branchOrder = [...pauseOrder, markers.branchBefore, markers.branchGuide, markers.branchAfter];
     await assertOrder('new branch guidance leaves inherited history in place', branchOrder);
+    await confirmGuidanceBeforeStop('branch', markers.branchGuide, markers.branchAcknowledged);
+    branchOrder.push(markers.branchAcknowledged);
     await page.locator('#composerInput').fill('UNSENT_BRANCH_DRAFT_6438');
     await page.locator('#stopRunBtn').click();
     const branchPaused = await settled(fork.session.id);

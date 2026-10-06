@@ -531,7 +531,7 @@ function historicalContent(messages) {
     assert.equal(busy.ok, false);
     assert.equal(busy.code, 'SESSION_REWIND_BUSY');
     await page.evaluate(text => { setComposerText(text); updateSendState(); }, `${runMarker('QUEUED')}: Reply with the queued fixture confirmation.`);
-    await page.locator('#queueTurnBtn').click();
+    await page.locator('#sendBtn').click();
     await page.waitForFunction(id => state.queuedTurns.has(id), source.id);
     const busyQueued = await page.evaluate(payload => z.rewindSession(payload), boundary(busySource));
     assert.equal(busyQueued.ok, false);
