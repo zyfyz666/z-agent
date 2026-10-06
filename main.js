@@ -69,6 +69,10 @@ const codeGraphRuntime = require('./lib/codegraph-runtime');
 const { plansRoot, writePlanDocument } = require('./lib/plan-document');
 const understandAnythingRuntime = require('./lib/understand-anything-runtime');
 const { LongTermMemoryStore, tokenize: tokenizeMemoryText } = require('./lib/long-term-memory');
+const { executeMemoryOperation } = require('./lib/memory-database');
+const { MemoryReviewQueue } = require('./lib/memory-review-jobs');
+const { createTaskMemoryApi } = require('./lib/task-memory-api');
+const { taskMemoryIdentity, taskSource, buildTaskProgressRecord, buildReviewJobPayload } = require('./lib/task-memory-service');
 const { SkillEvolutionStore } = require('./lib/skill-evolution');
 const { ContinualHarnessStore } = require('./lib/continual-harness');
 const { createUtilityLedger } = require('./lib/agi/utility');
@@ -1431,10 +1435,17 @@ const generatedImageStoreDir = path.join(dataDir, 'generated-images');
 const generatedVideoStoreDir = path.join(dataDir, 'generated-videos');
 const generatedMediaManifestDir = path.join(dataDir, 'generated-media');
 const memoryPath = path.join(dataDir, 'memory.json');
+const memoryDatabasePath = path.join(dataDir, 'memory.sqlite');
 const skillEvolutionPath = path.join(dataDir, 'skill-evolution.json');
 const continualHarnessPath = path.join(dataDir, 'harness', 'harness-state.json');
 const ZAGENT_DIR = '.zagent';
-const longTermMemory = new LongTermMemoryStore({ globalPath: memoryPath, zagentDir: ZAGENT_DIR });
+const longTermMemory = new LongTermMemoryStore({ globalPath: memoryPath, dbPath: memoryDatabasePath, zagentDir: ZAGENT_DIR, appRoot });
+const memoryReviewQueue = new MemoryReviewQueue({
+  dbPath: memoryDatabasePath,
+  execute: (file, operation, args) => executeMemoryOperation(file, operation, args, { appRoot }),
+  processJob: processQueuedMemoryReview,
+  onError: error => console.warn('[memory] background review:', error?.message || error)
+});
 const skillEvolution = new SkillEvolutionStore({ filePath: skillEvolutionPath });
 const continualHarness = new ContinualHarnessStore({ globalPath: continualHarnessPath, zagentDir: ZAGENT_DIR });
 const agiUtilityLedger = createUtilityLedger({ filePath: path.join(dataDir, 'agi', 'utility.json') });
@@ -6313,52 +6324,75 @@ ipcMain.handle('skills:remove-custom', (_e, id) => {
 
 async function recordLearningReview(payload = {}) {
   if (!payload.skillCandidate) return { ok: true, candidate: null, promotedSkill: null };
-  const recorded = skillEvolution.record(payload.skillCandidate, {
+  const applyInSession = typeof payload.applyInSession === 'function' ? payload.applyInSession : callback => callback();
+  const recorded = await applyInSession(() => skillEvolution.record(payload.skillCandidate, {
     verified: !!payload.verified,
     toolCallCount: payload.toolCallCount,
     runId: payload.runId,
     sessionId: payload.sessionId,
     workspace: payload.workspace
-  });
-  if (!recorded.ok) return { ...recorded, promotedSkill: null };
+  }));
+  if (!recorded?.ok || recorded.skipped) return { ...recorded, promotedSkill: null };
 
   const candidate = recorded.candidate;
-  const learnedId = `z-learned-${candidate.id.replace(/^z-(?:learned-)?/, '')}`;
-  const scope = payload.workspace ? 'workspace' : 'global';
-  const state = continualHarness.load({ scope, workspace: payload.workspace });
-  const existingHarnessSkill = state.entries.skill[learnedId];
-  const harnessEdit = {
-    action: existingHarnessSkill ? 'update' : 'create',
-    kind: 'skill',
-    id: learnedId,
-    title: candidate.name,
-    content: candidate.prompt,
-    path: 'learned',
-    scope,
-    metadata: {
-      status: recorded.ready ? 'active' : 'observing',
-      description: candidate.description,
-      triggers: candidate.triggers || [],
-      successfulRuns: candidate.successfulRuns,
-      evidenceCount: candidate.successfulRuns.length
-    },
-    reason: candidate.evidence
-  };
-  const harnessResult = await continualHarness.apply({
-    trigger: `Learn reusable Skill ${candidate.name}`,
-    evidence: candidate.evidence,
-    expectedOutcome: recorded.ready
-      ? 'Make the repeatedly verified procedure available as a Z Skill.'
-      : 'Observe the same procedure in another independent verified run before activation.',
-    edits: [harnessEdit]
-  }, {
-    scope,
-    workspace: payload.workspace,
-    expectedRevision: payload.harnessBaseline?.revision,
-    baselineState: payload.harnessBaseline,
-    runId: payload.runId,
-    sessionId: payload.sessionId,
-    source: 'background_review'
+  const requiresValidation = Boolean(candidate.verification?.postconditions?.length)
+    || process.env.Z_AGI_STRICT_SKILL_PROMOTION === '1';
+  let validationEvidence = null;
+  // A judge can take minutes. Keep all model calls outside the short session
+  // guard so the user can continue or rewind while validation is running.
+  if (recorded.ready && requiresValidation && !candidate.validation) {
+    const evidence = await validateSkillCandidate(candidate, payload.sidecar || null);
+    if (evidence.ok) validationEvidence = evidence;
+    else console.warn(`[agi] skill candidate ${candidate.id} failed validation: ${evidence.failed}/${evidence.passed + evidence.failed} checks passed`);
+  }
+  // Recheck the caller's revision immediately before every subsequent write.
+  // A rewind during validation returns skipped without promoting old results.
+  return await applyInSession(async () => {
+    if (validationEvidence) {
+      const latest = skillEvolution.list().find(item => item.id === candidate.id);
+      if (!latest || latest.prompt !== candidate.prompt
+        || JSON.stringify(latest.verification || null) !== JSON.stringify(candidate.verification || null)) {
+        return { ...recorded, skipped: true, reason: 'Skill candidate changed during validation.', promotedSkill: null };
+      }
+      const attached = skillEvolution.attachValidation(candidate.id, validationEvidence);
+      if (attached.ok) candidate.validation = attached.validation;
+    }
+    const learnedId = `z-learned-${candidate.id.replace(/^z-(?:learned-)?/, '')}`;
+    const scope = payload.workspace ? 'workspace' : 'global';
+    const state = continualHarness.load({ scope, workspace: payload.workspace });
+    const existingHarnessSkill = state.entries.skill[learnedId];
+    const harnessEdit = {
+      action: existingHarnessSkill ? 'update' : 'create',
+      kind: 'skill',
+      id: learnedId,
+      title: candidate.name,
+      content: candidate.prompt,
+      path: 'learned',
+      scope,
+      metadata: {
+        status: recorded.ready ? 'active' : 'observing',
+        description: candidate.description,
+        triggers: candidate.triggers || [],
+        successfulRuns: candidate.successfulRuns,
+        evidenceCount: candidate.successfulRuns.length
+      },
+      reason: candidate.evidence
+    };
+    const harnessResult = await continualHarness.apply({
+      trigger: `Learn reusable Skill ${candidate.name}`,
+      evidence: candidate.evidence,
+      expectedOutcome: recorded.ready
+        ? 'Make the repeatedly verified procedure available as a Z Skill.'
+        : 'Observe the same procedure in another independent verified run before activation.',
+      edits: [harnessEdit]
+    }, {
+      scope,
+      workspace: payload.workspace,
+      expectedRevision: payload.harnessBaseline?.revision,
+      baselineState: payload.harnessBaseline,
+      runId: payload.runId,
+      sessionId: payload.sessionId,
+      source: 'background_review'
   });
   if (!harnessResult.ok || !harnessResult.refinement?.appliedEdits?.some(edit => edit.applied)) {
     return { ...recorded, harnessResult, promotedSkill: null };
@@ -6371,22 +6405,8 @@ async function recordLearningReview(payload = {}) {
     return { ...recorded, harnessResult, promotedSkill: null };
   }
 
-  // P0-1 promotion gate: workflow-mined candidates (and everything under the
-  // strict env flag) must carry a passing Z Eval validation before the
-  // candidate may be projected into a real Skill. The validation is now real:
-  // static checks plus one headless judge session, whose evidence record is
-  // attached to the candidate and persisted for the topology gate.
-  const requiresValidation = Boolean(candidate.verification?.postconditions?.length)
-    || process.env.Z_AGI_STRICT_SKILL_PROMOTION === '1';
-  if (requiresValidation && !candidate.validation) {
-    const evidence = await validateSkillCandidate(candidate, payload.sidecar || null);
-    if (evidence.ok) {
-      const attached = skillEvolution.attachValidation(candidate.id, evidence);
-      if (attached.ok) candidate.validation = attached.validation;
-    } else {
-      console.warn(`[agi] skill candidate ${candidate.id} failed validation: ${evidence.failed}/${evidence.passed + evidence.failed} checks passed`);
-    }
-  }
+  // Workflow-mined candidates must carry the passing validation collected
+  // above before they can be projected into an executable Skill.
   const promotionGate = skillEvolution.canPromote(candidate.id, { requireValidation: requiresValidation });
   if (!promotionGate.ok) {
     await continualHarness.rollback(harnessResult.refinement.id, {
@@ -6454,6 +6474,7 @@ async function recordLearningReview(payload = {}) {
     evidence: `${candidate.successfulRuns.length} distinct verified runs reinforced this procedure and the Skill projection succeeded.`
   }, { scope, workspace: payload.workspace });
   return { ...recorded, harnessResult, promotedSkill };
+  });
 }
 
 ipcMain.handle('skills:market', () => skillRegistry.getMarketSkills(appRoot, dataDir));
@@ -7667,6 +7688,10 @@ ipcMain.handle('session:save', async (_e, session) => {
     // carry stale renderer snapshots, including snapshots from a previous tab.
     if (stored && Object.hasOwn(stored, 'browserState')) persisted.browserState = stored.browserState;
     else delete persisted.browserState;
+    // Checkpoints are written only by the authoritative native execution path.
+    // A stale renderer save must not erase them or supply a forged summary.
+    if (stored?.contextCheckpoints) persisted.contextCheckpoints = stored.contextCheckpoints;
+    else delete persisted.contextCheckpoints;
     if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
       if (stored && Array.isArray(stored.messages)) {
         const head = stored.messages.slice(0, session.messagesStart);
@@ -7741,6 +7766,54 @@ ipcMain.handle('session:delete', async (_e, payload) => {
 // ---------------------------------------------------------------------------
 // IPC: Long-term memory (global/machine/workspace, selectively retrieved)
 // ---------------------------------------------------------------------------
+const taskMemoryApi = createTaskMemoryApi({
+  store: longTermMemory, readSession: readSessionRecord, withSessionWrite,
+  readUsage: identity => memoryReviewQueue.operation('usage-get', identity),
+  readJobs: identity => memoryReviewQueue.operation('list', identity)
+});
+ipcMain.handle('memory:task-list', (_event, payload) => taskMemoryApi.list(payload));
+ipcMain.handle('memory:task-update', (_event, payload) => taskMemoryApi.update(payload));
+ipcMain.handle('memory:task-delete', (_event, payload) => taskMemoryApi.remove(payload));
+
+async function persistTaskContextCheckpoint(sessionId, checkpoint, revision) {
+  if (!checkpoint || checkpoint.sessionId !== sessionId || checkpoint.branchId !== sessionId
+    || checkpoint.conversationRevision !== revision || checkpoint.boundaryVerified !== true
+    || !/^[a-f0-9]{64}$/.test(String(checkpoint.checkpointHash || ''))
+    || JSON.stringify(checkpoint).length > 180_000) return;
+  return withSessionWrite(sessionId, async () => {
+    const stored = await readSessionRecord(sessionId, { sessionLocked: true });
+    if (!stored || sessionConversationRevision(stored) !== revision) return;
+    const previous = Array.isArray(stored.contextCheckpoints) ? stored.contextCheckpoints : [];
+    stored.contextCheckpoints = [...previous.filter(item => item.checkpointHash !== checkpoint.checkpointHash), checkpoint].slice(-8);
+    await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(stored, null, 2));
+  });
+}
+
+async function persistTaskProgress({ sessionId, request, result, runId, runStartedAt }) {
+  if (!isSafeSessionId(sessionId)) return;
+  return withSessionWrite(sessionId, async () => {
+    const stored = await readSessionRecord(sessionId, { sessionLocked: true });
+    if (!stored || sessionConversationRevision(stored) !== request.conversationRevision) return;
+    const identity = taskMemoryIdentity(stored);
+    const previous = longTermMemory.list(identity).find(item => item.type === 'work_state');
+    const record = buildTaskProgressRecord({ session: stored, request, result, runId, runStartedAt, previous });
+    if (record) addMemoryRecord(record, { ...identity, ...record, sourceKind: 'task_snapshot' });
+  });
+}
+
+async function processQueuedMemoryReview(job, context = {}) {
+  if (isQuiting) return { ok: false, error: '应用正在退出，稍后继续整理。' };
+  if (context.isCurrent && !context.isCurrent()) return { skipped: true, reason: '记忆整理已停止。' };
+  const session = await readSessionRecord(job.sessionId);
+  if (!session || sessionConversationRevision(session) !== job.conversationRevision) {
+    return { skipped: true, reason: '来源对话已删除或回退，旧记忆整理已取消。' };
+  }
+  return withOpenCodeBackgroundLease(async () => {
+    const sidecar = await ensureOpenCodeSidecar(getOpenCodeRuntimeConfig(loadConfig()));
+    return reviewCompletedRunMemory({ ...job.payload, sidecar, isCurrent: context.isCurrent });
+  });
+}
+
 function addMemoryRecord(record = {}, options = {}) {
   const workspace = String(options.workspace || record.workspace || '').trim();
   const defaultScope = record.scope || (workspace ? 'workspace' : 'global');
@@ -7750,7 +7823,11 @@ function addMemoryRecord(record = {}, options = {}) {
     sourceKind: options.sourceKind || record.sourceKind,
     sessionId: options.sessionId || record.sessionId,
     runId: options.runId || record.runId,
-    refinementId: options.refinementId || record.refinementId
+    refinementId: options.refinementId || record.refinementId,
+    conversationRevision: options.conversationRevision ?? record.conversationRevision,
+    runStartedAt: options.runStartedAt ?? record.runStartedAt,
+    sourceMessageId: options.sourceMessageId || record.sourceMessageId,
+    sourceMessageIndex: options.sourceMessageIndex ?? record.sourceMessageIndex
   });
   // P0-5 simplified forgetting runs at write time (throttled): it only reduces
   // confidence on stale low-frequency entries and never deletes or touches
@@ -7775,23 +7852,35 @@ async function reviewCompletedRunMemory({
   workspace,
   zSessionId,
   runId,
+  runStartedAt,
   harnessBaselines,
+  refinementRequest,
+  isCurrent = () => true,
   evolutionMode = false
 }) {
   try {
-    const refineRequest = evolutionMode ? consumeHarnessRefinementRequest(runId) : null;
+    const applyInSession = callback => withSessionWrite(zSessionId, async () => {
+      const currentSession = await readSessionRecord(zSessionId, { sessionLocked: true });
+      if (!isCurrent() || !currentSession || sessionConversationRevision(currentSession) !== request.conversationRevision) {
+        return { ok: true, skipped: true, reason: '来源对话已回退或整理已停止，丢弃旧整理结果。' };
+      }
+      return callback(currentSession);
+    });
+    const refineRequest = evolutionMode ? (refinementRequest ?? consumeHarnessRefinementRequest(runId)) : null;
     if (refineRequest?.action === 'rollback') {
-      const targetState = continualHarness.load({ scope: refineRequest.scope, workspace });
-      const target = targetState.refinements.find(item => item.id === refineRequest.rollbackId);
-      const rollback = await continualHarness.rollback(refineRequest.rollbackId, {
-        scope: refineRequest.scope,
-        workspace,
-        source: 'explicit_user_rollback',
-        evidence: refineRequest.instructions
+      return await applyInSession(async () => {
+        const targetState = continualHarness.load({ scope: refineRequest.scope, workspace });
+        const target = targetState.refinements.find(item => item.id === refineRequest.rollbackId);
+        const rollback = await continualHarness.rollback(refineRequest.rollbackId, {
+          scope: refineRequest.scope,
+          workspace,
+          source: 'explicit_user_rollback',
+          evidence: refineRequest.instructions
       });
       if (rollback.ok) rollbackHarnessProjection(target, workspace);
       if (!rollback.ok) console.warn(`[harness] rollback ${refineRequest.rollbackId} failed: ${rollback.error}`);
-      return;
+      return { ok: rollback.ok, error: rollback.error };
+      });
     }
     // Persist an explicit user policy before consulting the isolated reviewer.
     // Reviewer output is enrichment only; a provider/schema failure must never
@@ -7804,14 +7893,15 @@ async function reviewCompletedRunMemory({
     let directPolicyResult = null;
     if (evolutionMode && explicitPolicy?.text) {
       const policyScope = refineRequest?.scope === 'workspace' && workspace ? 'workspace' : 'global';
-      directPolicyResult = await persistExplicitUserPolicy({
+      directPolicyResult = await applyInSession(() => persistExplicitUserPolicy({
         instructions: explicitPolicy.text,
         scope: policyScope,
         workspace,
         runId,
         sessionId: zSessionId,
         source: refineRequest ? 'agent_refine' : 'explicit_user_policy'
-      });
+      }));
+      if (directPolicyResult.skipped) return directPolicyResult;
       if (!directPolicyResult.ok) {
         console.warn(`[harness] explicit policy was not activated for run ${runId}: ${directPolicyResult.error}`);
       }
@@ -7833,60 +7923,79 @@ async function reviewCompletedRunMemory({
       harnessOverview: evolutionMode ? continualHarness.overview({ workspace, query: prompt }) : '',
       userRequestedFinish: result?.userRequestedFinish === true
     });
-    // The direct policy above is the authoritative representation of an
-    // explicit user instruction. Do not create a second competing candidate
-    // from the reviewer for the same request.
-    const reviewForHarness = explicitPolicy?.text
-      ? { ...review, harnessCandidates: [] }
-      : review;
-    const harnessResults = evolutionMode
-      ? await applyReviewedHarnessState(reviewForHarness, {
-        workspace,
-        sessionId: zSessionId,
-        runId,
-        harnessBaselines,
-        refineInstructions: refineRequest?.instructions || '',
-        verifiedSuccess: result?.status === 'done'
-          && (Array.isArray(result?.todos) ? result.todos : []).every(todo => todo?.done === true)
-      })
-      : [];
-    if (evolutionMode) await recordReviewedRefinementOutcomes(review, workspace);
-    const memoryResults = evolutionMode
-      ? harnessResults.flatMap(item => item.memories.map(({ record }) => addMemoryRecord(record, {
-        workspace,
-        sourceKind: refineRequest ? 'agent_refine' : 'background_review',
-        sessionId: zSessionId,
-        runId,
-        refinementId: item.result?.refinement?.id
-      })))
-      : (Array.isArray(review?.memories) ? review.memories.map(memory => addMemoryRecord(memory, {
-        workspace,
-        sourceKind: 'background_review',
-        sessionId: zSessionId,
-        runId
-      })) : []);
-    // Continuity card: one superseding record per workspace so a new task in
-    // the same workspace starts from where this run stopped.
-    if (review?.workState && workspace) {
-      const workStateResult = addMemoryRecord({
-        key: 'work.state.current',
-        type: 'work_state',
-        scope: 'workspace',
-        content: review.workState.content,
-        confidence: 0.9,
-        evidence: review.workState.evidence,
-        basis: 'project_artifact',
-        verified: true,
-        durable: true,
-        sensitive: false,
-        transient: false
-      }, { workspace, sourceKind: 'work_state', sessionId: zSessionId, runId });
-      if (!workStateResult?.ok) {
-        console.warn(`[memory] work state was not stored for run ${runId}: ${workStateResult?.error || 'unknown error'}`);
+    if (review?.error) return { ok: false, error: review.error };
+    // Review runs outside the task. Re-check the saved boundary after the model
+    // returns, and hold the session write queue while applying its result.
+    const applied = await applyInSession(async currentSession => {
+      // The direct policy above is the authoritative representation of an
+      // explicit user instruction. Do not create a second competing candidate
+      // from the reviewer for the same request.
+      const reviewForHarness = explicitPolicy?.text
+        ? { ...review, harnessCandidates: [] }
+        : review;
+      const harnessResults = evolutionMode
+        ? await applyReviewedHarnessState(reviewForHarness, {
+          workspace,
+          sessionId: zSessionId,
+          runId,
+          harnessBaselines,
+          refineInstructions: refineRequest?.instructions || '',
+          verifiedSuccess: result?.status === 'done'
+            && (Array.isArray(result?.todos) ? result.todos : []).every(todo => todo?.done === true)
+        })
+        : [];
+      if (evolutionMode) await recordReviewedRefinementOutcomes(review, workspace);
+      if (!isCurrent()) return { ok: true, skipped: true, reason: '记忆整理已停止，丢弃旧整理结果。' };
+      const memoryResults = evolutionMode
+        ? harnessResults.flatMap(item => item.memories.map(record => addMemoryRecord(record, {
+          workspace,
+          sourceKind: refineRequest ? 'agent_refine' : 'background_review',
+          sessionId: zSessionId,
+          runId,
+          refinementId: item.result?.refinement?.id,
+          conversationRevision: request.conversationRevision, runStartedAt,
+          sourceMessageId: request.sourceMessageId, sourceMessageIndex: request.requestMessageIndex
+        })))
+        : (Array.isArray(review?.memories) ? review.memories.map(memory => addMemoryRecord(memory, {
+          workspace,
+          sourceKind: 'background_review',
+          sessionId: zSessionId,
+          runId, conversationRevision: request.conversationRevision, runStartedAt,
+          sourceMessageId: request.sourceMessageId, sourceMessageIndex: request.requestMessageIndex
+        })) : []);
+      // The review enriches only this task's current revision. It cannot replace
+      // another task's progress or a newer run that completed while it waited.
+      if (review?.workState && zSessionId) {
+        const identity = taskMemoryIdentity(currentSession);
+        const previous = longTermMemory.list(identity).find(item => item.type === 'work_state');
+        const workStateResult = addMemoryRecord({
+          key: 'work.state.current',
+          type: 'work_state',
+          scope: 'task',
+          content: review.workState.content,
+          confidence: 0.9,
+          evidence: review.workState.evidence,
+          basis: 'reviewed_task_snapshot',
+          verified: false,
+          taskState: previous?.taskState || null,
+          durable: true,
+          sensitive: false,
+          transient: false
+        }, { workspace, sourceKind: 'work_state', sessionId: zSessionId, runId,
+          conversationRevision: request.conversationRevision, runStartedAt,
+          sourceMessageId: request.sourceMessageId, sourceMessageIndex: request.requestMessageIndex });
+        if (!workStateResult?.ok) {
+          console.warn(`[memory] work state was not stored for run ${runId}: ${workStateResult?.error || 'unknown error'}`);
+        }
       }
-    }
+      const stored = memoryResults.filter(item => item?.ok).length;
+      if (stored > 0) console.log(`[memory] stored ${stored} durable record(s) from run ${runId}`);
+      return { ok: true, stored };
+    });
+    if (applied.skipped) return applied;
     if (evolutionMode && review?.skillCandidate) {
       await recordLearningReview({
+        applyInSession,
         sidecar,
         skillCandidate: review.skillCandidate,
         verified: result?.status === 'done'
@@ -7905,16 +8014,15 @@ async function reviewCompletedRunMemory({
     // reviewer, so its own failure never blocks the rest of the pipeline.
     if (evolutionMode) {
       try {
-        await attributeHarnessUsage({ runId, workspace, sessionId: zSessionId, result });
+        await applyInSession(() => attributeHarnessUsage({ runId, workspace, sessionId: zSessionId, result }));
       } catch (error) {
         console.warn(`[harness] usage attribution failed for run ${runId}:`, error?.message || error);
       }
     }
-    const stored = memoryResults.filter(item => item?.ok).length;
-    if (stored > 0) console.log(`[memory] stored ${stored} durable record(s) from run ${runId}`);
-    if (review?.error) console.warn(`[memory] review skipped for run ${runId}: ${review.error}`);
+    return applied;
   } catch (error) {
     console.warn(`[memory] non-fatal review failure for run ${runId}:`, error?.message || error);
+    return { ok: false, error: String(error?.message || error) };
   }
 }
 
@@ -9696,6 +9804,7 @@ ipcMain.handle('opencode:compress-session', async (_e, { zSessionId } = {}) => {
 
 ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
   const admittedRunId = String(request.runId || crypto.randomUUID());
+  const runStartedAt = Date.now();
   let admissionPending = false;
   let coreTurnStarted = false;
   let coreTurn = null;
@@ -9715,6 +9824,9 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     }
     assertConversationRevision(authoritativeSession, request.conversationRevision);
     request.conversationRevision = sessionConversationRevision(authoritativeSession);
+    request.branchId = String(authoritativeSession?.id || request.zSessionId || '');
+    request.contextCheckpoints = Array.isArray(authoritativeSession?.contextCheckpoints) ? authoritativeSession.contextCheckpoints : [];
+    delete request.taskMemoryContext;
     delete request.forkHistory;
     const forkContext = forkRunContext(authoritativeSession, request);
     if (forkContext) Object.assign(request, forkContext);
@@ -9780,9 +9892,15 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     for (const key of Object.keys(request)) if (!(key in isolated)) delete request[key];
     Object.assign(request, isolated);
     const agiMode = agiEnabled(request);
-    const retrievedMemory = request.utility || forkContext
+    const memoryIdentity = taskMemoryIdentity(authoritativeSession || runWorkspaceSession);
+    memoryIdentity.workspace = workspace;
+    const memorySource = taskSource(authoritativeSession || runWorkspaceSession, request, admittedRunId, runStartedAt);
+    request.sourceMessageId = memorySource.sourceMessageId;
+    request.requestMessageIndex = memorySource.sourceMessageIndex;
+    const retrievedMemory = request.utility
       ? { context: '' }
       : longTermMemory.query({
+        ...memoryIdentity,
         query: memoryQuery,
         workspace,
         maxChars: 3_600,
@@ -9792,7 +9910,12 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       });
     const runId = admittedRunId;
     const zSessionId = String(request.zSessionId || '');
-    const runStartedAt = Date.now();
+    request.taskMemoryContext = (retrievedMemory.memories || []).find(item => item.type === 'work_state')?.taskState || null;
+    if (!request.utility && zSessionId) {
+      memoryReviewQueue.operation('usage-save', { ...memoryIdentity, runId, now: runStartedAt,
+        items: retrievedMemory.memories || [] });
+      await persistTaskProgress({ sessionId: zSessionId, request, runId, runStartedAt });
+    }
     // Self-evolution runs on its own mode and inside AGI mode (the dual chain
     // the user selected): only these modes create and promote new experience.
     const evolutionMode = evolutionEnabled(request);
@@ -10020,6 +10143,10 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     };
     const emitOpenCodeEvent = event => {
       if (event?.type === 'z.opencode.started') void recordForkBinding(event.data?.sessionID);
+      if (event?.type === 'z.context.checkpoint') {
+        void persistTaskContextCheckpoint(zSessionId, event.data?.checkpoint, request.conversationRevision)
+          .catch(error => console.warn('[memory] checkpoint could not be saved:', error?.message || error));
+      }
       if (event?.type === 'z.delivery.contract.updated') {
         const activeRun = openCodeActiveRuns.get(runId);
         if (activeRun) activeRun.deliveryContract = event.data?.contract || null;
@@ -10227,24 +10354,23 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         }
       }
       completeOpenCodeReconcileRun(runId, completedResult);
+      if (!request.utility) {
+        await persistTaskProgress({ sessionId: zSessionId, request, result, runId, runStartedAt })
+          .catch(error => console.warn('[memory] task progress could not be saved:', error?.message || error));
+      }
       if (mainWindow && !mainWindow.isDestroyed() && mainRendererReady) {
         mainWindow.webContents.send('opencode:completed', { runId, result: completedResult });
       }
       if (!request.utility && ['done', 'error'].includes(result?.status) && result?.userRequestedFinish !== true) {
-        void withOpenCodeBackgroundLease(() => reviewCompletedRunMemory({
-          sidecar,
-          selection,
-          request,
-          result,
-          prompt,
-          workspace,
-          zSessionId,
-          runId,
-          harnessBaselines,
-          evolutionMode
-        }));
+        try {
+          const reviewPayload = buildReviewJobPayload({ session: authoritativeSession || runWorkspaceSession,
+            selection, request, result, prompt, workspace, runId, runStartedAt, harnessBaselines, evolutionMode,
+            refinementRequest: evolutionMode ? consumeHarnessRefinementRequest(runId) : null });
+          memoryReviewQueue.enqueue({ id: runId, sessionId: zSessionId,
+            conversationRevision: request.conversationRevision, payload: reviewPayload });
+        } catch (error) { console.warn('[memory] review could not be queued:', error?.message || error); }
       }
-    }).catch(error => {
+    }).catch(async error => {
       console.error(`[opencode] Run ${runId} failed:`, error);
       flushOpenCodeRendererEvents(runId);
       const failedResult = {
@@ -10262,6 +10388,10 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       };
       if (coreTurnStarted) zCore.completeTurn(runId, failedResult);
       completeOpenCodeReconcileRun(runId, failedResult);
+      if (!request.utility) {
+        await persistTaskProgress({ sessionId: zSessionId, request, result: failedResult, runId, runStartedAt })
+          .catch(memoryError => console.warn('[memory] failed task progress could not be saved:', memoryError?.message || memoryError));
+      }
       if (mainWindow && !mainWindow.isDestroyed() && mainRendererReady) {
         mainWindow.webContents.send('opencode:completed', {
           runId,
@@ -10391,6 +10521,32 @@ async function mutateSessionIntent(intentId, method) {
     return { ok: false, error: error?.message || String(error), code: error?.code };
   }
 }
+
+ipcMain.handle('z:core-prepare-guidance-intent', async (_e, payload = {}) => {
+  const sessionId = String(payload.sessionId || '');
+  if (!isSafeSessionId(sessionId)) return { ok: false, error: '会话无效。' };
+  if (sessionRewindOperations.has(sessionId)) return { ok: false, error: '对话正在回退或恢复。', code: 'SESSION_REWIND_BUSY' };
+  try {
+    return await withSessionWrite(sessionId, async () => {
+      const stored = await readSessionRecord(sessionId, { sessionLocked: true });
+      if (!stored) return { ok: false, error: '会话不存在。' };
+      assertConversationRevision(stored, payload.conversationRevision);
+      const runId = String(payload.runId || '');
+      const requestId = String(payload.requestId || '');
+      const active = openCodeActiveRuns.get(runId);
+      const record = zCore.state?.intents?.[String(payload.intentId || '')];
+      if (!active || active.zSessionId !== sessionId || active.cancelRequested || active.visionAbortController?.signal?.aborted
+        || !record || record.threadId !== sessionId || !requestId || requestId.length > 160) {
+        return { ok: false, error: '当前任务已结束或排队消息不可用，消息仍保留在队列中。', code: 'STEERING_STALE' };
+      }
+      assertConversationRevision(stored, record.intent?.conversationRevision);
+      const intent = zCore.prepareGuidanceIntent({ intentId: record.id, threadId: sessionId, runId, requestId });
+      if (!intent) return { ok: false, error: '消息已发送或任务正在停止。', code: 'STEERING_STALE' };
+      rememberOpenCodeGuidanceRun(runId, sessionId);
+      return { ok: true, intent };
+    });
+  } catch (error) { return { ok: false, error: error?.message || String(error), code: error?.code }; }
+});
 
 ipcMain.handle('z:core-consume-intent', (_e, intentId) => mutateSessionIntent(intentId, 'consumeIntent'));
 
@@ -10799,6 +10955,7 @@ app.whenReady().then(async () => {
   await migrateLegacyDataDir();
   ensureDirs();
   initializeZCore();
+  if (!isE2EMode) memoryReviewQueue.start();
   try {
     const recoveredTurns = zCore.recoverInterruptedTurns();
     if (recoveredTurns.length) {
@@ -10858,6 +11015,7 @@ app.on('window-all-closed', (e) => {
 // 真正退出时清理托盘和 MCP 服务器
 app.on('before-quit', () => {
   isQuiting = true;
+  try { memoryReviewQueue.stop(); } catch (error) { console.warn('[memory] review queue shutdown:', error?.message || error); }
   if (e2eParentWatchdog) {
     clearInterval(e2eParentWatchdog);
     e2eParentWatchdog = null;

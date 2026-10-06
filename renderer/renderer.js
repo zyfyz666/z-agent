@@ -1931,6 +1931,9 @@ function openSessionSidebarMenu(anchor, sessionId, position) {
     label: '对话存储位置', icon: ICONS.folder,
     onSelect: () => openSessionStorageDialog(session, anchor)
   }, {
+    label: '任务记忆', icon: ICONS.folder,
+    onSelect: () => openTaskMemoryDialog(session, anchor)
+  }, {
     label: session.pinned ? '取消置顶任务' : '置顶任务',
     icon: ICONS.pin,
     onSelect: () => toggleSessionPinnedFromSidebar(session)
@@ -6905,6 +6908,7 @@ function enqueueQueuedTurn(queued) {
 }
 
 function queuedGuidanceSource(queued) {
+  if (!queued?.guidanceContinuation?.requestId || !queued.guidanceContinuation.runId) return undefined;
   return queued?.sessionRef?.messages?.find(message =>
     message.liveGuidance?.requestId === queued.guidanceContinuation?.requestId
     && message.liveGuidance.runId === queued.guidanceContinuation?.runId);
@@ -6922,15 +6926,16 @@ async function updateQueuedGuidanceContinuation(queued, phase, error = '') {
   await saveCurrentSession(queued.sessionRef);
 }
 
-function captureStoppedGuidanceContinuations(runCtx) {
+function captureStoppedGuidanceContinuations(runCtx, { queueOriginsOnly = false } = {}) {
   const session = runCtx.sessionRef || state.activeRuns.get(runCtx.sessionId)?.sessionRef;
   if (!session) return;
   let captured = false;
   for (const message of session.messages || []) {
     const guidance = message.liveGuidance;
+    if (queueOriginsOnly && !guidance?.queueIntentId) continue;
     if (guidance?.runId !== runCtx.runId || guidance.deliveryEvidence === 'provider-response'
       || !['pending', 'queued'].includes(guidance.status) || guidance.continuationIntentId) continue;
-    const id = createQueuedTurnId();
+    const id = guidance.queueIntentId || createQueuedTurnId();
     guidance.continuationIntentId = id;
     guidance.continuationStatus = 'pending';
     enqueueQueuedTurn({
@@ -6939,10 +6944,11 @@ function captureStoppedGuidanceContinuations(runCtx) {
       skillCalls: (message.skillCalls || []).map(item => ({ ...item })),
       subagentRoles: [...(message.subagentRoles || [])],
       modelSelection: normalizeModelSelectionSnapshot(message.modelSelection || runCtx.modelSelection || getAgentModelSelection(session)),
-      queuedAt: Number(message.ts) || Date.now(),
+      queuedAt: Number(guidance.queuedAt || message.ts) || Date.now(),
       guidanceContinuation: { runId: runCtx.runId, requestId: guidance.requestId,
         ...(guidance.nativeMessageId ? { nativeMessageId: guidance.nativeMessageId } : {}) }
     });
+    if (guidance.queueIntentId) void invokeZCore('zCoreRequeueIntent', id).catch(() => {});
     refreshLiveGuidanceStatus(session, message);
     captured = true;
   }
@@ -6992,10 +6998,14 @@ async function prepareQueuedGuidanceContinuations(session) {
         await invokeZCore('zCoreDeleteIntent', queued.id, 'guidance_already_delivered').catch(() => {});
       } else if (['detached', 'not-inserted'].includes(item?.status)) {
         queued.guidanceDetached = true;
+        delete queued.guidanceVerificationFailed;
+        delete queued.guidanceVerificationError;
         await updateQueuedGuidanceContinuation(queued, 'queued');
       } else {
         ready = false;
         const error = item?.error || result?.error || '等待原任务停止并核实引导是否送达';
+        queued.guidanceVerificationFailed = item?.status !== 'pending';
+        queued.guidanceVerificationError = error;
         queued.retryAfter = Date.now() + (item?.status === 'pending' ? 1000 : 5000);
         await updateQueuedGuidanceContinuation(queued, item?.status === 'pending' ? 'pending' : 'failed', error);
         if (item?.status !== 'pending' && !queued.guidanceDetachWarningShown) {
@@ -7012,26 +7022,47 @@ function syncQueuedTurnUi() {
   const host = $('#queuedTurnHost');
   if (!host) return;
   const sessionId = String(state.currentSession?.id || '');
-  const queued = sessionId ? state.queuedTurns.get(sessionId) : null;
-  host.classList.toggle('hidden', !queued);
-  host.dataset.sessionId = queued ? sessionId : '';
-  const count = queuedTurnsForSession(sessionId).length;
-  host.dataset.queueCount = String(count);
-  const label = host.querySelector('.queued-turn-label');
-  if (label) label.textContent = count > 1 ? `${count} 条排队对话` : '排队对话';
-  const verifyingGuidance = !!queued?.guidanceContinuation && !queued.guidanceDetached
-    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true;
-  for (const selector of ['#queuedTurnEdit', '#queuedTurnRemove']) {
-    const button = $(selector);
-    if (button) button.disabled = verifyingGuidance;
+  const turns = queuedTurnsForSession(sessionId);
+  host.classList.toggle('hidden', !turns.length);
+  host.dataset.sessionId = turns.length ? sessionId : '';
+  host.dataset.queueCount = String(turns.length);
+  const rows = turns.map(queued => {
+    const guidance = queuedGuidanceSource(queued)?.liveGuidance;
+    const verifying = !!queued.guidanceContinuation && !queued.guidanceDetached
+      && guidance?.nativeDetached !== true;
+    const detail = [queued.text, ...(queued.attachments || []).map(item => item.name),
+      ...(queued.skillCalls || []).map(item => `$${item.name || item.id}`),
+      ...(queued.subagentRoles || []).map(id => `￥${SUBAGENT_ROLE_LABELS[id] || id}`)].filter(Boolean).join(' · ');
+    return { id: queued.id, detail, busy: queued.steering === true, verifying,
+      failedVerification: guidance?.continuationStatus === 'failed' || queued.guidanceVerificationFailed === true,
+      verificationError: queued.guidanceVerificationError || guidance?.continuationError || '',
+      guideReason: queuedTurnGuidanceUnavailable(queued, sessionId) };
+  });
+  const renderKey = JSON.stringify([sessionId, rows]);
+  if (host.dataset.renderKey !== renderKey) {
+    host.dataset.renderKey = renderKey;
+    host.innerHTML = rows.map((row, index) => `<div class="queued-turn-row conversation-preview-row" data-queued-turn-id="${escapeAttr(row.id)}">
+      <div class="queued-turn-copy"><span class="queued-turn-label" title="${escapeAttr(row.verificationError)}">${row.busy ? '正在转为引导…' : row.verifying ? row.failedVerification ? '引导送达未确认，可取回编辑' : '等待确认引导状态' : '排队对话'}</span><span class="queued-turn-preview" data-preserve-language title="${escapeAttr(row.detail)}">${escapeHtml(row.detail)}</span></div>
+      <span class="queued-turn-actions">
+        <button ${index === 0 ? 'id="queuedTurnSteer"' : ''} class="queued-turn-steer" type="button" data-queued-action="steer" ${row.guideReason ? 'disabled' : ''} title="${escapeAttr(row.guideReason || '将这条排队消息转为引导')}" aria-label="将这条排队消息转为引导">转为引导</button>
+        <button ${index === 0 ? 'id="queuedTurnEdit"' : ''} class="capability-dialog-close" type="button" data-queued-action="edit" ${row.busy || (row.verifying && !row.failedVerification) ? 'disabled' : ''} title="编辑排队对话" aria-label="编辑排队对话"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m13.5 7.5 3 3"/></svg></button>
+        <button ${index === 0 ? 'id="queuedTurnRemove"' : ''} class="capability-dialog-close" type="button" data-queued-action="remove" ${row.busy || (row.verifying && !row.failedVerification) ? 'disabled' : ''} title="删除排队对话" aria-label="删除排队对话"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </span></div>`).join('');
   }
-  const detail = queued
-    ? [queued.text, ...(queued.attachments || []).map(item => item.name), ...(queued.skillCalls || []).map(item => `$${item.name || item.id}`), ...(queued.subagentRoles || []).map(id => `￥${SUBAGENT_ROLE_LABELS[id] || id}`)]
-        .filter(Boolean)
-        .join(' · ')
-    : '';
-  host.title = detail ? `${count > 1 ? '下一条：' : ''}${detail}` : '排队对话';
-  host.setAttribute('aria-label', detail ? `${count} 条排队对话，下一条：${detail}` : '排队对话');
+  host.removeAttribute('title');
+  host.setAttribute('aria-label', `${turns.length} 条排队对话`);
+}
+
+function queuedTurnGuidanceUnavailable(queued, sessionId) {
+  if (queued.steering) return '正在转为引导，请稍候';
+  if (queued.guidanceContinuation && !queued.guidanceDetached
+    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true) return '正在确认原任务中的引导状态';
+  const runCtx = state.activeRuns.get(String(sessionId))?.runCtx;
+  if (!runCtx?.runId || runCtx.shouldAbort) return '当前没有可接收引导的运行，消息将按顺序发送';
+  if ((queued.skillCalls || []).length || (queued.subagentRoles || []).length) return '含技能或子代理的消息需要作为后续对话发送';
+  if ((queued.modelSelection?.modelType && queued.modelSelection.modelType !== 'text')
+    || (runCtx.modelSelection?.modelType && runCtx.modelSelection.modelType !== 'text')) return '图片或视频生成任务不支持中途引导';
+  return '';
 }
 
 function clearComposerPayload() {
@@ -7118,6 +7149,12 @@ function applyLiveGuidanceStatus(runCtx, event) {
   Object.assign(guidance, { status: data.status,
     ...(data.status === 'delivered' ? { deliveryEvidence: data.deliveryEvidence, deliveredAt: data.deliveredAt, error: '' }
       : { error: String(data.error || '未确认送入模型') }) });
+  if (data.status === 'delivered' && guidance.queueIntentId) {
+    const queued = queuedTurnsForSession(session.id).find(item => item.id === guidance.queueIntentId);
+    if (queued) removeQueuedTurn(session.id, queued);
+    void invokeZCore('zCoreAckIntent', guidance.queueIntentId).catch(() => {});
+    syncQueuedTurnUi(); updateSendState();
+  }
   if (data.status === 'delivered' && guidance.continuationIntentId) {
     guidance.continuationStatus = 'delivered';
     const queued = queuedTurnsForSession(session.id).find(item => item.id === guidance.continuationIntentId);
@@ -7132,6 +7169,9 @@ function applyLiveGuidanceStatus(runCtx, event) {
 }
 
 function settleLiveGuidanceStatuses(runCtx) {
+  if (runCtx?.sessionRef && typeof captureStoppedGuidanceContinuations === 'function') {
+    captureStoppedGuidanceContinuations(runCtx, { queueOriginsOnly: true });
+  }
   for (const message of runCtx?.sessionRef?.messages || []) {
     if (message.liveGuidance?.runId !== runCtx.runId || message.liveGuidance.continuationIntentId
       || !['pending', 'queued'].includes(message.liveGuidance.status)) continue;
@@ -7141,31 +7181,34 @@ function settleLiveGuidanceStatuses(runCtx) {
   }
 }
 
-async function steerCurrentComposerTurn() {
-  const selectedSession = state.currentSession;
+async function steerCurrentComposerTurn(options = {}) {
+  const fromQueue = options.queued;
+  const selectedSession = fromQueue?.sessionRef || state.currentSession;
   const sessionId = String(selectedSession?.id || '');
   const entry = state.activeRuns.get(sessionId);
   const runCtx = entry?.runCtx;
   const session = entry?.sessionRef || selectedSession;
-  syncComposerSkillsFromDom();
-  syncComposerSubagentsFromDom();
-  const text = getComposerText().trim();
-  const attachments = state.attachments.map(item => ({ ...item }));
+  if (options.runId && runCtx?.runId !== options.runId) return false;
+  if (!fromQueue) { syncComposerSkillsFromDom(); syncComposerSubagentsFromDom(); }
+  const text = String(fromQueue ? fromQueue.text : getComposerText()).trim();
+  const attachments = (fromQueue ? fromQueue.attachments || [] : state.attachments).map(item => ({ ...item }));
   if (!sessionId || !runCtx?.runId || runCtx.shouldAbort || (!text && !attachments.length)) return false;
-  if (state.selectedSkills.length || state.selectedSubagents.length) return false;
+  if (fromQueue ? (fromQueue.skillCalls || []).length || (fromQueue.subagentRoles || []).length
+    : state.selectedSkills.length || state.selectedSubagents.length) return false;
   const modelSelection = normalizeModelSelectionSnapshot(runCtx.modelSelection || getAgentModelSelection(session));
   if (modelSelection.modelType && modelSelection.modelType !== 'text') return false;
   const runId = String(runCtx.runId);
-  const requestId = `guidance-${createQueuedTurnId()}`;
+  const requestId = options.requestId || `guidance-${createQueuedTurnId()}`;
   const message = { role: 'user', content: text, attachments, modelSelection, ts: Date.now(),
-    liveGuidance: { requestId, runId, status: 'pending' } };
+    liveGuidance: { requestId, runId, status: 'pending', ...(fromQueue ? { queueIntentId: fromQueue.id, queuedAt: fromQueue.queuedAt } : {}) } };
+  if (fromQueue) { fromQueue.sessionRef = session; options.onMessage?.(message); }
   captureLiveGuidanceDisplayBoundary(runCtx, message);
   session.messages = session.messages || [];
   session.messages.push(message);
   if (state.currentSession?.id === sessionId) {
     appendMessage('user', text, attachments, true, session.messages.length - 1, message.ts, null, null, [], null, message.liveGuidance);
     renderOpenCodeRunNow(runCtx);
-    clearComposerPayload();
+    if (!fromQueue) clearComposerPayload();
     updateSendState();
   }
   try {
@@ -7232,16 +7275,84 @@ function queueCurrentComposerTurn() {
   return true;
 }
 
-function editCurrentQueuedTurn() {
+async function steerQueuedTurn(sessionId, queuedId) {
+  const queued = queuedTurnsForSession(sessionId).find(turn => turn.id === queuedId);
+  if (!queued) return false;
+  const unavailable = queuedTurnGuidanceUnavailable(queued, sessionId);
+  if (unavailable) { if (state.currentSession?.id === sessionId) toast(unavailable); return false; }
+  const runCtx = state.activeRuns.get(sessionId)?.runCtx;
+  const requestId = `guidance-queue-${queued.id}-${createQueuedTurnId()}`;
+  let prepared = false;
+  let message;
+  queued.steering = true;
+  syncQueuedTurnUi();
+  try {
+    if (queued.persistPromise) await queued.persistPromise;
+    if (queued.persistenceError) throw new Error(queued.persistenceError);
+    if (!api.zCorePrepareGuidanceIntent) throw new Error('请重启 Z 后使用转为引导');
+    const result = await api.zCorePrepareGuidanceIntent({ intentId: queued.id, sessionId, runId: runCtx.runId,
+      requestId, conversationRevision: Number(queued.conversationRevision) || 0 });
+    if (!result?.ok) throw new Error(result?.error || '未能转换，消息仍在排队');
+    prepared = true;
+    queued.guidanceContinuation = { runId: runCtx.runId, requestId };
+    delete queued.guidanceDetached;
+    delete queued.guidanceVerificationFailed;
+    delete queued.guidanceVerificationError;
+    const accepted = await steerCurrentComposerTurn({ queued, requestId, runId: runCtx.runId, onMessage: value => { message = value; } });
+    if (message?.liveGuidance?.deliveryEvidence === 'provider-response') {
+      removeQueuedTurn(sessionId, queued);
+      await invokeZCore('zCoreAckIntent', queued.id);
+      return true;
+    }
+    if (accepted && !message?.liveGuidance?.continuationIntentId) {
+      // Keep the durable claimed intent until a provider receipt arrives. If
+      // the renderer exits, its stored guidance reference prevents replay.
+      removeQueuedTurn(sessionId, queued);
+      return true;
+    }
+    if (message) {
+      message.liveGuidance.continuationIntentId = queued.id;
+      message.liveGuidance.continuationStatus = 'pending';
+      await updateQueuedGuidanceContinuation(queued, 'pending');
+    } else {
+      // Validation ended before calling the steering IPC, so no model request
+      // can contain this attempt. The queued payload itself is unchanged.
+      queued.guidanceDetached = true;
+    }
+    await invokeZCore('zCoreRequeueIntent', queued.id);
+    if (state.currentSession?.id === sessionId) toast('引导未确认送达，消息已保留在队列');
+    return false;
+  } catch (error) {
+    if (prepared) {
+      if (message) {
+        message.liveGuidance.continuationIntentId = queued.id;
+        await updateQueuedGuidanceContinuation(queued, 'pending', String(error?.message || error)).catch(() => {});
+      } else queued.guidanceDetached = true;
+      await invokeZCore('zCoreRequeueIntent', queued.id).catch(() => {});
+    }
+    if (state.currentSession?.id === sessionId) toast(error?.message || '转换失败，消息仍在排队');
+    return false;
+  } finally {
+    delete queued.steering;
+    syncQueuedTurnUi(); updateSendState();
+    if (!isSessionExecutionActive(sessionId)) scheduleQueuedTurnDispatch(queued.sessionRef);
+  }
+}
+
+function editCurrentQueuedTurn(queuedId = '') {
   const sessionId = String(state.currentSession?.id || '');
-  const queued = state.queuedTurns.get(sessionId);
-  if (!queued) return;
+  const queued = typeof queuedId === 'string' && queuedId ? queuedTurnsForSession(sessionId).find(turn => turn.id === queuedId) : state.queuedTurns.get(sessionId);
+  if (!queued || queued.steering) return;
   if (queued.guidanceContinuation && !queued.guidanceDetached
-    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true) {
+    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true
+    && queuedGuidanceSource(queued)?.liveGuidance?.continuationStatus !== 'failed' && !queued.guidanceVerificationFailed) {
     toast('正在确认原任务中的引导状态，确认后即可编辑');
     return;
   }
   void invokeZCore('zCoreDeleteIntent', queued.id, 'user_edited').catch(() => {});
+  if (queuedGuidanceSource(queued)?.liveGuidance?.continuationStatus === 'failed' || queued.guidanceVerificationFailed) {
+    toast('原引导送达情况仍未确认，已取回输入框；重发前请先核对对话');
+  }
   removeQueuedTurn(sessionId, queued);
   void updateQueuedGuidanceContinuation(queued, 'edited').catch(() => {});
   setComposerText(queued.text || '', { preserveSkills: false });
@@ -7258,11 +7369,13 @@ function editCurrentQueuedTurn() {
   setComposerCaretByTextOffset(composerLastCaretTextOffset);
 }
 
-function removeCurrentQueuedTurn() {
+function removeCurrentQueuedTurn(queuedId = '') {
   const sessionId = String(state.currentSession?.id || '');
-  const queued = sessionId ? state.queuedTurns.get(sessionId) : null;
+  const queued = typeof queuedId === 'string' && queuedId ? queuedTurnsForSession(sessionId).find(turn => turn.id === queuedId) : state.queuedTurns.get(sessionId);
+  if (queued?.steering) return;
   if (queued?.guidanceContinuation && !queued.guidanceDetached
-    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true) {
+    && queuedGuidanceSource(queued)?.liveGuidance?.nativeDetached !== true
+    && queuedGuidanceSource(queued)?.liveGuidance?.continuationStatus !== 'failed' && !queued.guidanceVerificationFailed) {
     toast('正在确认原任务中的引导状态，确认后即可移除');
     return;
   }
@@ -7273,8 +7386,16 @@ function removeCurrentQueuedTurn() {
   updateSendState();
 }
 
-$('#queuedTurnEdit')?.addEventListener('click', editCurrentQueuedTurn);
-$('#queuedTurnRemove')?.addEventListener('click', removeCurrentQueuedTurn);
+$('#queuedTurnHost')?.addEventListener('click', event => {
+  const action = event.target.closest('[data-queued-action]');
+  const row = action?.closest('[data-queued-turn-id]');
+  if (!row || action.disabled) return;
+  const sessionId = String(event.currentTarget.dataset.sessionId || '');
+  if (!sessionId || state.currentSession?.id !== sessionId) return;
+  if (action.dataset.queuedAction === 'steer') void steerQueuedTurn(sessionId, row.dataset.queuedTurnId);
+  if (action.dataset.queuedAction === 'edit') editCurrentQueuedTurn(row.dataset.queuedTurnId);
+  if (action.dataset.queuedAction === 'remove') removeCurrentQueuedTurn(row.dataset.queuedTurnId);
+});
 
 function abortTask() {
   const sessionId = state.currentSession?.id;
@@ -11543,6 +11664,7 @@ function scheduleQueuedTurnDispatch(session) {
       if (isSessionExecutionActive(sessionId)) return;
       queued = state.queuedTurns.get(sessionId);
       if (!queued) return;
+      if (queued.steering) return;
       if (Number(queued.retryAfter) > Date.now()) return;
 
       const targetSession = queued.sessionRef || session;
@@ -11551,6 +11673,7 @@ function scheduleQueuedTurnDispatch(session) {
       if (!(await prepareQueuedGuidanceContinuations(targetSession))) return;
       queued = state.queuedTurns.get(sessionId);
       if (!queued) return;
+      if (queued.steering) return;
       queued.sessionRef = targetSession;
       if ((Number(queued.conversationRevision) || 0) !== (Number(targetSession.conversationRevision) || 0)) {
         removeQueuedTurn(sessionId, queued);
@@ -24059,6 +24182,233 @@ async function openSessionStorageDialog(session = state.currentSession, anchor =
   finally { if (dialog.isConnected) pathField.setAttribute('aria-busy', 'false'); }
 }
 
+function taskMemoryText(value) {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+function taskMemoryScopeLabel(scope) {
+  return ({ task: '本任务', session: '本任务', project: '本项目', workspace: '本项目', global: '全局', device: '本机', machine: '本机' })[scope] || '范围未记录';
+}
+
+function taskMemoryStatusLabel(status) {
+  return ({ active: '使用中', disabled: '已停用', inactive: '已停用', archived: '已归档', superseded: '已被替代', deleted: '已删除', legacy: '旧版记录' })[status] || '状态未记录';
+}
+
+function taskMemoryIsProgress(item) {
+  return ['task', 'session'].includes(item.scope) || ['work_state', 'task_state', 'progress', 'progress_card', 'task_progress'].includes(item.type);
+}
+
+function taskMemoryTypeLabel(type) {
+  return ({ work_state: '任务进度', preference: '偏好', environment: '环境信息', project: '项目知识', decision: '决定', procedure: '操作方法', failure_solution: '问题处理' })[type] || type;
+}
+
+async function openTaskMemoryDialog(session = state.currentSession, anchor = document.activeElement) {
+  const sessionId = String(session?.id || '');
+  if (!sessionId) return;
+  const previous = $('#taskMemoryDialog');
+  if (previous) { previous.close(); previous.remove(); }
+  const dialog = document.createElement('dialog');
+  dialog.id = 'taskMemoryDialog';
+  dialog.className = 'task-memory-dialog';
+  dialog.dataset.sessionId = sessionId;
+  dialog.setAttribute('aria-labelledby', 'taskMemoryTitle');
+  dialog.innerHTML = `<header class="task-memory-header"><div><h2 id="taskMemoryTitle">任务记忆</h2><p id="taskMemoryTaskName" data-preserve-language></p></div><button type="button" id="taskMemoryClose" class="secondary-btn">关闭</button></header>
+    <p class="task-memory-intro">查看任务进度、可复用知识，以及上次选入上下文的记忆。选入不代表模型接口已收到；停用或删除后不再用于后续请求。</p>
+    <div class="task-memory-search"><label for="taskMemorySearch">搜索记忆</label><input id="taskMemorySearch" type="search" placeholder="搜索内容或来源" autocomplete="off"><button type="button" id="taskMemoryRefresh" class="secondary-btn">刷新</button></div>
+    <p id="taskMemoryStatus" class="task-memory-status" role="status" aria-live="polite">正在读取记忆…</p>
+    <div id="taskMemorySections" class="task-memory-sections" aria-busy="true"></div>
+    <details class="task-memory-storage"><summary>存储位置</summary><p id="taskMemoryStoragePath" data-preserve-language></p></details>`;
+  dialog.querySelector('#taskMemoryTaskName').textContent = displaySessionTitle(session.title);
+  const search = dialog.querySelector('#taskMemorySearch');
+  const status = dialog.querySelector('#taskMemoryStatus');
+  const sections = dialog.querySelector('#taskMemorySections');
+  let requestVersion = 0;
+  let searchTimer = null;
+  let mutating = false;
+  let conversationRevision;
+  const mutationRequest = item => ({ sessionId, id: item.id, ...(Number.isInteger(conversationRevision) ? { conversationRevision } : {}) });
+  const alive = () => dialog.isConnected && dialog.open;
+  const showStatus = (message, error = false) => {
+    if (!alive()) return;
+    status.textContent = message;
+    status.classList.toggle('error', error);
+  };
+  const makeText = (tag, className, text, preserve = false) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    node.textContent = String(text ?? '');
+    if (preserve) node.setAttribute('data-preserve-language', '');
+    return node;
+  };
+  const addButton = (parent, label, action, style = 'secondary-btn') => {
+    const button = makeText('button', style, label);
+    button.type = 'button';
+    button.dataset.memoryAction = action;
+    parent.appendChild(button);
+    return button;
+  };
+  const setBusy = busy => {
+    mutating = busy;
+    for (const control of dialog.querySelectorAll('input, textarea, button:not(#taskMemoryClose)')) control.disabled = busy;
+  };
+  const mutate = async (operation, successMessage) => {
+    if (mutating || !alive()) return;
+    clearTimeout(searchTimer);
+    ++requestVersion;
+    setBusy(true);
+    showStatus('正在保存记忆…');
+    try {
+      const result = await operation();
+      if (!result?.ok) throw new Error(result?.error || '记忆保存失败，请重试');
+      if (!alive()) return;
+      await refresh();
+      showStatus(successMessage);
+    } catch (error) { showStatus(error?.message || '记忆保存失败，请重试', true); }
+    finally { if (alive()) setBusy(false); }
+  };
+  const addSource = (parent, item) => {
+    const source = item.source || {};
+    const details = document.createElement('details');
+    details.className = 'task-memory-source';
+    details.appendChild(makeText('summary', '', '详情与来源'));
+    const metadata = document.createElement('dl');
+    const addMeta = (label, value) => {
+      if (value == null || value === '') return;
+      metadata.append(makeText('dt', '', label), makeText('dd', '', taskMemoryText(value), true));
+    };
+    addMeta('来源任务', item.sourceTitle || source.title || source.sessionId || '未记录');
+    addMeta('来源轮次', source.runId);
+    addMeta('对话版本', source.conversationRevision);
+    addMeta('消息位置', source.messageId || source.messageIndex);
+    addMeta('记忆类型', taskMemoryTypeLabel(item.type));
+    const updated = item.updatedAt || item.createdAt;
+    if (updated) {
+      const date = new Date(updated);
+      addMeta('更新时间', Number.isNaN(date.getTime()) ? updated : date.toLocaleString());
+    }
+    const evidence = taskMemoryText(item.evidence);
+    if (evidence) addMeta('依据', evidence);
+    details.appendChild(metadata);
+    if (source.sessionId) {
+      const sourceButton = addButton(details, '打开来源对话', 'source');
+      sourceButton.addEventListener('click', async () => {
+        if (mutating || !alive()) return;
+        try {
+          const sourceSession = await api.getSession(String(source.sessionId));
+          if (!alive()) return;
+          if (!sourceSession?.id) throw new Error('来源对话已不存在');
+          dialog.close();
+          await loadSession(sourceSession.id);
+        } catch (error) { showStatus(error?.message || '无法打开来源对话', true); }
+      });
+    }
+    parent.appendChild(details);
+  };
+  const makeCard = (item, used = false) => {
+    const card = document.createElement('article');
+    card.className = 'task-memory-card';
+    card.dataset.memoryId = String(item.id || '');
+    if (used) card.dataset.memoryUsage = 'true';
+    const heading = makeText('div', 'task-memory-card-heading', '');
+    heading.appendChild(makeText('span', 'task-memory-scope', taskMemoryScopeLabel(item.scope)));
+    if (!used) heading.appendChild(makeText('span', 'task-memory-state', taskMemoryStatusLabel(item.status)));
+    else heading.appendChild(makeText('span', 'task-memory-state', '已选入上下文'));
+    const content = makeText('div', 'task-memory-content', taskMemoryText(item.content) || '内容未记录', true);
+    card.append(heading, content);
+    addSource(card, item);
+    if (used || !item.id || item.status === 'deleted') return card;
+    const actions = makeText('div', 'task-memory-card-actions', '');
+    const edit = addButton(actions, '编辑', 'edit');
+    const toggle = addButton(actions, item.status === 'active' ? '停用' : '启用', 'toggle');
+    const remove = addButton(actions, '删除', 'delete', 'secondary-btn task-memory-danger');
+    card.appendChild(actions);
+    const clearInline = () => { card.querySelector('.task-memory-inline')?.remove(); actions.hidden = false; content.hidden = false; };
+    edit.addEventListener('click', () => {
+      clearInline();
+      const editor = makeText('div', 'task-memory-inline', '');
+      const field = document.createElement('textarea');
+      field.className = 'task-memory-editor';
+      field.setAttribute('aria-label', '编辑记忆内容');
+      field.value = taskMemoryText(item.content);
+      field.rows = 6;
+      editor.appendChild(field);
+      const buttons = makeText('div', 'task-memory-card-actions', '');
+      const cancel = addButton(buttons, '取消', 'cancel-edit');
+      const save = addButton(buttons, '保存', 'save', 'primary-btn');
+      cancel.addEventListener('click', clearInline);
+      save.addEventListener('click', () => {
+        const value = field.value.trim();
+        if (!value) { showStatus('记忆内容不能为空', true); field.focus(); return; }
+        mutate(() => api.updateTaskMemory({ ...mutationRequest(item), content: value }), '记忆已更新');
+      });
+      editor.appendChild(buttons); card.appendChild(editor); actions.hidden = true; content.hidden = true; field.focus();
+    });
+    toggle.addEventListener('click', () => mutate(() => api.updateTaskMemory({ ...mutationRequest(item),
+      status: item.status === 'active' ? 'disabled' : 'active' }), item.status === 'active' ? '记忆已停用' : '记忆已启用'));
+    remove.addEventListener('click', () => {
+      clearInline();
+      const confirmation = makeText('div', 'task-memory-inline task-memory-confirm', '');
+      confirmation.appendChild(makeText('p', '', '确定删除这条记忆？删除后不再使用。'));
+      const buttons = makeText('div', 'task-memory-card-actions', '');
+      addButton(buttons, '取消', 'cancel-delete').addEventListener('click', clearInline);
+      addButton(buttons, '确认删除', 'confirm-delete', 'secondary-btn task-memory-danger').addEventListener('click', () =>
+        mutate(() => api.deleteTaskMemory(mutationRequest(item)), '记忆已删除'));
+      confirmation.appendChild(buttons); card.appendChild(confirmation); actions.hidden = true;
+    });
+    return card;
+  };
+  const render = result => {
+    sections.replaceChildren();
+    const items = Array.isArray(result.items) ? result.items : [];
+    const usage = Array.isArray(result.usage?.items) ? result.usage.items : [];
+    const addSection = (title, entries, empty, used = false) => {
+      const section = makeText('section', 'task-memory-section', '');
+      const heading = makeText('h3', '', title);
+      heading.appendChild(makeText('span', 'task-memory-count', String(entries.length)));
+      section.appendChild(heading);
+      if (entries.length) for (const item of entries) section.appendChild(makeCard(item, used));
+      else section.appendChild(makeText('p', 'task-memory-empty', empty));
+      sections.appendChild(section);
+    };
+    addSection('任务进度', items.filter(taskMemoryIsProgress), search.value.trim() ? '没有符合条件的任务进度' : '此任务尚未保存进度记忆');
+    addSection('可复用知识', items.filter(item => !taskMemoryIsProgress(item)), search.value.trim() ? '没有符合条件的可复用知识' : '此任务暂无可用的项目、全局或本机知识');
+    addSection('上次选入上下文的记忆', usage, '尚未记录该任务选用的记忆', true);
+    dialog.querySelector('#taskMemoryStoragePath').textContent = result.storage?.path || '存储位置未记录';
+  };
+  const refresh = async () => {
+    const version = ++requestVersion;
+    const query = search.value.trim();
+    sections.setAttribute('aria-busy', 'true');
+    showStatus('正在读取记忆…');
+    try {
+      if (!api.listTaskMemories) throw new Error('请重启 Z 后使用任务记忆');
+      const result = await api.listTaskMemories({ sessionId, query, includeInactive: true });
+      if (!alive() || version !== requestVersion) return;
+      if (!result?.ok || result.sessionId !== sessionId) throw new Error(result?.error || '无法读取任务记忆');
+      conversationRevision = result.conversationRevision;
+      render(result);
+      showStatus('已包含停用的记忆。修改对后续请求生效。');
+    } catch (error) {
+      if (version === requestVersion) showStatus(error?.message || '无法读取任务记忆', true);
+    } finally { if (alive() && version === requestVersion) sections.setAttribute('aria-busy', 'false'); }
+  };
+  search.addEventListener('input', () => {
+    clearTimeout(searchTimer); ++requestVersion;
+    searchTimer = setTimeout(() => { if (alive() && !mutating) refresh(); }, 180);
+  });
+  dialog.querySelector('#taskMemoryRefresh').addEventListener('click', () => { if (!mutating) { clearTimeout(searchTimer); refresh(); } });
+  dialog.querySelector('#taskMemoryClose').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    clearTimeout(searchTimer); ++requestVersion; dialog.remove();
+    if (anchor?.isConnected) anchor.focus?.();
+  });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  await refresh();
+}
+
 let renameTaskSessionId = null;
 let renameTaskDialogVersion = 0;
 let renameTaskSaving = false;
@@ -24137,6 +24487,7 @@ function bindTaskActions() {
     if (action === 'pin') await toggleCurrentTaskPinned();
     if (action === 'rename') openRenameTaskDialog();
     if (action === 'storage-location') await openSessionStorageDialog(state.currentSession, moreButton);
+    if (action === 'task-memory') await openTaskMemoryDialog(state.currentSession, moreButton);
   });
   $('#renameTaskCancel')?.addEventListener('click', closeRenameTaskDialog);
   $('#renameTaskConfirm')?.addEventListener('click', confirmTaskRename);

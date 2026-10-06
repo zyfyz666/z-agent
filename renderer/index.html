@@ -169,6 +169,10 @@
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7h7l2-3h9v16H3z"/></svg>
                   <span>对话存储位置</span>
                 </button>
+                <button type="button" class="task-action-item" data-task-action="task-memory" role="menuitem">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 3h14v18H5zM9 7h6M9 11h6M9 15h4"/></svg>
+                  <span>任务记忆</span>
+                </button>
               </div>
             </div>
           </div>
@@ -457,22 +461,7 @@
           </div>
 
           <div class="composer-wrap">
-            <div id="queuedTurnHost" class="queued-turn-host conversation-preview-shell hidden" role="status" aria-live="polite">
-              <div class="queued-turn-row conversation-preview-row">
-                <span class="browser-focus-chat-label agent-permission-heading">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/><path d="M8 9h8M8 13h5"/></svg>
-                  <span class="queued-turn-label">排队对话</span>
-                </span>
-                <span class="queued-turn-actions">
-                  <button id="queuedTurnEdit" class="capability-dialog-close" type="button" title="编辑排队对话" aria-label="编辑排队对话">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m13.5 7.5 3 3"/></svg>
-                  </button>
-                  <button id="queuedTurnRemove" class="capability-dialog-close" type="button" title="删除排队对话" aria-label="删除排队对话">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
-                  </button>
-                </span>
-              </div>
-            </div>
+            <div id="queuedTurnHost" class="queued-turn-host conversation-preview-shell hidden" role="status" aria-live="polite"></div>
             <div id="attachments" class="attachments hidden"></div>
             <div id="composer" class="composer">
               <button id="composerResizeHandle" class="composer-resize-handle" type="button" role="separator" aria-orientation="horizontal" aria-label="调整输入框高度" title="拖动调整输入框高度，双击恢复自适应"></button>

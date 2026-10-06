@@ -13,13 +13,15 @@ function failedRunHandler() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   const marker = source.indexOf('console.error(`[opencode] Run ${runId} failed:`, error);');
   assert.ok(marker > 0, 'main-process run rejection handler exists');
-  const start = source.lastIndexOf('.catch(error => {', marker) + '.catch('.length;
+  const start = source.lastIndexOf('.catch(async error => {', marker) + '.catch('.length;
   const end = source.indexOf('}).finally(() => {', marker) + 1;
   assert.ok(start > 0 && end > start, 'the production rejection handler is isolated');
-  const calls = { flushed: [], core: [], reconciled: [], sent: [] };
+  const calls = { flushed: [], core: [], reconciled: [], sent: [], progress: [] };
   const handler = vm.runInNewContext(`(${source.slice(start, end)})`, {
     console: { error() {} },
     runId: 'run-failed-history',
+    zSessionId: 'sess_failed_history', request: { conversationRevision: 3 }, runStartedAt: 1000,
+    persistTaskProgress: async payload => calls.progress.push(payload),
     OPENCODE_VERSION: 'test',
     coreTurnStarted: true,
     flushOpenCodeRendererEvents: runId => calls.flushed.push(runId),
@@ -62,6 +64,9 @@ test('a rejected run retains its Observer snapshot in completion and history rep
   assert.equal(calls.sent[0].channel, 'opencode:completed');
   assert.equal(calls.sent[0].payload.runId, 'run-failed-history');
   assert.equal(calls.sent[0].payload.result, result);
+  assert.equal(calls.progress.length, 1);
+  assert.equal(calls.progress[0].result, result);
+  assert.equal(calls.progress[0].request.conversationRevision, 3);
 });
 
 test('a failure before Observer startup does not invent historical telemetry', async () => {

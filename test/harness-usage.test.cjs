@@ -140,6 +140,15 @@ test('three consecutive failed uses demote an advisory entry to observing', asyn
 });
 
 test('reviewer edits and usage attribution coexist for the same injected entries', async () => {
+  const sessionId = 'sess_coexist';
+  const sessionDirectory = path.join(stubDataDir, 'ZData', 'sessions');
+  const workspace = path.join(stubDataDir, 'coexist-workspace');
+  fs.mkdirSync(sessionDirectory, { recursive: true });
+  fs.mkdirSync(workspace, { recursive: true });
+  fs.writeFileSync(path.join(sessionDirectory, `${sessionId}.json`), JSON.stringify({
+    id: sessionId, title: 'Review attribution fixture', conversationRevision: 0,
+    workspace, workspaceKind: 'selected', messages: [{ id: 'user-coexist', role: 'user', content: '普通任务', ts: Date.now() }]
+  }));
   const store = main.__test.continualHarness;
   await store.apply({ edits: [
     {
@@ -157,7 +166,7 @@ test('reviewer edits and usage attribution coexist for the same injected entries
   main.__test.registerHarnessUsage({
     runId: 'run-coexist',
     workspace: '',
-    sessionId: 'sess-coexist',
+    sessionId,
     entries: [
       { kind: 'prompt', id: 'prompt-coexist', scope: 'global' },
       { kind: 'memory', id: 'memory-coexist', scope: 'global' }
@@ -186,11 +195,11 @@ test('reviewer edits and usage attribution coexist for the same injected entries
       }
     },
     selection: { providerId: 'z-provider', modelId: 'z-model' },
-    request: { history: [] },
+    request: { history: [], conversationRevision: 0, requestMessageIndex: 0, sourceMessageId: 'user-coexist' },
     result: { status: 'done', todos: [{ done: true }], toolCalls: [], changes: [] },
     prompt: '普通任务',
     workspace: '',
-    zSessionId: 'sess-coexist',
+    zSessionId: sessionId,
     runId: 'run-coexist',
     harnessBaselines: { global: baseline },
     evolutionMode: true

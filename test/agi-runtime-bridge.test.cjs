@@ -113,14 +113,16 @@ test('memory maintenance decays stale entries only and never preferences', () =>
       updatedAt: old
     });
     const store = new LongTermMemoryStore({ globalPath: memoryPath, zagentDir: '.zagent' });
+    const originalJson = fs.readFileSync(memoryPath, 'utf8');
     const result = maintainMemoryStore({ longTermMemory: store, memoryPath, workspace: '' });
     assert.equal(result.updated, 1);
-    const persisted = JSON.parse(fs.readFileSync(memoryPath, 'utf8'));
-    const stale = persisted.memories.find(item => item.id === 'm-stale');
-    const preference = persisted.memories.find(item => item.id === 'm-pref');
+    const persisted = new LongTermMemoryStore({ dbPath: store.dbPath }).list();
+    const stale = persisted.find(item => item.migration.originalId === 'm-stale');
+    const preference = persisted.find(item => item.migration.originalId === 'm-pref');
     assert.ok(stale.confidence < 0.2, 'stale entry must decay');
     assert.equal(preference.confidence, 0.9, 'preference must stay untouched');
     assert.equal(preference.metadata?.decayedAt, undefined);
+    assert.equal(fs.readFileSync(memoryPath, 'utf8'), originalJson, 'legacy JSON must remain unchanged');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -161,7 +163,9 @@ test('memory query boosts entries from verified runs', () => {
     const memoryPath = path.join(dir, 'memory.json');
     const store = new LongTermMemoryStore({ globalPath: memoryPath, zagentDir: '.zagent' });
     store.upsert({ content: '部署流程：先构建再发布，目标环境为 staging', type: 'procedure', scope: 'global', confidence: 0.6 }, { runId: 'run-pass' });
-    store.upsert({ content: '部署流程：先构建再发布，目标环境为 prod', type: 'procedure', scope: 'global', confidence: 0.6 }, { runId: 'run-fail' });
+    // Give the unverified fact a small baseline advantage, so this proves the
+    // bounded verification bonus changes ranking even with FTS5 tie-breaking.
+    store.upsert({ content: '部署流程：先构建再发布，目标环境为 prod', type: 'procedure', scope: 'global', confidence: 0.8 }, { runId: 'run-fail' });
     const plain = store.query({ query: '部署流程 构建 发布 staging prod', workspace: '', maxChars: 4000, limit: 5 });
     const boosted = store.query({
       query: '部署流程 构建 发布 staging prod',

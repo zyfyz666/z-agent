@@ -52,6 +52,13 @@ function read(id) {
   return { tool_calls: [{ index: 0, id, type: 'function',
     function: { name: 'read', arguments: JSON.stringify({ filePath: fixtureFile }) } }] };
 }
+function withoutRetrievedMemory(message) {
+  const strip = text => typeof text === 'string' ? text.replace(/<z-task-memory>[\s\S]*?<\/z-task-memory>/g, '')
+    .replace(/<z-long-term-memory>[\s\S]*?<\/z-long-term-memory>/g, '') : text;
+  return { ...message, content: Array.isArray(message.content)
+    ? message.content.map(part => typeof part.text === 'string' ? { ...part, text: strip(part.text) } : part)
+    : strip(message.content) };
+}
 function occurrences(messages, marker) {
   return messages.filter(message => message.role === 'user')
     .reduce((count, message) => count + JSON.stringify(message.content).split(marker).length - 1, 0);
@@ -69,7 +76,9 @@ const server = http.createServer((request, response) => {
       const body = JSON.parse(raw);
       assert.equal(body.model, modelId);
       assert.ok(++requestCount <= 40, 'bounded localhost model work');
-      const messages = body.messages || [];
+      // Markers in recalled task state are historical references, not new
+      // user submissions. Count only original inputs for queue idempotence.
+      const messages = (body.messages || []).map(withoutRetrievedMemory);
       const userText = messages.filter(message => message.role === 'user').map(message => JSON.stringify(message.content)).join('\n');
       if (!body.tools?.length || !userText.includes(mark.start)) return complete(response, { content: 'Fixture auxiliary response' });
       const tags = [mark.start, mark.delivered, mark.first, mark.second, mark.waiting];
@@ -188,11 +197,19 @@ async function upload(paths) {
     await page.waitForFunction(marker => document.querySelector('#messages')?.textContent.includes(marker), mark.before, { timeout: 60_000 });
     const originalRun = await page.evaluate(id => ({ runId: state.activeRuns.get(id).runCtx.runId,
       native: state.activeRuns.get(id).runCtx.openCodeSessionId }), a.id);
-    await upload([textFile, imageFile]);
-    await send(mark.delivered, 'steer');
-    await guide(mark.delivered, 'queued');
     await send(mark.first, 'enter');
+    await upload([textFile, imageFile]);
+    await send(mark.delivered);
     await send(mark.second);
+    const cardToPromote = page.locator('#queuedTurnHost [data-queued-turn-id]').filter({ hasText: mark.delivered });
+    assert.equal(await page.locator('#queuedTurnHost [data-queued-action="steer"]').count(), 3, 'every queued message exposes its own guidance action');
+    assert.equal(await cardToPromote.locator('[data-queued-action="steer"]').isEnabled(), true);
+    await page.locator('#composerInput').fill('PRESERVE_DRAFT_DURING_QUEUE_PROMOTION');
+    await cardToPromote.locator('[data-queued-action="steer"]').click();
+    await guide(mark.delivered, 'queued');
+    await cardToPromote.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('#composerInput').innerText(), 'PRESERVE_DRAFT_DURING_QUEUE_PROMOTION');
+    await page.locator('#composerInput').fill('');
     const queue = await page.evaluate(id => {
       const head = state.queuedTurns.get(id); return head ? [head, ...(head.followingTurns || [])].map(turn => turn.text) : [];
     }, a.id);
@@ -201,7 +218,7 @@ async function upload(paths) {
       .some(message => message.content === first || message.content === second), mark), false);
     assert.equal(await page.evaluate(id => state.activeRuns.get(id).runCtx.runId, a.id), originalRun.runId);
     assert.equal(report.requests.some(request => request.first || request.second), false);
-    report.checks.push('Enter and Send append two waiting turns without steering or replacing the active run');
+    report.checks.push('Enter/Send queue by default; every queued card exposes conversion, and converting the middle card preserves the composer draft and remaining queue order');
 
     finish(held.get('initial'), read('call-queue-after-guide'));
     await guide(mark.delivered, 'delivered');
@@ -209,7 +226,8 @@ async function upload(paths) {
     assert.ok(guidedHeld && held.has('guided'));
     report.checks.push('manual guidance carries uploaded text and the original PNG bytes into the next native request');
     await upload([waitingFile]);
-    await send(mark.waiting, 'steer');
+    await send(mark.waiting);
+    await page.locator('#queuedTurnHost [data-queued-turn-id]').filter({ hasText: mark.waiting }).locator('[data-queued-action="steer"]').click();
     await guide(mark.waiting, 'queued');
     await page.locator('#composerInput').fill(mark.draft);
     await page.screenshot({ path: path.join(output, 'before-stop.png') });
