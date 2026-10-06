@@ -24461,7 +24461,9 @@ function renderMarkdownTables(t) {
 const AGENT_URL_PATTERN = /(?:https?:\/\/|file:\/\/|www\.)[^\s<>"'`]+/gi;
 const AGENT_MARKDOWN_LINK_PATTERN = /\[([^\]\r\n]+)\]\(\s*((?:https?:\/\/|file:\/\/|www\.|(?:[A-Za-z]:)?[\\/])[^\s<>"')]+)\s*\)/gi;
 const AGENT_MARKDOWN_IMAGE_PATTERN = /!\[([^\]\r\n]*)\]\(\s*([^\s<>"')]+)\s*\)/gi;
-const AGENT_LOCAL_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\/Users\/|\/home\/|\/opt\/|\/tmp\/|\/var\/|\\\\)[^\s<>"'`)\]]+/g;
+// UNC links need both a server and a share. A run of escaped punctuation must
+// not become a file link, including by matching from its second backslash.
+const AGENT_LOCAL_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\/Users\/|\/home\/|\/opt\/|\/tmp\/|\/var\/)[^\s<>"'`)\]]+|(?<!\\)\\\\[^\s\\/<>"'`)\]]+[\\/][^\s\\/<>"'`)\]]+(?:[\\/][^\s<>"'`)\]]*)?/g;
 
 function localPathToFileUrl(value) {
   const source = trimAgentUrlCandidate(value);
@@ -24651,6 +24653,10 @@ function renderMarkdown(text) {
     const token = saveAgentLink(source, source);
     return token ? token + match.slice(source.length) : match;
   });
+  // Interpret one Markdown escape layer around prose quotes, after protecting
+  // code, TeX, URLs and file paths. Keep literal slash pairs; never recursively
+  // decode model text or mutate the saved conversation.
+  t = t.replace(/(?<!\\)(\\+)(["'])/g, (_, slashes, quote) => '\\'.repeat(Math.floor(slashes.length / 2)) + quote);
   t = escapeHtml(t);
   // bold / italic
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
