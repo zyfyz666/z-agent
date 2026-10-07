@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="dsh-review.css" />
   <link rel="stylesheet" href="understand-anything/understand-anything.css" />
   <link rel="stylesheet" href="z-theme.css" />
+  <link rel="stylesheet" href="observer-session-controls.css" />
 </head>
 <body>
   <div id="app" class="app">
@@ -2160,6 +2161,9 @@
     <form id="zConnectionForm">
       <header><h3 id="zConnectionTitle">切换 API</h3><button id="zConnectionClose" type="button" aria-label="关闭">×</button></header>
       <p id="zConnectionDescription"></p>
+      <label class="z-check-field" for="zSessionObserverEnabled"><input id="zSessionObserverEnabled" type="checkbox" checked aria-describedby="zSessionObserverHint"> 启用观察者（仅此任务）</label>
+      <p id="zSessionObserverHint">开关立即生效，仅影响此任务。关闭后主 Agent 继续工作，历史观察记录保留。</p>
+      <button id="zSessionObserverRetry" type="button" hidden>重试</button>
       <label for="zConnectionSelect">API 连接</label>
       <select id="zConnectionSelect"></select>
       <div id="zConnectionModelField"><label for="zConnectionModel">模型</label><select id="zConnectionModel"></select></div>

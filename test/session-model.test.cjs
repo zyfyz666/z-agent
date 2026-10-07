@@ -121,7 +121,7 @@ function fixture(t) {
   // Execute the actual admission/routing block, stopping at the kernel
   // boundary. The separate desktop E2E exercises real provider requests.
   vm.runInContext(section("ipcMain.handle('opencode:start-run',", '    // The persisted conversation owns its directory.')
-    + 'return { ok: true, selection, runtime: getOpenCodeRuntimeConfig(cfg), cfg }; } catch (error) { return { ok: false, error: error.message, code: error.code }; } });', context);
+    + 'return { ok: true, selection, runtime: getOpenCodeRuntimeConfig(cfg), cfg, observerEnabled: request.observerEnabled }; } catch (error) { return { ok: false, error: error.message, code: error.code }; } });', context);
   return {
     root, context, compressionCalls,
     create: () => context.createFreshSessionRecord(),
@@ -654,6 +654,22 @@ test('runs and compression resolve each session or explicit frozen model into th
   assert.equal(f.compressionCalls[0].runtime.modelId, 'model-b');
   assert.equal(f.compressionCalls[0].request.openCodeConfig.apiKey, 'fixture-key-b');
   assert.deepEqual(f.config(), global);
+});
+
+test('run admission uses the persisted observer setting and blocks disabled automatic wakes only', async t => {
+  const f = fixture(t);
+  const disabled = await f.create();
+  const sibling = await f.create();
+  f.seed({ ...disabled, observerEnabled: false });
+  const manual = await f.start({ zSessionId: disabled.id, observerEnabled: true });
+  assert.equal(manual.ok, true, manual.error);
+  assert.equal(manual.observerEnabled, false, 'renderer snapshots cannot re-enable observation');
+  const automatic = await f.start({ zSessionId: disabled.id, observerWake: { reviewId: 'pending' }, observerEnabled: true });
+  assert.equal(automatic.ok, false);
+  assert.equal(automatic.code, 'OBSERVER_DISABLED');
+  const independent = await f.start({ zSessionId: sibling.id, observerWake: { reviewId: 'other' } });
+  assert.equal(independent.ok, true, independent.error);
+  assert.equal(independent.observerEnabled, true);
 });
 
 test('missing models/suppliers fail explicitly and synthetic utility sessions require an explicit valid frozen model', async t => {

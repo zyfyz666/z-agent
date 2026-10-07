@@ -20,8 +20,8 @@ function fixture(t, options = {}) {
   sidecar.start = async () => ({ ok: true });
   sidecar.client = { session: {
     create: async () => ({ data: { id: 'session', directory } }),
-    messages: async () => { calls.messages++; return { data: state.messages }; },
-    promptAsync: async () => { calls.prompt++; state.started = true; return options.prompt?.(state) || { data: true }; },
+    messages: async () => { calls.messages++; return options.messages?.(state) || { data: state.messages }; },
+    promptAsync: async request => { calls.prompt++; state.started = true; return options.prompt?.(state, request) || { data: true }; },
     status: async () => options.status?.(state) || { data: { session: { type: 'idle' } } },
     abort: async () => { calls.abort++; return { data: true }; },
     todo: async () => ({ data: [] }), diff: async () => ({ data: [] })
@@ -30,8 +30,8 @@ function fixture(t, options = {}) {
   })() }) } };
   return { directory, events, state, calls, sidecar, run: () => sidecar.run({
     runId: 'run', workspace: directory, hasUserWorkspace: true, prompt: 'Inspect a fixture',
-    providerId: 'fixture', modelId: 'fixture', workMode: 'normal'
-  }, event => events.push(event)) };
+    providerId: 'fixture', modelId: 'fixture', workMode: 'normal', ...options.request
+  }, event => { events.push(event); options.onEvent?.(event, state); }) };
 }
 async function until(predicate, timeout = 2000) {
   const deadline = Date.now() + timeout;
@@ -73,6 +73,71 @@ test('real sidecar health reports an overdue tool while the main status poll is 
   const count = f.events.length;
   await pause(30);
   assert.equal(f.events.length, count, 'no health callbacks survive run finalization');
+});
+
+test('a run starting with its observer off still diagnoses overdue tools and can enable observation without restarting', async t => {
+  let releaseStatus;
+  const f = fixture(t, {
+    request: { observerEnabled: false },
+    prompt: state => {
+      state.messages = [assistant([{ type: 'tool', tool: 'bash', callID: 'running-tool',
+        state: { status: 'running', time: { start: Date.now() }, input: { timeout: 10 } } }])];
+      return { data: true };
+    },
+    status: () => new Promise(resolve => { releaseStatus = resolve; })
+  });
+  const pending = f.run();
+  await until(() => f.events.some(event => event.data?.health?.state === 'overdue'));
+  const runtime = f.sidecar.activeRuns.get('run');
+  assert.equal(runtime.watchdogMonitor.snapshot().enabled, false);
+  assert.equal(runtime.watchdogMonitor.snapshot().phase, 'disabled');
+  assert.equal(runtime.modelObserver, undefined);
+  assert.equal(f.sidecar.setObserverEnabled('run', true).enabled, true);
+  assert.equal(f.calls.prompt, 1);
+  assert.equal(f.calls.abort, 0);
+  assert.equal(runtime.abortController.signal.aborted, false);
+  assert.ok(runtime.healthMonitor.timer);
+  await f.sidecar.cancel('run');
+  releaseStatus({ data: { session: { type: 'busy' } } });
+  const result = await pending;
+  assert.equal(result.status, 'interrupted');
+  assert.ok(result.watchdog.healthEvents.some(event => event.state === 'overdue'));
+});
+
+test('closing observation during a checkpoint baseline read drops captured advice before another model request', async t => {
+  let finishFirstPrompt, finishCheckpointRead;
+  const f = fixture(t, {
+    prompt: async (state, request) => {
+      if (request.noReply) return { data: true };
+      assert.equal(finishFirstPrompt, undefined, 'the cancelled observer checkpoint must not start another primary prompt');
+      await new Promise(resolve => { finishFirstPrompt = resolve; });
+      const reply = assistant([{ type: 'text', text: 'The requested inspection is complete.' }]);
+      reply.info.time.completed = Date.now();
+      reply.info.finish = 'stop';
+      state.messages = [reply];
+      return { data: true };
+    },
+    onEvent: (event, state) => { if (event.type === 'z.interjection.processing') state.holdCheckpoint = true; },
+    messages: state => {
+      if (!state.holdCheckpoint || state.checkpointReadPending) return { data: state.messages };
+      state.checkpointReadPending = true;
+      return new Promise(resolve => { finishCheckpointRead = () => { state.holdCheckpoint = false; resolve({ data: state.messages }); }; });
+    }
+  });
+  const pending = f.run();
+  await until(() => !!finishFirstPrompt);
+  const delivered = await f.sidecar.deliverInterjection('run', { source: 'runtime', observerGeneration: 0,
+    guidance: 'An observer follow-up that the user is about to turn off.' });
+  assert.equal(delivered.ok, true);
+  finishFirstPrompt();
+  await until(() => !!finishCheckpointRead);
+  f.sidecar.setObserverEnabled('run', false);
+  f.sidecar.setObserverEnabled('run', true);
+  finishCheckpointRead();
+  const result = await pending;
+  assert.equal(result.status, 'done');
+  assert.equal(f.calls.prompt, 2, 'only the first prompt and accepted noReply insertion were sent');
+  assert.equal(f.calls.abort, 0, 'switching the observer never aborts the main agent');
 });
 
 for (const status of ['pending', 'running', '']) test(`native retry refuses an ambiguous ${status || 'unknown'} tool without assistant.error`, async t => {

@@ -676,6 +676,10 @@ function syncCurrentSessionAgentUi(session = state.currentSession) {
 }
 
 const observerHistorySelection = new Map();
+const sessionObserverUpdates = new Map();
+const sessionObserverSyncErrors = new Map();
+const sessionObserverEventVersions = new Map();
+const observerEyeGuards = new WeakSet();
 let observerPendingSessionId = '';
 let observerEarlierSessionId = '';
 let sessionLoadToken = 0;
@@ -697,6 +701,7 @@ function observerSessionsInMemory(sessionId) {
   return [...new Set([
     state.currentSession?.id === id ? state.currentSession : null,
     state.activeRuns.get(id)?.sessionRef,
+    state.activeRuns.get(id)?.runCtx?.sessionRef,
     state.sessions.find(item => String(item.id) === id)
   ].filter(Boolean))];
 }
@@ -714,6 +719,8 @@ const observerCompletion = window.ZObserverCompletion?.createController({
   isBusy: id => isSessionExecutionActive(id) || state.queuedTurns.has(id) || sessionRewindRequests.has(id),
   // Rules mode cannot judge a goal; skip without flashing a "checking" state.
   reviewEnabled: () => !!state.config?.observer?.model && state.config.observer.completion?.enabled !== false,
+  sessionEnabled: (id, session) => session?.observerEnabled !== false
+    && !observerSessionsInMemory(id).some(item => item.observerEnabled === false),
   render: id => { if (state.currentSession?.id === id) renderWdMonitor(); }
 });
 // Run and submit paths reach it through globalThis: they are also loaded on
@@ -721,19 +728,111 @@ const observerCompletion = window.ZObserverCompletion?.createController({
 globalThis.zObserverCompletion = observerCompletion;
 setInterval(() => observerCompletion?.tick(document), 1000);
 
+function sessionObserverEnabled(session = state.currentSession) {
+  return session?.observerEnabled !== false;
+}
+
+function applySessionObserverState(detail = {}) {
+  const id = String(detail.id || '');
+  if (!id || typeof detail.observerEnabled !== 'boolean') return;
+  for (const session of observerSessionsInMemory(id)) {
+    session.observerEnabled = detail.observerEnabled;
+    if (Object.hasOwn(detail, 'observerCompletion')) session.observerCompletion = detail.observerCompletion;
+  }
+  void observerCompletion?.setEnabled(id, detail.observerEnabled);
+  if (detail.runtimeApplied === false) sessionObserverSyncErrors.set(id, '设置已保存，当前运行同步失败，请重试。');
+  else if (detail.runtimeApplied === true) sessionObserverSyncErrors.delete(id);
+  if (state.currentSession?.id === id) { renderWdMonitor(); renderModelBadge(); }
+}
+
+async function setSessionObserverEnabled(sessionId, enabled) {
+  const id = String(sessionId || '');
+  if (!id || sessionObserverUpdates.has(id)) return;
+  const previous = observerSessionsInMemory(id)[0]?.observerEnabled !== false;
+  const version = sessionObserverEventVersions.get(id) || 0;
+  sessionObserverUpdates.set(id, true);
+  sessionObserverSyncErrors.delete(id);
+  applySessionObserverState({ id, observerEnabled: enabled !== false });
+  try {
+    const result = await api.setSessionObserverEnabled(id, enabled !== false);
+    if (!result?.ok) throw new Error(result?.error || '观察者开关保存失败，请重试。');
+    if ((sessionObserverEventVersions.get(id) || 0) === version) applySessionObserverState(result);
+    if (result.runtimeApplied === false) sessionObserverSyncErrors.set(id, '设置已保存，当前运行同步失败，请重试。');
+    return result;
+  } catch (error) {
+    if ((sessionObserverEventVersions.get(id) || 0) === version) applySessionObserverState({ id, observerEnabled: previous });
+    sessionObserverSyncErrors.set(id, String(error?.message || '观察者开关保存失败，请重试。'));
+    return { ok: false, error: error?.message };
+  } finally {
+    sessionObserverUpdates.delete(id);
+    if (state.currentSession?.id === id) { renderWdMonitor(); renderModelBadge(); }
+  }
+}
+
+function renderSessionObserverControl(host, session) {
+  if (!host || !session?.id) return;
+  const enabled = sessionObserverEnabled(session), id = session.id;
+  host.dataset.sessionObserverEnabled = String(enabled);
+  const header = host.querySelector('.wd-header');
+  if (!header) return;
+  const toggle = document.createElement('button');
+  toggle.type = 'button'; toggle.className = 'z-session-observer-toggle';
+  toggle.dataset.sessionObserverToggle = id;
+  toggle.setAttribute('role', 'switch'); toggle.setAttribute('aria-checked', String(enabled));
+  toggle.setAttribute('aria-label', '启用此任务的观察者');
+  toggle.title = enabled ? '关闭本任务观察者' : '开启本任务观察者';
+  toggle.textContent = enabled ? '已开启' : '已关闭';
+  toggle.disabled = sessionObserverUpdates.has(id);
+  header.insertBefore(toggle, header.querySelector('[data-observer-config]'));
+  let notice = host.querySelector('.z-session-observer-notice');
+  if (!notice) { notice = document.createElement('p'); notice.className = 'z-session-observer-notice'; header.after(notice); }
+  notice.setAttribute('role', 'status'); notice.replaceChildren();
+  const error = sessionObserverSyncErrors.get(id);
+  notice.hidden = enabled && !error;
+  notice.append(document.createTextNode(error || '已关闭 · 仅此任务。主 Agent 继续工作，已有观察记录保留。'));
+  if (error) {
+    const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重试';
+    retry.dataset.sessionObserverRetry = id; retry.disabled = sessionObserverUpdates.has(id); notice.append(retry);
+  }
+  const closeEye = () => {
+    if (host.dataset.sessionObserverEnabled !== 'false') return;
+    const eye = host.querySelector('.wd-oracle');
+    if (!eye) return;
+    if (eye.dataset.eye !== 'closed') eye.dataset.eye = 'closed';
+    if (eye.hasAttribute('data-blink')) delete eye.dataset.blink;
+    eye.style.removeProperty('--wd-gaze-x'); eye.style.removeProperty('--wd-gaze-y');
+  };
+  closeEye();
+  if (!observerEyeGuards.has(host)) {
+    observerEyeGuards.add(host);
+    new MutationObserver(closeEye).observe(host, { subtree: true, attributes: true, attributeFilter: ['data-eye', 'data-blink'] });
+  }
+}
+
 function renderWdMonitor(session = state.currentSession) {
   if (observerPendingSessionId) { renderWdMonitorLoading(); return; }
   if (session && state.currentSession?.id !== session.id) return;
+  if (session?.id) void observerCompletion?.setEnabled(session.id, sessionObserverEnabled(session));
   const monitor = window.ZWdMonitor;
   if (!monitor) return;
   const runCtx = session?.id ? getRunCtx(session.id) : null;
   const selection = monitor.selectSession(session, runCtx, observerHistorySelection.get(session?.id) || '');
   // The end-of-turn card belongs to the newest saved run only.
   const record = observerCompletion?.recordFor(session?.id) || session?.observerCompletion;
-  const completion = !isSessionExecutionActive(session?.id) && selection.key === selection.runs?.[0]?.key
+  const completion = sessionObserverEnabled(session) && !isSessionExecutionActive(session?.id) && selection.key === selection.runs?.[0]?.key
     ? window.ZObserverCompletion?.displayFor(session, record) : null;
   monitor.render($('#rs-watchdog'), { ...selection, completion, earlierLoading: observerEarlierSessionId === session?.id });
+  renderSessionObserverControl($('#rs-watchdog'), session);
 }
+
+$('#rs-watchdog')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-session-observer-toggle], [data-session-observer-retry]');
+  if (!button) return;
+  const id = button.dataset.sessionObserverToggle || button.dataset.sessionObserverRetry;
+  if (id !== state.currentSession?.id) return;
+  const enabled = sessionObserverEnabled();
+  void setSessionObserverEnabled(id, button.dataset.sessionObserverRetry ? enabled : !enabled);
+});
 
 $('#rs-watchdog')?.addEventListener('change', event => {
   if (!event.target.matches('[data-observer-history]') || !state.currentSession?.id || observerPendingSessionId) return;
@@ -1294,6 +1393,11 @@ async function init() {
     }
   });
   api.onSessionChanged?.((detail) => {
+    if (detail?.reason === 'observer-enabled-changed') {
+      sessionObserverEventVersions.set(detail.id, (sessionObserverEventVersions.get(detail.id) || 0) + 1);
+      applySessionObserverState(detail);
+      return;
+    }
     applyExternalSessionChange(detail).catch((error) => {
       console.error('[session-sync]', error);
     });
@@ -11236,6 +11340,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         title: session.title || latestUserMessage.content || 'Z task',
         modelSelection,
         prompt: String(latestUserMessage.content || ''),
+        observerWake: latestUserMessage.observerWake || false,
         attachments: latestUserMessage.attachments || [],
         ...(hasResetHistory ? { requestMessageIndex, requestMessageAnchor } : {}),
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
@@ -11799,6 +11904,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   const runSession = options.session || state.currentSession;
   if (!runSession) return { ok: false, error: '没有可用会话' };
   await ensureFullSessionLoaded(runSession);
+  if (options.observerWake && runSession.observerEnabled === false) return { ok: false, error: 'observer_disabled', code: 'OBSERVER_DISABLED' };
   if (sessionRewindRequests.has(runSession.id)) return { ok: false, error: 'busy' };
   const intentId = String(options.intentId || '').trim();
   const persistedSubmission = findPersistedIntentSubmission(runSession, intentId);
@@ -23547,6 +23653,10 @@ async function saveModelPicker() {
 
 function renderModelBadge() {
   window.ZConnectionControls?.mount({ api, config: state.config, onNotice: toast, onLayoutChange: scheduleComposerGrow,
+    session: state.currentSession,
+    observerPending: id => sessionObserverUpdates.has(id),
+    observerSyncError: id => sessionObserverSyncErrors.get(id) || '',
+    onSessionObserverChange: setSessionObserverEnabled,
     onObserverChange: observer => { state.config.observer = observer; renderModelBadge(); }
   });
   const selection = getAgentModelSelection();

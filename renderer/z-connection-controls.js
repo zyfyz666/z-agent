@@ -1,6 +1,7 @@
 (function (root) {
   'use strict';
   let host, initialized = false, entries = [], loading = 0, saving = false, outputSelectionKey = '';
+  let dialogSessionId = '';
   const $ = id => document.getElementById(id);
   const key = value => JSON.stringify([value.providerId, value.supplierId]);
   const t = value => document.documentElement.lang === 'en' ? root.ZI18n?.translate(value) || value : value;
@@ -63,9 +64,29 @@
     summary.dataset.error = String(!!status.error);
   }
   function render() {
-    $('zObserverName').textContent = observer().model?.name || t('规则');
+    $('zObserverName').textContent = host.session?.observerEnabled === false ? t('已关闭') : observer().model?.name || t('规则');
     const effortLabel = observer().model ? ` · ${t('观察者思考强度')}：${t(reasoningLabels[reasoningEffort(observer().reasoningEffort)])}` : '';
     $('zObserverPill').title = `${t('观察者')} · ${observer().model?.name || t('规则模式')}${effortLabel} · ${observer().judgeEvery || 6}`;
+    if (host.session?.observerEnabled === false) $('zObserverPill').title = t('已关闭 · 仅此任务');
+    renderSessionControl();
+  }
+  function renderSessionControl() {
+    const input = $('zSessionObserverEnabled');
+    if (!input) return;
+    const ownsDialog = dialogSessionId && dialogSessionId === host.session?.id;
+    input.checked = host.session?.observerEnabled !== false;
+    input.disabled = !ownsDialog || host.observerPending?.(dialogSessionId) === true;
+    const error = ownsDialog ? host.observerSyncError?.(dialogSessionId) : '';
+    $('zSessionObserverHint').textContent = t(error || '开关立即生效，仅影响此任务。关闭后主 Agent 继续工作，历史观察记录保留。');
+    $('zSessionObserverRetry').hidden = !error;
+    $('zSessionObserverRetry').disabled = input.disabled;
+  }
+  async function changeSessionObserver(retry = false) {
+    const id = dialogSessionId;
+    if (!id || id !== host.session?.id || host.observerPending?.(id)) return;
+    const enabled = retry ? host.session.observerEnabled !== false : $('zSessionObserverEnabled').checked;
+    await host.onSessionObserverChange?.(id, enabled);
+    if (dialogSessionId === id && host.session?.id === id) renderSessionControl();
   }
   function renderReasoningControl() {
     const ruleOnly = $('zConnectionSelect').value === 'rules';
@@ -86,6 +107,7 @@
   }
   async function open() {
     if (saving) return;
+    dialogSessionId = String(host.session?.id || '');
     const sequence = ++loading;
     $('zConnectionTitle').textContent = t('观察者设置');
     $('zConnectionDescription').textContent = t('规则模式无需模型。选择独立模型后，观察者会在后台分析任务摘要并提供建议。修改从下一轮任务生效。');
@@ -100,6 +122,7 @@
     $('zObserverOutputTokens').setCustomValidity('');
     $('zObserverOutputSummary').textContent = '';
     fillCompletion(observer());
+    renderSessionControl();
     $('zConnectionNotice').textContent = t('正在读取连接…');
     $('zConnectionSelect').disabled = true;
     $('zConnectionSave').disabled = true;
@@ -174,6 +197,9 @@
   }
   root.ZConnectionControls = { outputLimitState, mount(options) {
     host = options;
+    if ($('zConnectionDialog').open && dialogSessionId !== String(host.session?.id || '')) {
+      loading++; $('zConnectionDialog').close(); dialogSessionId = '';
+    }
     if (!initialized) {
       initialized = true;
       const layoutObserver = new ResizeObserver(() => host.onLayoutChange?.());
@@ -184,6 +210,8 @@
       $('zConnectionModel').addEventListener('change', renderOutputControl);
       $('zObserverOutputTokens').addEventListener('input', renderOutputControl);
       $('zObserverCompletion').addEventListener('change', renderCompletionControl);
+      $('zSessionObserverEnabled')?.addEventListener('change', () => { void changeSessionObserver(); });
+      $('zSessionObserverRetry')?.addEventListener('click', () => { void changeSessionObserver(true); });
       $('zConnectionForm').addEventListener('submit', save);
       $('zConnectionClose').addEventListener('click', close);
       $('zConnectionCancel').addEventListener('click', close);

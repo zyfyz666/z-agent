@@ -104,6 +104,7 @@ const { detectVsCode, launchVsCode } = require('./lib/vscode-launcher');
 const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
 const { normalizeObserverSettings, completionInput, completionSettings, reviewCompletion } = require('./lib/observer-model');
+const { sessionObserverEnabled, cancelSessionObserverCompletion } = require('./lib/session-observer-settings');
 const { normalizeOutputTokens, validateOutputTokens } = require('./lib/model-output-limits');
 const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
 const { sessionConversationRevision, assertConversationRevision, rewindBoundary, createRewindBackup,
@@ -6184,26 +6185,36 @@ ipcMain.handle('observer:configure', (_event, payload = {}) => {
 // newer request or a cancel aborts the older one. Only goal/result summaries are
 // sent, never API keys; the renderer decides what to do with the verdict.
 const completionReviews = new Map();
+const sessionObserverOverrides = new Map();
 ipcMain.handle('observer:review-completion', async (_event, payload = {}) => {
   const sessionId = String(payload.sessionId || '');
-  if (!sessionId) return { skipped: 'no-session' };
-  const cfg = loadConfig();
-  const settings = completionSettings(normalizeObserverSettings(cfg.observer).completion);
-  if (!settings.enabled) return { skipped: 'disabled' };
-  const connection = observerConnectionForRun(cfg);
-  if (!connection) return { skipped: 'rules-only' };
-  if (connection.unavailable) return { error: '所选观察者 API 已停用，请在观察者设置里重新选择', maxWakes: settings.maxWakes };
+  if (!isSafeSessionId(sessionId)) return { skipped: 'no-session' };
+  // Register before the first read: disabling during that read must also
+  // cancel a review which has not reached its model request yet.
   completionReviews.get(sessionId)?.abort();
   const controller = new AbortController();
   completionReviews.set(sessionId, controller);
   const timer = setTimeout(() => controller.abort(), 300_000);
+  let settings;
   try {
+    const stored = await readSessionRecord(sessionId);
+    if (controller.signal.aborted) return { cancelled: true };
+    if (!stored) return { skipped: 'no-session' };
+    if (!sessionObserverEnabled(stored) || sessionObserverOverrides.get(sessionId) === false) return { skipped: 'disabled' };
+    const cfg = loadConfig();
+    settings = completionSettings(normalizeObserverSettings(cfg.observer).completion);
+    if (!settings.enabled) return { skipped: 'disabled' };
+    const connection = observerConnectionForRun(cfg);
+    if (!connection) return { skipped: 'rules-only' };
+    if (connection.unavailable) return { error: '所选观察者 API 已停用，请在观察者设置里重新选择', maxWakes: settings.maxWakes };
     const verdict = await reviewCompletion(connection, completionInput(payload), { signal: controller.signal });
+    if (controller.signal.aborted || completionReviews.get(sessionId) !== controller
+      || sessionObserverOverrides.get(sessionId) === false) return { cancelled: true };
     return { verdict, maxWakes: settings.maxWakes, model: connection.name || connection.modelId };
   } catch (error) {
     if (controller.signal.aborted) return { cancelled: true };
     const message = String(error?.message || '');
-    return { error: message.startsWith('观察者模型') ? message.slice(0, 160) : '观察者模型暂时不可用，本轮未核验', maxWakes: settings.maxWakes };
+    return { error: message.startsWith('观察者模型') ? message.slice(0, 160) : '观察者模型暂时不可用，本轮未核验', maxWakes: settings?.maxWakes };
   } finally {
     clearTimeout(timer);
     if (completionReviews.get(sessionId) === controller) completionReviews.delete(sessionId);
@@ -6222,27 +6233,95 @@ function readObserverWakes() {
   catch { return {}; }
 }
 let observerWakeWrite = Promise.resolve();
-ipcMain.handle('observer:list-wakes', () => Object.entries(readObserverWakes()).map(([sessionId, record]) => ({ ...record, sessionId })));
+async function writeObserverWakeIndex(sessionId, record) {
+  const pending = observerWakeWrite.catch(() => {}).then(async () => {
+    const index = readObserverWakes();
+    if (record && ['pending', 'scheduled'].includes(record.status)) index[sessionId] = record;
+    else delete index[sessionId];
+    await writeAtomic(observerWakeIndexPath(), index);
+  });
+  observerWakeWrite = pending.catch(error => console.warn('[observer] wake index write failed:', error?.message || error));
+  return pending;
+}
+ipcMain.handle('observer:list-wakes', async () => {
+  const records = await Promise.all(Object.keys(readObserverWakes()).map(async sessionId => {
+    if (!isSafeSessionId(sessionId)) return null;
+    const stored = await readSessionRecord(sessionId);
+    const record = stored?.observerCompletion;
+    return stored && sessionObserverEnabled(stored) && sessionObserverOverrides.get(sessionId) !== false
+      && ['pending', 'scheduled'].includes(record?.status) ? { ...record, sessionId } : null;
+  }));
+  return records.filter(Boolean);
+});
 ipcMain.handle('observer:set-completion', async (_event, sessionId, record) => {
   const id = String(sessionId || '');
   if (!isSafeSessionId(id) || !record || typeof record !== 'object' || JSON.stringify(record).length > 32_000) return { ok: false };
-  const wake = ['pending', 'scheduled'].includes(record.status);
   // Only this field changes: no updatedAt bump, so the conversation keeps its place in the list.
-  const saved = await withSessionWrite(id, async () => {
+  return withSessionWrite(id, async () => {
     const p = sessionPath(id);
     const data = p && fs.existsSync(p) ? await readSessionRecord(id, { sessionLocked: true }) : null;
-    if (!data) return false;
+    if (!data) return { ok: false, code: 'session-not-found' };
+    if (!sessionObserverEnabled(data) || sessionObserverOverrides.get(id) === false) {
+      await writeObserverWakeIndex(id, null);
+      return { ok: false, code: 'OBSERVER_DISABLED', observerEnabled: false, observerCompletion: data.observerCompletion };
+    }
     data.observerCompletion = record;
     await writeSessionFileAtomic(p, JSON.stringify(data, null, 2));
-    return true;
+    // Keep the session write lock until its index entry is committed, so a
+    // stale pending save cannot recreate a wake after the off switch wins.
+    await writeObserverWakeIndex(id, record);
+    return { ok: true, observerCompletion: record };
   });
-  observerWakeWrite = observerWakeWrite.then(async () => {
-    const index = readObserverWakes();
-    if (wake && saved) index[id] = record; else delete index[id];
-    await writeAtomic(observerWakeIndexPath(), index);
-  }).catch(error => console.warn('[observer] wake index write failed:', error?.message || error));
-  await observerWakeWrite;
-  return { ok: saved };
+});
+
+async function setSessionObserverEnabledRecord(sessionId, enabled) {
+  const id = String(sessionId || '');
+  if (!isSafeSessionId(id) || typeof enabled !== 'boolean') {
+    return { ok: false, error: '会话或观察者开关无效', code: 'INVALID_OBSERVER_SETTING' };
+  }
+  return withSessionWrite(id, async () => {
+    const stored = await readSessionRecord(id, { sessionLocked: true });
+    if (!stored) return { ok: false, error: '会话不存在', code: 'session-not-found' };
+    const previousOverride = sessionObserverOverrides.get(id);
+    sessionObserverOverrides.set(id, enabled);
+    if (!enabled) completionReviews.get(id)?.abort();
+    const data = { ...stored, observerEnabled: enabled };
+    if (!enabled && stored.observerCompletion) data.observerCompletion = cancelSessionObserverCompletion(stored.observerCompletion);
+    try {
+      await writeSessionFileAtomic(sessionPath(id), JSON.stringify(data, null, 2));
+    } catch (error) {
+      if (previousOverride === undefined) sessionObserverOverrides.delete(id);
+      else sessionObserverOverrides.set(id, previousOverride);
+      throw error;
+    }
+    const runtimeFailures = [];
+    for (const [runId, active] of openCodeActiveRuns) {
+      if (String(active.zSessionId || '') !== id) continue;
+      active.observerEnabled = enabled;
+      // A run still preparing attachments will read the override immediately
+      // before starting. Do not create a second runtime merely to toggle it.
+      if (!active.task) continue;
+      try {
+        const result = await openCodeSidecar?.setObserverEnabled?.(runId, enabled);
+        if (!result?.ok) runtimeFailures.push(result?.error || '当前运行的观察者未确认切换');
+      } catch (error) { runtimeFailures.push(error?.message || String(error)); }
+    }
+    let wakeIndexError = '';
+    if (!enabled) {
+      try { await writeObserverWakeIndex(id, null); }
+      catch (error) { wakeIndexError = error?.message || String(error); }
+    }
+    await refreshSessionSummaryCache(id, data);
+    const detail = { id, observerEnabled: enabled, observerCompletion: data.observerCompletion,
+      runtimeApplied: runtimeFailures.length === 0, ...(runtimeFailures.length ? { runtimeError: runtimeFailures.join('；') } : {}),
+      ...(wakeIndexError ? { wakeIndexError } : {}) };
+    notifyDesktopSessionUpdate({ ...detail, reason: 'observer-enabled-changed' });
+    return { ok: true, ...detail };
+  });
+}
+ipcMain.handle('session:observer-enabled-set', async (_event, sessionId, enabled) => {
+  try { return await setSessionObserverEnabledRecord(sessionId, enabled); }
+  catch (error) { return { ok: false, error: error?.message || String(error), code: error?.code || 'OBSERVER_SETTING_SAVE_FAILED' }; }
 });
 
 ipcMain.handle('models:quick-list', () => {
@@ -7275,6 +7354,7 @@ function toSessionSummary(data) {
         && data.contextReset.sourceSessionId === backupSourceId
         && Array.isArray(data.messages) && data.messages.length === backup.messageCount } : {}),
     conversationRevision: sessionConversationRevision(data),
+    observerEnabled: data.observerEnabled !== false,
     pinned: !!data.pinned,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
@@ -7305,6 +7385,7 @@ async function createFreshSessionRecord(options = {}) {
     id,
     title: String(options.title || '新对话').slice(0, 80),
     messages: [],
+    observerEnabled: true,
     pinned: false,
     workspace: normalizeWorkspacePath(options.workspace),
     createdAt: Date.now(), updatedAt: Date.now()
@@ -7799,6 +7880,13 @@ ipcMain.handle('session:save', async (_e, session) => {
     let persisted = { ...session, title: stored?.title ?? session.title,
       modelSelection: stored?.modelSelection
       || initialSessionModelSelection({ ...session, modelSelection: undefined }) };
+    // The task switch and completion IPC own these fields. Background message
+    // saves must not restore an older switch value or a cancelled wake.
+    persisted.observerEnabled = (stored || session).observerEnabled !== false;
+    if (stored) {
+      if (stored.observerCompletion) persisted.observerCompletion = stored.observerCompletion;
+      else delete persisted.observerCompletion;
+    }
     // Only the browser-state IPC may change this field. Message saves often
     // carry stale renderer snapshots, including snapshots from a previous tab.
     if (stored && Object.hasOwn(stored, 'browserState')) persisted.browserState = stored.browserState;
@@ -9939,6 +10027,10 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     }
     assertConversationRevision(authoritativeSession, request.conversationRevision);
     request.conversationRevision = sessionConversationRevision(authoritativeSession);
+    request.observerEnabled = authoritativeSession?.observerEnabled !== false;
+    if (request.observerWake && !request.observerEnabled) {
+      throw Object.assign(new Error('此任务的观察者已关闭，自动唤醒已取消。'), { code: 'OBSERVER_DISABLED' });
+    }
     request.branchId = String(authoritativeSession?.id || request.zSessionId || '');
     request.contextCheckpoints = Array.isArray(authoritativeSession?.contextCheckpoints) ? authoritativeSession.contextCheckpoints : [];
     delete request.taskMemoryContext;
@@ -10285,8 +10377,13 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         });
       }
     };
+    const effectiveObserverEnabled = sessionObserverOverrides.get(zSessionId) ?? request.observerEnabled;
+    if (request.observerWake && !effectiveObserverEnabled) {
+      throw Object.assign(new Error('此任务的观察者已关闭，自动唤醒已取消。'), { code: 'OBSERVER_DISABLED' });
+    }
     const task = providerAdapter.startTurn({
       ...request,
+      observerEnabled: effectiveObserverEnabled,
       runId,
       zConfigSnapshotId: coreTurn?.configSnapshotId || '',
       language: cfg.language,

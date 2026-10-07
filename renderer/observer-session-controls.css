@@ -1,0 +1,15 @@
+.wd-header { flex-wrap: wrap; }
+.z-session-observer-toggle {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  border: 1px solid var(--border-soft); border-radius: 999px; padding: 4px 9px;
+  background: var(--bg-elev); color: var(--text-dim); font: inherit; font-size: 11px; cursor: pointer;
+}
+.z-session-observer-toggle::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.z-session-observer-toggle[aria-checked="true"] { color: var(--text); }
+.z-session-observer-toggle[aria-checked="true"]::before { background: #61b59b; }
+.z-session-observer-toggle:disabled { opacity: .55; cursor: wait; }
+.z-session-observer-toggle:focus-visible { outline: 2px solid var(--border-strong); outline-offset: 3px; }
+.z-session-observer-notice { margin: 0; padding: 8px 14px; color: var(--text-dim); font-size: 12px; line-height: 1.65; }
+.z-session-observer-notice[hidden] { display: none; }
+.z-session-observer-notice button { margin-left: 8px; color: var(--text); background: transparent; border: 1px solid var(--border-soft); border-radius: 6px; cursor: pointer; }
+#zSessionObserverRetry[hidden] { display: none; }

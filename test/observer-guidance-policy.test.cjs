@@ -5,8 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { observerGenerationCurrent, observerRunEnabled } = require('../lib/opencode-sidecar');
 const source = fs.readFileSync(path.join(__dirname, '../lib/opencode-sidecar.js'), 'utf8');
-const start = source.indexOf('        if (this.thrashWatchdogEnabled && run) {');
+const start = source.indexOf('        if (this.thrashWatchdogEnabled && run && run.request?.observerEnabled !== false) {');
 const end = source.indexOf('        const settled = settledAssistantSince', start);
 assert.ok(start > 0 && end > start);
 const pollBlock = source.slice(start, end);
@@ -38,7 +39,7 @@ function fixture(connection) {
     async deliverInterjection(runId, request) { deliveries.push({ runId, request }); return { ok: true }; }
   };
   const context = vm.createContext({ run, driver, messages: [], sessionID: 'kernel-session',
-    ModelObserver: ControlledObserver, emitWatchdogStatus() {},
+    ModelObserver: ControlledObserver, emitWatchdogStatus() {}, observerGenerationCurrent, observerRunEnabled,
     stepsFromMessages: () => Array.from({ length: 12 }, (_, index) => ({ op: 'read', target: `file-${index}` })),
     thrashGuidance: value => value.message, errorText: error => error.message,
     appendAudit() { throw new Error('Fixture has no audit path'); }, path,
@@ -104,4 +105,18 @@ test('explicit rules-only observation still delivers its deterministic rule guid
   assert.equal(f.deliveries[0].request.guidance, f.verdict.message);
   assert.equal(f.decisions.length, 1);
   assert.equal(f.events.length, 1);
+});
+
+test('a disabled task skips both model reviews and deterministic rules', async () => {
+  for (const connection of [null, { modelId: 'observer-model' }]) {
+    const f = fixture(connection);
+    f.run.request.observerEnabled = false;
+    await f.poll();
+    assert.deepEqual(f.observations, []);
+    assert.deepEqual(f.deliveries, []);
+    assert.equal(f.run.modelObserver, undefined);
+    f.run.request.observerEnabled = true;
+    await f.poll();
+    assert.equal(f.observations.length, 1);
+  }
 });

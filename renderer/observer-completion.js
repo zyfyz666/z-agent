@@ -109,7 +109,23 @@
     const clock = deps.timers || globalThis;
     const live = new Map(); // sessionId -> { record }
     const timers = new Map();
+    const enabledOverrides = new Map();
+    const generations = new Map();
     const quiet = async fn => { try { return await fn(); } catch { return null; } };
+    const enabled = (id, session) => enabledOverrides.get(id) !== false && session?.observerEnabled !== false
+      && deps.sessionEnabled?.(id, session) !== false;
+
+    function setEnabled(id, value) {
+      id = String(id || '');
+      if (!id) return Promise.resolve();
+      const next = value !== false;
+      if (enabledOverrides.get(id) === next) return Promise.resolve();
+      enabledOverrides.set(id, next);
+      generations.set(id, (generations.get(id) || 0) + 1);
+      if (next) return Promise.resolve();
+      clock.clearTimeout(timers.get(id)); timers.delete(id);
+      return cancel(id);
+    }
 
     // Main writes only `observerCompletion` (and the wake index); the renderer's
     // copies are updated so a later full save carries the same record.
@@ -126,6 +142,7 @@
     // Long waits are stepped (<= 60 s) so a machine that slept through a wake sees it as expired.
     function arm(id) {
       clock.clearTimeout(timers.get(id)); timers.delete(id);
+      if (!enabled(id)) return;
       const record = live.get(id)?.record;
       if (!['pending', 'scheduled'].includes(record?.status)) return;
       timers.set(id, clock.setTimeout(() => {
@@ -143,18 +160,29 @@
       const entry = live.get(id);
       if (!entry) return;
       const { record } = entry;
+      if (record.dispatching) return;
+      const generation = generations.get(id) || 0;
       const session = await quiet(() => deps.loadSession(id));
+      if (live.get(id) !== entry || entry.record !== record || (generations.get(id) || 0) !== generation) return;
+      if (!enabled(id, session)) return cancel(id);
       if (!session) return finalize(id, { ...record, status: 'failed', endedAt: now(), error: '找不到这个对话' });
       const last = latestRun(session.messages || []);
       if (deps.isBusy(id) || String(last?.run?.runId || '') !== record.runId) {
         return finalize(id, { ...record, status: 'superseded', endedAt: now() });
       }
-      // Mark sent before submitting: submit resolves only when the woken run ends,
-      // and that run's own review must not be overwritten afterwards.
+      // Reserve the wake while it is still cancellable. `submit` resolves when
+      // the run ends, so never overwrite a newer run's review on completion.
       const wakeId = `wake-${now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      await finalize(id, { ...record, status: 'sent', sentAt: now(), wakeId, retrying: undefined });
+      await finalize(id, { ...record, dispatching: true, wakeId, retrying: undefined });
+      if (!enabled(id, session) || (generations.get(id) || 0) !== generation) return;
       const result = await quiet(() => deps.submit(session, wakeText(record), { id: wakeId, wake: record.wakes + 1, runId: record.runId }));
-      if ((session.messages || []).some(message => message?.observerWake?.id === wakeId)) return;
+      if (!enabled(id, session) || (generations.get(id) || 0) !== generation) return;
+      if ((session.messages || []).some(message => message?.observerWake?.id === wakeId)) {
+        if (live.get(id) === entry && entry.record.wakeId === wakeId && entry.record.dispatching) {
+          await finalize(id, { ...record, status: 'sent', sentAt: now(), wakeId, retrying: undefined });
+        }
+        return;
+      }
       if (result?.error === 'busy' && !deps.isBusy(id)) {
         // The concurrent-run limit is full; the conversation itself is free. Retry,
         // keeping the original pending/scheduled status.
@@ -168,7 +196,8 @@
       if (!id) return;
       const last = latestRun(session.messages || []);
       const open = live.get(id)?.record;
-      if (!shouldReview(last?.run) || deps.isBusy(id) || deps.reviewEnabled?.() === false) {
+      if (!enabled(id, session)) { await cancel(id); return; }
+      if (!shouldReview(last?.run) || deps.isBusy(id) || deps.reviewEnabled?.(id, session) === false) {
         if (OPEN.has(open?.status)) await finalize(id, { ...open, status: 'superseded', endedAt: now() });
         return;
       }
@@ -181,7 +210,9 @@
       deps.render?.(id);
       const reply = await quiet(() => deps.api.reviewObserverCompletion(payload)) || { error: '观察者模型暂时不可用，本轮未核验' };
       if (live.get(id)?.record !== reviewing) return;
-      const fresh = latestRun((await quiet(() => deps.loadSession(id)))?.messages || []);
+      const freshSession = await quiet(() => deps.loadSession(id));
+      if (live.get(id)?.record !== reviewing || !enabled(id, freshSession)) return cancel(id);
+      const fresh = latestRun(freshSession?.messages || []);
       if (deps.isBusy(id) || String(fresh?.run?.runId || '') !== payload.runId || reply.cancelled || reply.skipped) {
         live.delete(id);
         return void deps.render?.(id);
@@ -203,6 +234,7 @@
 
     // Manual wake: a pending/scheduled one now, or one that expired or hit the limit.
     async function wakeNow(id, fallback) {
+      if (!enabled(id)) return;
       if (!live.has(id) && fallback?.followUp) live.set(id, { record: fallback });
       const record = live.get(id)?.record;
       if (!record?.followUp || !['pending', 'scheduled', 'expired', 'limit'].includes(record.status)) return;
@@ -223,10 +255,16 @@
     // ("click to wake"); scheduled ones still in the future are re-armed.
     async function hydrate() {
       const stored = await quiet(() => deps.api.listObserverWakes?.()) || [];
-      for (const record of Array.isArray(stored) ? stored : []) {
+      for (const storedRecord of Array.isArray(stored) ? stored : []) {
+        // No dispatch can remain in flight across a renderer restart.
+        const record = { ...storedRecord, dispatching: undefined };
         const id = String(record?.sessionId || '');
         if (!id || !['pending', 'scheduled'].includes(record.status)) continue;
+        const generation = generations.get(id) || 0;
+        const session = await quiet(() => deps.loadSession(id));
+        if ((generations.get(id) || 0) !== generation || live.has(id)) continue;
         live.set(id, { record });
+        if (!enabled(id, session)) { await cancel(id); continue; }
         if (record.dueAt <= now() || record.status === 'pending') await finalize(id, { ...record, status: 'expired', expiredAt: now() });
         else arm(id);
       }
@@ -241,7 +279,7 @@
       }
     }
 
-    return { afterRun, cancel, wakeNow, onUserMessage, hydrate, recordFor, tick, arm, dispatch };
+    return { afterRun, cancel, wakeNow, onUserMessage, hydrate, recordFor, tick, arm, dispatch, setEnabled, isEnabled: enabled };
   }
 
   return { COUNTDOWN_MS, latestGoal, latestRun, shouldReview, stepsFromTimeline, reviewPayload, decide, wakeText, displayFor, remaining, createController };

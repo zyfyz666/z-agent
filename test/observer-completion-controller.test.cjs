@@ -231,3 +231,98 @@ test('new labels translate to English', () => {
     assert.doesNotMatch(translate(value), /[㐀-鿿]/u, value);
   }
 });
+
+test('a disabled task never starts a completion review', async () => {
+  const h = harness({ verdicts: [{ verdict: wake() }] });
+  h.session.observerEnabled = false;
+  await h.controller.afterRun(h.session);
+  assert.equal(h.calls.reviews.length, 0);
+  assert.equal(h.controller.recordFor('s1'), null);
+});
+
+test('disabling immediately cancels the countdown and enabling does not revive it', async () => {
+  const h = harness({ verdicts: [{ verdict: wake(), maxWakes: 3 }] });
+  await h.controller.afterRun(h.session);
+  h.session.observerEnabled = false;
+  await h.controller.setEnabled('s1', false);
+  assert.equal(h.controller.recordFor('s1').status, 'cancelled');
+  h.session.observerEnabled = true;
+  await h.controller.setEnabled('s1', true);
+  await h.clock.advance(60_000);
+  assert.equal(h.calls.submits.length, 0);
+});
+
+test('a late review cannot revive a disabled and then re-enabled task', async () => {
+  const h = harness({ verdicts: ['defer'] });
+  const pending = h.controller.afterRun(h.session);
+  await Promise.resolve();
+  await h.controller.setEnabled('s1', false);
+  await h.controller.setEnabled('s1', true);
+  h.resolveReview({ verdict: wake(), maxWakes: 3 });
+  await pending;
+  await h.clock.advance(60_000);
+  assert.equal(h.calls.cancels, 1);
+  assert.equal(h.calls.submits.length, 0);
+  assert.equal(h.controller.recordFor('s1'), null);
+});
+
+test('disabled scheduled wakes are cancelled during hydration', async () => {
+  const h = harness();
+  h.session.observerEnabled = false;
+  h.api.listObserverWakes = async () => [{ sessionId: 's1', runId: 'r1', status: 'scheduled', dueAt: h.clock.now() + 60_000, followUp: 'continue', wakes: 0 }];
+  await h.controller.hydrate();
+  assert.equal(h.controller.recordFor('s1').status, 'cancelled');
+  await h.clock.advance(120_000);
+  assert.equal(h.calls.submits.length, 0);
+});
+
+test('disabling while dispatch loads the session prevents the wake', async () => {
+  const h = harness({ verdicts: [{ verdict: wake(), maxWakes: 3 }] });
+  await h.controller.afterRun(h.session);
+  let finishLoad;
+  h.deps.loadSession = () => new Promise(resolve => { finishLoad = resolve; });
+  const dispatch = h.controller.dispatch('s1');
+  await Promise.resolve();
+  await h.controller.setEnabled('s1', false);
+  finishLoad(h.session);
+  await dispatch;
+  assert.equal(h.calls.submits.length, 0);
+  assert.equal(h.controller.recordFor('s1').status, 'cancelled');
+});
+
+test('disabling while a reserved wake is saved blocks submit and never records sent', async () => {
+  const h = harness({ verdicts: [{ verdict: wake(), maxWakes: 3 }] });
+  await h.controller.afterRun(h.session);
+  let finishSave;
+  const saved = [];
+  h.api.setObserverCompletion = async (id, record) => {
+    saved.push(record);
+    if (record.dispatching && record.status === 'pending') await new Promise(resolve => { finishSave = resolve; });
+  };
+  const dispatch = h.controller.dispatch('s1');
+  for (let i = 0; i < 10 && !finishSave; i++) await Promise.resolve();
+  await h.controller.setEnabled('s1', false);
+  finishSave(); await dispatch;
+  assert.equal(h.calls.submits.length, 0);
+  assert.equal(h.controller.recordFor('s1').status, 'cancelled');
+  assert.equal(saved.some(record => record.status === 'sent'), false);
+});
+
+test('a reserved dispatch rejects a second manual wake while submit is pending', async () => {
+  const h = harness({ verdicts: [{ verdict: wake(), maxWakes: 3 }] });
+  await h.controller.afterRun(h.session);
+  let finishSubmit;
+  h.deps.submit = async (session, text, wakeInfo) => {
+    h.calls.submits.push(wakeInfo);
+    await new Promise(resolve => { finishSubmit = resolve; });
+    session.messages.push({ role: 'user', content: text, observerWake: wakeInfo });
+    return { ok: true };
+  };
+  const first = h.controller.wakeNow('s1');
+  for (let i = 0; i < 20 && !finishSubmit; i++) await Promise.resolve();
+  assert.equal(h.controller.recordFor('s1').dispatching, true);
+  await h.controller.wakeNow('s1');
+  assert.equal(h.calls.submits.length, 1);
+  finishSubmit(); await first;
+  assert.equal(h.controller.recordFor('s1').status, 'sent');
+});

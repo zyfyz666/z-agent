@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('z', {
   listQuickModels: () => ipcRenderer.invoke('models:quick-list'),
   listModelConnections: () => ipcRenderer.invoke('models:connections'),
   configureObserver: (settings) => ipcRenderer.invoke('observer:configure', settings),
+  setSessionObserverEnabled: (sessionId, enabled) => ipcRenderer.invoke('session:observer-enabled-set', sessionId, enabled),
   reviewObserverCompletion: (payload) => ipcRenderer.invoke('observer:review-completion', payload),
   cancelObserverCompletion: (sessionId) => ipcRenderer.invoke('observer:cancel-completion', sessionId),
   setObserverCompletion: (sessionId, record) => ipcRenderer.invoke('observer:set-completion', sessionId, record),

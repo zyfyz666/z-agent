@@ -14,6 +14,7 @@ let application, page;
 const errors = [];
 const report = { ok: false, checks: [], screenshots: [], errors };
 const key = entry => JSON.stringify([entry.providerId, entry.supplierId]);
+const modelIdentity = selection => [selection.providerId, selection.supplierId, selection.modelId, selection.modelType];
 const shot = async name => { const file = path.join(output, name + '.png'); await page.screenshot({ path: file }); report.screenshots.push(file); };
 async function launch() {
   application = await electron.launch({ executablePath: require('electron'), args: [appRoot], cwd: appRoot, env });
@@ -43,7 +44,14 @@ async function selectMain(connection) {
   assert.equal(await choices.count(), 1);
   assert.equal(await choices.first().getAttribute('data-model-picker-provider'), connection.providerId);
   await choices.first().click();
-  await page.waitForFunction(provider => state.config.agentModel.providerId === provider && !modelPickerSaving, connection.providerId);
+  await page.waitForFunction(expected => {
+    const selected = getAgentModelSelection();
+    return selected.providerId === expected.providerId && selected.supplierId === expected.supplierId
+      && selected.modelId === 'same-model' && !modelPickerSaving;
+  }, connection);
+  const selected = await publicState();
+  assert.deepEqual(modelIdentity(selected.savedModelSelection), [connection.providerId, connection.supplierId, 'same-model', 'text'], 'the current session model is persisted');
+  assert.deepEqual(modelIdentity(selected.modelSelection), modelIdentity(selected.savedModelSelection));
   await page.locator('#modelPill').click();
 }
 async function save() {
@@ -51,7 +59,10 @@ async function save() {
   await page.waitForFunction(() => !document.querySelector('#zConnectionDialog').open);
 }
 async function publicState() { return page.evaluate(async () => {
-  const cfg = await z.getConfig(); return { agentModel: cfg.agentModel, observer: cfg.observer };
+  const cfg = await z.getConfig();
+  const session = await z.getSession(state.currentSession.id);
+  return { sessionId: session.id, modelSelection: getAgentModelSelection(), savedModelSelection: session.modelSelection,
+    defaultModel: cfg.agentModel, observer: cfg.observer };
 }); }
 (async () => {
   try {
@@ -77,13 +88,14 @@ async function publicState() { return page.evaluate(async () => {
     const [main, observer] = connections;
     const safe = await page.evaluate(() => z.listModelConnections());
     assert.doesNotMatch(JSON.stringify(safe), /isolated-test-secret|127\.0\.0\.1/);
+    const beforeBrowsing = await publicState();
     await open('main');
     await page.locator('#modelQuickSupplier').selectOption(key(observer));
     await shot('00-supplier-model-menu');
     await page.keyboard.press('Escape');
-    assert.equal((await publicState()).agentModel.providerId, main.providerId, 'browsing a supplier does not change the active connection');
+    assert.deepEqual(modelIdentity((await publicState()).modelSelection), modelIdentity(beforeBrowsing.modelSelection), 'browsing a supplier does not change the current session model');
     await selectMain(main);
-    assert.equal((await publicState()).agentModel.providerId, main.providerId);
+    assert.equal((await publicState()).modelSelection.providerId, main.providerId);
     report.checks.push('composer API selection');
     await open('observer');
     await page.locator('#zConnectionSelect').selectOption(key(observer));
@@ -99,10 +111,11 @@ async function publicState() { return page.evaluate(async () => {
     let cfg = await publicState();
     assert.equal(cfg.observer.model.providerId, observer.providerId);
     assert.equal(cfg.observer.judgeEvery, 3);
-    assert.equal(cfg.agentModel.providerId, main.providerId);
+    assert.equal(cfg.modelSelection.providerId, main.providerId);
     report.checks.push('independent model and interval');
     await selectMain(observer);
     assert.equal((await publicState()).observer.model.providerId, observer.providerId);
+    assert.deepEqual(modelIdentity((await publicState()).defaultModel), modelIdentity(beforeBrowsing.defaultModel), 'session model changes preserve the global default');
     await selectMain(main);
     assert.equal((await publicState()).observer.judgeEvery, 3);
     await page.evaluate(() => applyLanguage('en'));
@@ -146,10 +159,14 @@ async function publicState() { return page.evaluate(async () => {
     await page.waitForFunction(() => document.querySelector('#zConnectionDialog').open);
     await page.locator('#zConnectionCancel').click();
     await page.evaluate(() => state.activeRuns.clear());
+    const sessionId = (await publicState()).sessionId;
     await application.close(); application = null;
     await launch();
+    await page.evaluate(id => loadSession(id), sessionId);
     cfg = await publicState();
-    assert.equal(cfg.agentModel.providerId, main.providerId);
+    assert.equal(cfg.sessionId, sessionId);
+    assert.deepEqual(modelIdentity(cfg.modelSelection), [main.providerId, main.supplierId, 'same-model', 'text']);
+    assert.deepEqual(modelIdentity(cfg.savedModelSelection), modelIdentity(cfg.modelSelection));
     assert.equal(cfg.observer.model.providerId, observer.providerId);
     assert.equal(cfg.observer.judgeEvery, 3);
     report.checks.push('restart persistence, localization and layout');
@@ -167,7 +184,7 @@ async function publicState() { return page.evaluate(async () => {
     await page.locator('#zObserverEvery').fill('1'); await save();
     cfg = await publicState();
     assert.equal(cfg.observer.model, null); assert.equal(cfg.observer.judgeEvery, 1);
-    assert.equal(cfg.agentModel.providerId, main.providerId);
+    assert.equal(cfg.modelSelection.providerId, main.providerId);
     report.checks.push('invalid input, deleted connection, rules-only mode');
     assert.deepEqual(errors, []);
     report.ok = true;
