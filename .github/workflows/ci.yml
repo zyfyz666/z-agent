@@ -16,6 +16,9 @@ jobs:
           node-version: 22
       # The application includes Windows-only runtime dependencies. Test on
       # the supported OS and install the exact committed dependency graph.
-      # Unit tests do not need Electron downloads or native lifecycle builds.
+      # Skip unrelated native lifecycle builds, then install Electron explicitly:
+      # browser observation and memory worker tests exercise the real runtime.
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Electron runtime for tests
+        run: node node_modules/electron/install.js
       - run: npm test

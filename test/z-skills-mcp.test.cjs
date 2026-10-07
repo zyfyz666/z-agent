@@ -7,15 +7,22 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
+const skillRegistry = require('../lib/skill-registry');
 
 const appRoot = path.resolve(__dirname, '..');
 
-function createClient(dataDir) {
+function createClient(dataDir, config = { customSkills: [] }) {
   const skillsRoot = path.join(dataDir, 'skills');
   fs.mkdirSync(skillsRoot, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ customSkills: [] }), 'utf8');
+  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(config), 'utf8');
+  // The desktop prepares SkillStore before starting this MCP. Do the same
+  // here so the RPC deadline measures reading, not cold Windows fixture I/O.
+  // Store creation itself remains covered by skill-manifest.test.cjs.
+  const prepared = skillRegistry.syncSkillStore(config, appRoot, dataDir);
+  assert.equal(prepared.ok, true, prepared.error);
   const child = spawn(process.execPath, [path.join(appRoot, 'lib', 'z-skills-mcp.js')], {
     cwd: appRoot,
+    windowsHide: true,
     env: {
       ...process.env,
       Z_SKILLS_ROOT: skillsRoot,
@@ -23,12 +30,31 @@ function createClient(dataDir) {
       Z_SKILLS_CONFIG_PATH: path.join(dataDir, 'config.json'),
       Z_SKILLS_APP_ROOT: appRoot,
       Z_SKILLS_CLI: path.join(appRoot, 'node_modules', 'skills', 'bin', 'cli.mjs'),
-      Z_SKILLS_ALLOW_NETWORK: 'false'
+      Z_SKILLS_ALLOW_NETWORK: 'false',
+      Z_INPUT_TOKENS_PER_SECOND: '10000'
     },
     stdio: ['pipe', 'pipe', 'pipe']
   });
   let buffer = '';
+  let stderr = '';
+  let terminalError;
   const pending = new Map();
+  const rejectPending = error => {
+    terminalError = error;
+    for (const waiter of pending.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    pending.clear();
+  };
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8_192); });
+  child.on('error', rejectPending);
+  child.stdin.on('error', rejectPending);
+  const closed = new Promise(resolve => child.once('close', (code, signal) => {
+    rejectPending(new Error(`Skills MCP closed (code=${code}, signal=${signal})${stderr ? `: ${stderr}` : ''}`));
+    resolve();
+  }));
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', chunk => {
     buffer += chunk;
@@ -37,24 +63,43 @@ function createClient(dataDir) {
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       if (line) {
-        const message = JSON.parse(line);
-        pending.get(message.id)?.(message);
-        pending.delete(message.id);
+        let message;
+        try { message = JSON.parse(line); } catch (error) {
+          rejectPending(new Error(`Invalid Skills MCP response: ${error.message}`));
+          return;
+        }
+        const waiter = pending.get(message.id);
+        if (waiter) {
+          pending.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message);
+        }
       }
       newline = buffer.indexOf('\n');
     }
   });
   let id = 0;
   const request = (method, params = {}) => new Promise((resolve, reject) => {
+    if (terminalError) return reject(terminalError);
     const requestId = ++id;
-    const timer = setTimeout(() => reject(new Error(`MCP timeout: ${method}`)), 10_000);
-    pending.set(requestId, message => {
-      clearTimeout(timer);
-      resolve(message);
-    });
+    const operation = [method, params.name, params.arguments?.id].filter(Boolean).join(' ');
+    const timer = setTimeout(() => {
+      pending.delete(requestId);
+      reject(new Error(`MCP timeout: ${operation}${stderr ? `; stderr: ${stderr}` : ''}`));
+    }, 10_000);
+    pending.set(requestId, { resolve, reject, timer });
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: requestId, method, params })}\n`);
   });
-  return { child, request };
+  const close = async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    let timer;
+    try {
+      await Promise.race([closed, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Skills MCP did not close after termination')), 5_000);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  return { request, close };
 }
 
 test('read_skill returns a structured per-task skip without failing MCP', async t => {
@@ -73,8 +118,8 @@ test('read_skill returns a structured per-task skip without failing MCP', async 
     ''
   ].join('\n'), 'utf8');
   const client = createClient(dataDir);
-  t.after(() => {
-    client.child.kill();
+  t.after(async () => {
+    await client.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
   const listed = await client.request('tools/list');
@@ -179,8 +224,10 @@ test('read_skill returns a structured per-task skip without failing MCP', async 
 test('high-throughput Hallmark delivery keeps the root document in one model payload', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'z-skills-speed-'));
   const hallmarkDirectory = path.join(dataDir, 'skills', 'hallmark');
-  fs.mkdirSync(path.dirname(hallmarkDirectory), { recursive: true });
-  fs.cpSync(path.join(appRoot, 'lib', 'skills', 'hallmark'), hallmarkDirectory, { recursive: true });
+  fs.mkdirSync(hallmarkDirectory, { recursive: true });
+  // This case checks root-document delivery; copying all 108 companion files
+  // adds cold disk work unrelated to its assertions. Resource reads are below.
+  fs.copyFileSync(path.join(appRoot, 'lib', 'skills', 'hallmark', 'SKILL.md'), path.join(hallmarkDirectory, 'SKILL.md'));
   const client = createClient(dataDir);
   try {
     const listed = await client.request('tools/call', {
@@ -192,7 +239,7 @@ test('high-throughput Hallmark delivery keeps the root document in one model pay
     assert.equal(listed.result.structuredContent.complete, true);
     assert.ok(listed.result.structuredContent.instructionBytes > 60_000);
   } finally {
-    client.child.kill();
+    await client.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
@@ -217,8 +264,7 @@ test('bundled Hallmark ignores a legacy two-file shadow and serves packaged reso
     source: 'bundled'
   }, null, 2), 'utf8');
 
-  const client = createClient(dataDir);
-  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
+  const client = createClient(dataDir, {
     customSkills: [{
       id: 'hallmark',
       name: 'Hallmark',
@@ -226,7 +272,7 @@ test('bundled Hallmark ignores a legacy two-file shadow and serves packaged reso
       source: 'bundled',
       version: 110
     }]
-  }), 'utf8');
+  });
   try {
     const loaded = await client.request('tools/call', {
       name: 'read_skill',
@@ -251,7 +297,7 @@ test('bundled Hallmark ignores a legacy two-file shadow and serves packaged reso
     assert.equal(resource.result.structuredContent.ok, true);
     assert.match(resource.result.structuredContent.content, /Twenty-one named landing-page shapes/);
   } finally {
-    client.child.kill();
+    await client.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
@@ -301,7 +347,7 @@ test('learned input speed selects real chunk tiers for the same Skill', async ()
     assert.equal(fast.result.structuredContent.delivery, 'inline');
     assert.equal(fast.result.structuredContent.complete, true);
   } finally {
-    client.child.kill();
+    await client.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
