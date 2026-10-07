@@ -105,6 +105,7 @@ const { resolveWindowsPowerShell } = require('./lib/powershell-resolver');
 const crypto = require('crypto');
 const { normalizeObserverSettings, completionInput, completionSettings, reviewCompletion } = require('./lib/observer-model');
 const { sessionObserverEnabled, cancelSessionObserverCompletion } = require('./lib/session-observer-settings');
+const { SubagentCompletionQueue } = require('./lib/subagent-completion-queue');
 const { normalizeOutputTokens, validateOutputTokens } = require('./lib/model-output-limits');
 const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
 const { sessionConversationRevision, assertConversationRevision, rewindBoundary, createRewindBackup,
@@ -226,6 +227,10 @@ const OPENCODE_IDLE_RELEASE_MS = Math.max(1_000, Number(process.env.Z_OPENCODE_I
 let openCodeIdleReleaseTimer = null;
 let openCodePrewarmPromise = null;
 let openCodeBackgroundLeases = 0;
+let subagentCompletionQueue = null;
+let subagentCompletionPollTimer = null;
+let subagentCompletionPolling = false;
+const subagentTrackingCancellations = new Map();
 const browserAgentToolClaims = new Map();
 const sessionAgentToolClaims = new Map();
 let zCore = null;
@@ -3488,10 +3493,10 @@ function setMainRendererBackgroundThrottling(enabled) {
 function scheduleOpenCodeIdleRelease() {
   if (openCodeIdleReleaseTimer) clearTimeout(openCodeIdleReleaseTimer);
   openCodeIdleReleaseTimer = null;
-  if (isQuiting || openCodeActiveRuns.size || openCodeBackgroundLeases || !openCodeSidecar) return;
+  if (isQuiting || openCodeActiveRuns.size || openCodeBackgroundLeases || !openCodeSidecar || openCodeSidecar.hasBackgroundSubagents?.()) return;
   openCodeIdleReleaseTimer = setTimeout(() => {
     openCodeIdleReleaseTimer = null;
-    if (isQuiting || openCodeActiveRuns.size || openCodeBackgroundLeases || !openCodeSidecar) return;
+    if (isQuiting || openCodeActiveRuns.size || openCodeBackgroundLeases || !openCodeSidecar || openCodeSidecar.hasBackgroundSubagents?.()) return;
     const idleSidecar = openCodeSidecar;
     openCodeSidecar = null;
     openCodeProviderAdapter = null;
@@ -7378,6 +7383,157 @@ function isSessionRunActive(sessionId) {
   return [...openCodeRunAdmissions.values()].some(admittedSessionId => String(admittedSessionId || '') === target);
 }
 
+function getSubagentCompletionQueue() {
+  if (!subagentCompletionQueue) {
+    subagentCompletionQueue = new SubagentCompletionQueue({
+      file: path.join(STABLE_DATA_DIR, 'subagent-completions.json'),
+      onChange: id => notifyDesktopSessionUpdate({ id, reason: 'subagent-wake-changed' }),
+      onClose: cleanupClosedSubagentTracking
+    });
+  }
+  return subagentCompletionQueue;
+}
+
+function cleanupClosedSubagentTracking(record) {
+  const sidecar = openCodeSidecar;
+  if (!sidecar) return;
+  if (record.delivery !== 'cancelled' || !sidecar.cancelSubagentCompletionTracking) {
+    sidecar.forgetSubagentCompletion?.(record);
+    return;
+  }
+  if (subagentTrackingCancellations.has(record.zSessionId)) return;
+  // Capture and abort the background children before removing their pins.
+  // New user input only defers claims and never reaches this cancellation.
+  const pending = Promise.resolve(sidecar.cancelSubagentCompletionTracking(record.zSessionId))
+    .catch(error => console.warn('[subagent-wake] background cancellation failed:', error?.message || error))
+    .finally(() => {
+      subagentTrackingCancellations.delete(record.zSessionId);
+      for (const item of Object.values(subagentCompletionQueue?.state.records || {})) {
+        if (item.zSessionId === record.zSessionId && item.delivery === 'cancelled') sidecar.forgetSubagentCompletion?.(item);
+      }
+      scheduleOpenCodeIdleRelease();
+    });
+  subagentTrackingCancellations.set(record.zSessionId, pending);
+}
+
+function updateSubagentCompletionQueue(operation) {
+  try { return operation(getSubagentCompletionQueue()); }
+  catch (error) { console.warn('[subagent-wake] durable queue update failed:', error?.message || error); return null; }
+}
+
+function subagentWakeSessionBusy(sessionId, exceptRunId = '', exceptIntentId = '') {
+  return sessionRewindOperations.has(sessionId) || manualContextCompressions.has(sessionId)
+    || [...openCodeActiveRuns].some(([id, run]) => id !== exceptRunId && run.zSessionId === sessionId)
+    || [...openCodeRunAdmissions].some(([id, target]) => id !== exceptRunId && target === sessionId)
+    || Object.values(zCore?.state?.intents || {}).some(intent => intent?.threadId === sessionId
+      && intent.id !== exceptIntentId && ['queued', 'consumed'].includes(intent.status));
+}
+
+async function validateSubagentWakeSession(sessionId, queue = getSubagentCompletionQueue()) {
+  const session = isSafeSessionId(sessionId) ? await readSessionRecord(sessionId) : null;
+  queue.reconcileSession(sessionId, session ? sessionConversationRevision(session) : null);
+  return session;
+}
+
+async function inspectSubagentCompletion(record) {
+  const sidecar = getOpenCodeSidecar();
+  if (!sidecar.inspectSubagentCompletion) return { status: 'unknown' };
+  let deadline;
+  return Promise.race([
+    Promise.resolve().then(() => sidecar.inspectSubagentCompletion(record)),
+    new Promise(resolve => { deadline = setTimeout(() => resolve({ status: 'unknown' }), 5_000); deadline.unref?.(); })
+  ]).catch(error => ({ status: 'unknown', error: error?.message || String(error) }))
+    .finally(() => clearTimeout(deadline));
+}
+
+function subagentWakeStartFailure(request, detail) {
+  if (!request.subagentWake) return { ok: false, ...detail };
+  const record = subagentCompletionQueue?.state.records[request.subagentWake.id];
+  const accepted = !!record?.acceptedRunId && record.acceptedRunId === request.runId;
+  if (!accepted && !['SUBAGENT_WAKE_BUSY', 'SUBAGENT_WAKE_UNAVAILABLE', 'SUBAGENT_WAKE_STALE'].includes(detail.code)) {
+    updateSubagentCompletionQueue(queue => queue.failClaim(request.subagentWake, detail.error || 'start_failed'));
+  }
+  return { ok: false, ...detail, subagentWakeAccepted: accepted };
+}
+
+function scheduleSubagentCompletionPoll() {
+  if (isQuiting || subagentCompletionPollTimer) return;
+  subagentCompletionPollTimer = setTimeout(() => {
+    subagentCompletionPollTimer = null;
+    void pollSubagentCompletions();
+  }, 10_000);
+  subagentCompletionPollTimer.unref?.();
+}
+
+async function pollSubagentCompletions() {
+  if (isQuiting || subagentCompletionPolling) return;
+  subagentCompletionPolling = true;
+  try {
+    const queue = getSubagentCompletionQueue();
+    for (const record of queue.pollable(4)) {
+      if (isQuiting) break;
+      if (!await validateSubagentWakeSession(record.zSessionId, queue)) continue;
+      // The sidecar can read the existing kernel or its durable native store.
+      // Inspection never prewarms a model or creates a provider task.
+      const result = await inspectSubagentCompletion(record);
+      queue.applyInspection(record, result || { status: 'unknown' });
+    }
+  } catch (error) { console.warn('[subagent-wake] background inspection failed:', error?.message || error); }
+  finally {
+    subagentCompletionPolling = false;
+    scheduleOpenCodeIdleRelease();
+    scheduleSubagentCompletionPoll();
+  }
+}
+
+ipcMain.handle('subagent:list-wakes', async (_event, payload = {}) => {
+  try {
+    const queue = getSubagentCompletionQueue();
+    const listed = queue.list(payload);
+    const ids = new Set([...listed.wakes, ...listed.uncertain].map(record => record.zSessionId));
+    for (const id of ids) await validateSubagentWakeSession(id, queue);
+    const result = queue.list(payload);
+    result.wakes = result.wakes.filter(record => !subagentWakeSessionBusy(record.zSessionId));
+    return result;
+  } catch (error) { return { ok: false, wakes: [], uncertain: [], error: error?.message || String(error) }; }
+});
+
+ipcMain.handle('subagent:claim-wake', async (_event, payload = {}) => {
+  try {
+    const sessionId = String(payload.sessionId || '');
+    return await withSessionWrite(sessionId, async () => {
+      const queue = getSubagentCompletionQueue();
+      const session = isSafeSessionId(sessionId) ? await readSessionRecord(sessionId, { sessionLocked: true }) : null;
+      queue.reconcileSession(sessionId, session ? sessionConversationRevision(session) : null);
+      if (!session) return { ok: false, code: 'session-not-found', error: '会话不存在。' };
+      assertConversationRevision(session, payload.conversationRevision);
+      if (subagentWakeSessionBusy(sessionId)) return { ok: false, code: 'SUBAGENT_WAKE_BUSY', error: '当前对话仍有用户请求等待处理。' };
+      const record = queue.state.records[payload.id];
+      if (record?.waitingForInspection) return { ok: false, code: 'SUBAGENT_WAKE_BUSY',
+        retryAt: record.inspectionRetryAt, error: '正在重新确认子代理结果是否已经处理。' };
+      if (record?.zSessionId === sessionId && record.delivery === 'pending') {
+        // An intervening user turn may have consumed the original task result.
+        queue.applyInspection(record, await inspectSubagentCompletion(record));
+        if (subagentWakeSessionBusy(sessionId)) return { ok: false, code: 'SUBAGENT_WAKE_BUSY', error: '当前对话仍有用户请求等待处理。' };
+        const inspected = queue.state.records[payload.id];
+        if (inspected?.waitingForInspection) return { ok: false, code: 'SUBAGENT_WAKE_BUSY',
+          retryAt: inspected.inspectionRetryAt, error: '正在重新确认子代理结果是否已经处理。' };
+      }
+      return queue.claim({ ...payload, sessionId });
+    });
+  } catch (error) { return { ok: false, code: error?.code, error: error?.message || String(error) }; }
+});
+
+ipcMain.handle('subagent:release-wake', (_event, payload = {}) => {
+  try { return getSubagentCompletionQueue().release(payload); }
+  catch (error) { return { ok: false, error: error?.message || String(error) }; }
+});
+
+ipcMain.handle('subagent:cancel-wakes', (_event, payload = {}) => {
+  try { return getSubagentCompletionQueue().cancelSession(String(payload.sessionId || ''), payload.reason); }
+  catch (error) { return { ok: false, error: error?.message || String(error) }; }
+});
+
 async function createFreshSessionRecord(options = {}) {
   ensureDirs();
   const id = 'sess_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -7499,6 +7655,7 @@ async function rewindSessionRecord(request = {}, { restore = false } = {}) {
       // Catch any task that arrived while the backup was being written.
       assertSessionRewindIdle(id);
       await writeSessionFileAtomic(sessionPath(id), JSON.stringify(session, null, 2));
+      updateSubagentCompletionQueue(queue => queue.cancelSession(id, 'revision_changed'));
       await refreshSessionSummaryCache(id, session);
       notifyDesktopSessionUpdate({ id, reason: restore ? 'rewind-restored' : 'rewound',
         backupSessionId, conversationRevision: session.conversationRevision });
@@ -7674,6 +7831,7 @@ function deleteSessionRecord(id, options = {}) {
       // the main process. An async unlink would yield between the check and
       // deletion, allowing a newly-started run to save the session again.
       fs.unlinkSync(sessionPath(id));
+      updateSubagentCompletionQueue(queue => queue.cancelSession(id, 'session_deleted'));
       invalidateSessionRecordCache(id);
     } catch (error) {
       if (replacementSession) {
@@ -10013,10 +10171,12 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
   let coreTurn = null;
   try {
     if (manualContextCompressions.has(String(request.zSessionId || ''))) {
-      return { ok: false, error: '上下文正在压缩，请完成后再开始工作' };
+      return subagentWakeStartFailure(request, { code: request.subagentWake ? 'SUBAGENT_WAKE_BUSY' : undefined,
+        error: '上下文正在压缩，请完成后再开始工作' });
     }
     if (openCodeActiveRuns.size + openCodeRunAdmissions.size >= MAX_CONCURRENT_AGENT_RUNS) {
-      return { ok: false, error: `并发任务已达上限（${MAX_CONCURRENT_AGENT_RUNS}个），请稍后再试。` };
+      return subagentWakeStartFailure(request, { code: request.subagentWake ? 'SUBAGENT_WAKE_BUSY' : undefined,
+        error: `并发任务已达上限（${MAX_CONCURRENT_AGENT_RUNS}个），请稍后再试。` });
     }
     request = { ...request, runId: admittedRunId };
     openCodeRunAdmissions.set(admittedRunId, String(request.zSessionId || ''));
@@ -10027,6 +10187,14 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     }
     assertConversationRevision(authoritativeSession, request.conversationRevision);
     request.conversationRevision = sessionConversationRevision(authoritativeSession);
+    if (request.subagentWake) {
+      const validation = getSubagentCompletionQueue().validateClaim({ ...request.subagentWake,
+        sessionId: String(request.zSessionId || ''), conversationRevision: request.conversationRevision, intentId: request.intentId });
+      if (!validation.ok) throw Object.assign(new Error(validation.error), { code: validation.code });
+      if (subagentWakeSessionBusy(String(request.zSessionId || ''), admittedRunId, request.intentId)) {
+        throw Object.assign(new Error('当前对话仍有用户请求等待处理。'), { code: 'SUBAGENT_WAKE_BUSY' });
+      }
+    }
     request.observerEnabled = authoritativeSession?.observerEnabled !== false;
     if (request.observerWake && !request.observerEnabled) {
       throw Object.assign(new Error('此任务的观察者已关闭，自动唤醒已取消。'), { code: 'OBSERVER_DISABLED' });
@@ -10278,7 +10446,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       openCodeActiveRuns.delete(runId);
       openCodeRunReconcile.delete(runId);
       refreshAgentRuntimeActivity();
-      return { ok: false, code: error?.code || 'Z_CORE_START_FAILED', error: `Z 无法启动本轮任务：${detail}` };
+      return subagentWakeStartFailure(request, { code: error?.code || 'Z_CORE_START_FAILED', error: `Z 无法启动本轮任务：${detail}` });
     }
     const resolvedSkills = await selectedRunSkills(request.selectedSkills, cfg, { workspace, workMode });
     if (resolvedSkills.error) {
@@ -10288,7 +10456,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       openCodeActiveRuns.delete(runId);
       refreshAgentRuntimeActivity();
       openCodeRunReconcile.delete(runId);
-      return { ok: false, error: resolvedSkills.error };
+      return subagentWakeStartFailure(request, { error: resolvedSkills.error });
     }
     const runSelectedSkills = resolvedSkills.skills;
     const skippedSkills = resolvedSkills.skippedSkills || [];
@@ -10350,6 +10518,12 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     };
     const emitOpenCodeEvent = event => {
       if (event?.type === 'z.opencode.started') void recordForkBinding(event.data?.sessionID);
+      if (event?.type === 'z.opencode.started') {
+        updateSubagentCompletionQueue(queue => queue.bindParent(runId, event.data?.sessionID));
+      }
+      if (event?.type === 'z.subagent.lifecycle') {
+        updateSubagentCompletionQueue(queue => queue.recordLifecycle(event.data));
+      }
       if (event?.type === 'z.context.checkpoint') {
         void persistTaskContextCheckpoint(zSessionId, event.data?.checkpoint, request.conversationRevision)
           .catch(error => console.warn('[memory] checkpoint could not be saved:', error?.message || error));
@@ -10381,6 +10555,27 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     if (request.observerWake && !effectiveObserverEnabled) {
       throw Object.assign(new Error('此任务的观察者已关闭，自动唤醒已取消。'), { code: 'OBSERVER_DISABLED' });
     }
+    if (request.subagentWake) {
+      // Session identity, user-queue priority and the delivery receipt commit
+      // under the same lock, immediately before invoking the provider. Once
+      // accepted, neither a renderer retry nor an app restart may replay it.
+      await withSessionWrite(zSessionId, async () => {
+        const stored = await readSessionRecord(zSessionId, { sessionLocked: true });
+        if (!stored) throw Object.assign(new Error('会话不存在。'), { code: 'session-not-found' });
+        assertConversationRevision(stored, request.conversationRevision);
+        if (subagentWakeSessionBusy(zSessionId, runId, request.intentId)) {
+          throw Object.assign(new Error('当前对话仍有用户请求等待处理。'), { code: 'SUBAGENT_WAKE_BUSY' });
+        }
+        const accepted = getSubagentCompletionQueue().accept({ ...request.subagentWake,
+          sessionId: zSessionId, conversationRevision: request.conversationRevision, intentId: request.intentId }, runId);
+        if (!accepted.ok) throw Object.assign(new Error(accepted.error), { code: accepted.code });
+      });
+    } else if (!request.utility && !request.observerWake) {
+      updateSubagentCompletionQueue(queue => queue.cancelSession(zSessionId, 'user_message'));
+    }
+    if (!request.utility) updateSubagentCompletionQueue(queue => queue.authorizeParent({
+      parentRunId: runId, zSessionId, conversationRevision: request.conversationRevision, startedAt: runStartedAt
+    }));
     const task = providerAdapter.startTurn({
       ...request,
       observerEnabled: effectiveObserverEnabled,
@@ -10441,6 +10636,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     });
     task.then(async result => {
       await recordForkBinding(result?.openCodeSessionId);
+      updateSubagentCompletionQueue(queue => { queue.settleParent(runId, result); queue.settleDelivery(runId); });
       if (coreTurnStarted) zCore.completeTurn(runId, result);
       try {
         if (evolutionMode) recordAgiTrajectory({ runId, workspace, result });
@@ -10583,6 +10779,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         } catch (error) { console.warn('[memory] review could not be queued:', error?.message || error); }
       }
     }).catch(async error => {
+      updateSubagentCompletionQueue(queue => { queue.settleParent(runId, { status: 'error' }); queue.settleDelivery(runId); });
       console.error(`[opencode] Run ${runId} failed:`, error);
       flushOpenCodeRendererEvents(runId);
       const failedResult = {
@@ -10619,10 +10816,13 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       clearSessionAgentToolClaims(runId);
       openCodeActiveRuns.delete(runId);
       refreshAgentRuntimeActivity();
+      notifyDesktopSessionUpdate({ id: zSessionId, reason: 'subagent-wake-changed' });
+      scheduleSubagentCompletionPoll();
     });
     return { ok: true, runId, version: OPENCODE_VERSION, workspace, workspaceKind };
   } catch (error) {
     const runId = String(request.runId || '');
+    updateSubagentCompletionQueue(queue => queue.settleParent(runId, { status: 'error' }));
     if (coreTurnStarted) zCore.completeTurn(runId, { status: 'error', error: openCodeErrorDetail(error) });
     if (admissionPending) openCodeRunAdmissions.delete(admittedRunId);
     removeHarnessRunContext(runId);
@@ -10631,7 +10831,7 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     openCodeActiveRuns.delete(runId);
     refreshAgentRuntimeActivity();
     console.error('[opencode] start-run failed:', error);
-    return { ok: false, error: error instanceof Error && error.message ? error.message : openCodeErrorDetail(error), code: error?.code };
+    return subagentWakeStartFailure(request, { error: error instanceof Error && error.message ? error.message : openCodeErrorDetail(error), code: error?.code });
   }
 });
 
@@ -10708,7 +10908,11 @@ ipcMain.handle('z:core-enqueue-intent', async (_e, payload = {}) => {
         assertConversationRevision(stored, existing.intent?.conversationRevision);
       }
       const intent = { ...(payload.intent || {}), conversationRevision: sessionConversationRevision(stored) };
-      return { ok: true, intent: zCore.enqueueIntent({ ...payload, intent }) };
+      const queued = zCore.enqueueIntent({ ...payload, intent });
+      if (!intent.subagentWake && !intent.observerWake && !intent.utility) {
+        updateSubagentCompletionQueue(queue => queue.cancelSession(id, 'user_message'));
+      }
+      return { ok: true, intent: queued };
     });
   } catch (error) {
     return { ok: false, error: error?.message || String(error), code: error?.code };
@@ -10843,6 +11047,11 @@ ipcMain.handle('opencode:session-changes', async (_e, payload = {}) => {
 
 async function cancelOpenCodeRun(runId) {
   const key = String(runId || '');
+  updateSubagentCompletionQueue(queue => {
+    const sessionId = openCodeActiveRuns.get(key)?.zSessionId || openCodeRunAdmissions.get(key)
+      || queue.state.parents[key]?.zSessionId;
+    if (sessionId) queue.cancelSession(sessionId, 'user_cancelled');
+  });
   const coreResult = zCore.requestCancel(key, 'user_cancelled');
   const active = openCodeActiveRuns.get(key);
   const visionCancelled = !!active?.visionAbortController;
@@ -11167,6 +11376,13 @@ app.whenReady().then(async () => {
   await migrateLegacyDataDir();
   ensureDirs();
   initializeZCore();
+  updateSubagentCompletionQueue(queue => {
+    for (const record of Object.values(queue.state.records)) {
+      const turn = record.acceptedRunId ? zCore.getTurn(record.acceptedRunId) : null;
+      if (turn && ['done', 'completed', 'error', 'cancelled'].includes(turn.status)) queue.settleDelivery(record.acceptedRunId);
+    }
+  });
+  scheduleSubagentCompletionPoll();
   if (!isE2EMode) memoryReviewQueue.start();
   try {
     const recoveredTurns = zCore.recoverInterruptedTurns();
@@ -11227,6 +11443,8 @@ app.on('window-all-closed', (e) => {
 // 真正退出时清理托盘和 MCP 服务器
 app.on('before-quit', () => {
   isQuiting = true;
+  if (subagentCompletionPollTimer) clearTimeout(subagentCompletionPollTimer);
+  subagentCompletionPollTimer = null;
   try { memoryReviewQueue.stop(); } catch (error) { console.warn('[memory] review queue shutdown:', error?.message || error); }
   if (e2eParentWatchdog) {
     clearInterval(e2eParentWatchdog);
@@ -11283,7 +11501,10 @@ if (process.env.Z_MAIN_TEST_EXPORTS === '1') {
       buildRecoveredRunDescriptors,
       recoveryRendererEvent,
       recoveringCoreTurns,
-      migrateVisionRelaySwitch
+      migrateVisionRelaySwitch,
+      getSubagentCompletionQueue,
+      subagentWakeSessionBusy,
+      pollSubagentCompletions
     }
   };
 }

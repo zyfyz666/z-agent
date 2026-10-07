@@ -271,6 +271,10 @@ contextBridge.exposeInMainWorld('z', {
   // OpenCode runtime
   openCodePrewarm: () => ipcRenderer.invoke('opencode:prewarm'),
   openCodeStartRun: (request) => ipcRenderer.invoke('opencode:start-run', request),
+  listSubagentWakes: (payload = {}) => ipcRenderer.invoke('subagent:list-wakes', payload),
+  claimSubagentWake: (payload) => ipcRenderer.invoke('subagent:claim-wake', payload),
+  releaseSubagentWake: (payload) => ipcRenderer.invoke('subagent:release-wake', payload),
+  cancelSubagentWakes: (payload) => ipcRenderer.invoke('subagent:cancel-wakes', payload),
   openCodeCompressSession: (zSessionId) => ipcRenderer.invoke('opencode:compress-session', { zSessionId }),
   openCodeRunChanges: (runId, options = {}) => ipcRenderer.invoke('opencode:run-changes', {
     runId,

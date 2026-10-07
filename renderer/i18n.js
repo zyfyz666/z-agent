@@ -2,6 +2,10 @@
  * sessions and user-authored content are never rewritten in storage. */
 (function installZI18n(global) {
   const ZH_EN = Object.freeze({
+    '子代理完成，继续处理结果': 'Subagent completed; continuing with the result',
+    '查看子代理回报': 'View the subagent report',
+    '子代理已完成，先前自动继续的状态无法确认，请手动继续': 'A subagent completed, but the earlier automatic continuation could not be confirmed. Continue manually.',
+    '最终回复已生成': 'Final reply generated', '收尾已停止': 'Finalization stopped', '收尾已结束': 'Finalization ended',
     '单次输出额度（tokens）': 'Output tokens per request', '观察者单次输出额度（tokens）': 'Observer output tokens per request',
     '留空或 0 为自动。仅当前对话，下次请求生效。': 'Blank or 0 means automatic. Applies to this conversation from the next request.',
     '留空或 0 为自动。与主模型独立，下轮任务生效。': 'Blank or 0 means automatic. Independent of the main model; applies from the next task.',

@@ -23,6 +23,7 @@
       const message = messages[index];
       if (message?.role !== 'user' || message.liveGuidance) continue;
       if (message.observerWake) { wakes += 1; continue; }
+      if (message.subagentWake) continue;
       return { goal: text(message.content), index, wakes };
     }
     return { goal: '', index: -1, wakes };

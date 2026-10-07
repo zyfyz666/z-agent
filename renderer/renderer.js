@@ -716,7 +716,8 @@ const observerCompletion = window.ZObserverCompletion?.createController({
     return session;
   },
   submit: (session, text, wake) => submitMessage(text, [], [], { session, observerWake: wake }),
-  isBusy: id => isSessionExecutionActive(id) || state.queuedTurns.has(id) || sessionRewindRequests.has(id),
+  isBusy: id => isSessionExecutionActive(id) || state.queuedTurns.has(id) || sessionRewindRequests.has(id)
+    || globalThis.zSubagentCompletion?.hasPending(id),
   // Rules mode cannot judge a goal; skip without flashing a "checking" state.
   reviewEnabled: () => !!state.config?.observer?.model && state.config.observer.completion?.enabled !== false,
   sessionEnabled: (id, session) => session?.observerEnabled !== false
@@ -727,6 +728,26 @@ const observerCompletion = window.ZObserverCompletion?.createController({
 // their own by tests, where it is simply absent.
 globalThis.zObserverCompletion = observerCompletion;
 setInterval(() => observerCompletion?.tick(document), 1000);
+
+const subagentCompletion = window.ZSubagentCompletion?.createController({
+  api,
+  loadSession: async id => {
+    const held = observerSessionsInMemory(id).find(session => Array.isArray(session.messages));
+    if (held) return held;
+    const session = await api.getSession(id, { messageLimit: MESSAGE_LOAD_LIMIT });
+    if (session && Array.isArray(session.messages)) markSessionLoadBaseline(session);
+    return session;
+  },
+  isBusy: id => isSessionExecutionActive(id) || state.queuedTurns.has(id) || sessionRewindRequests.has(id),
+  beforeSubmit: id => observerCompletion?.cancel(id),
+  submit: (session, text, wake, intentId) => submitMessage(text, [], [], { session, subagentWake: wake, intentId }),
+  notify: (id, message) => {
+    const title = observerSessionsInMemory(id).find(session => session.title)?.title;
+    toast(title && state.currentSession?.id !== id ? `「${title}」${message}` : message);
+  },
+  onError: error => console.warn('[subagent-completion]', error)
+});
+globalThis.zSubagentCompletion = subagentCompletion;
 
 function sessionObserverEnabled(session = state.currentSession) {
   return session?.observerEnabled !== false;
@@ -1393,6 +1414,10 @@ async function init() {
     }
   });
   api.onSessionChanged?.((detail) => {
+    if (detail?.reason === 'subagent-wake-changed') {
+      void globalThis.zSubagentCompletion?.refresh();
+      return;
+    }
     if (detail?.reason === 'observer-enabled-changed') {
       sessionObserverEventVersions.set(detail.id, (sessionObserverEventVersions.get(detail.id) || 0) + 1);
       applySessionObserverState(detail);
@@ -1444,6 +1469,7 @@ async function init() {
   for (const queued of state.queuedTurns.values()) {
     scheduleQueuedTurnDispatch(queued.sessionRef);
   }
+  await globalThis.zSubagentCompletion?.hydrate();
   if (recoveredTurns.length) {
     toast(recoveredRunCount
       ? `已从运行日志恢复 ${recoveredRunCount} 个中断任务的工作内容，可重新发送继续处理`
@@ -5639,6 +5665,20 @@ function appendMessage(role, content, attachments = [], animate = true, msgIndex
     badge.textContent = `观察者唤醒 · 第 ${Number(el._messageRecord.observerWake.wake) || 1} 次`;
     el.querySelector('.msg-body')?.before(badge);
   }
+  if (role === 'user' && el._messageRecord?.subagentWake) {
+    el.classList.add('subagent-wake');
+    const badge = document.createElement('div');
+    badge.className = 'msg-observer-wake msg-subagent-wake';
+    badge.textContent = '子代理完成，继续处理结果';
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = '查看子代理回报';
+    const report = document.createElement('div');
+    report.dataset.preserveLanguage = '';
+    report.textContent = window.ZSubagentCompletion?.reportText(content) || content;
+    details.append(summary, report);
+    el.querySelector('.msg-body')?.replaceChildren(badge, details);
+  }
   wrap.appendChild(el);
   bindSkillLogoFallbacks(el);
 
@@ -6990,6 +7030,7 @@ function persistQueuedTurn(queued) {
     }
   }).then(result => {
     queued.persistenceError = result?.ok === false ? String(result.error || '排队消息保存失败') : '';
+    if (result?.ok === true) void globalThis.zSubagentCompletion?.onUserMessage(String(queued.sessionRef.id));
     if (result?.code === 'SESSION_REVISION_CHANGED') {
       removeQueuedTurn(String(queued.sessionRef.id), queued);
       syncQueuedTurnUi();
@@ -7656,6 +7697,7 @@ function reconcileRunFromCoreTerminal(runId, event) {
 }
 
 function abortSessionById(sessionId) {
+  void globalThis.zSubagentCompletion?.cancel(sessionId);
   const runCtx = getRunCtx(sessionId);
   if (!runCtx) return { ok: false, error: 'not running' };
   if (runCtx.shouldAbort) {
@@ -9028,6 +9070,7 @@ async function submitMediaMessage(text, attachments = [], modelSelection = {}, o
   await saveCurrentSession(session);
 
   const assistantEl = ui ? appendMessage('assistant', '') : null;
+  await globalThis.zSubagentCompletion?.onUserMessage(session.id);
   state.activeRuns.get(session.id).assistantEl = assistantEl;
   const requestId = runCtx.runId;
   let assistantMsg;
@@ -9465,9 +9508,10 @@ function getCachedAgentTimelineProjection(rawTimeline, status, revision = 0) {
     && cached.length === rawTimeline.length) {
     return cached.timeline;
   }
-  const timeline = normalizeDeliveryAgreementTimeline(
+  let timeline = normalizeDeliveryAgreementTimeline(
     getAgentTimelineRenderWindow(rawTimeline, status)
   );
+  timeline = window.ZSubagentCompletion?.projectFinalization(timeline, status) || timeline;
   agentTimelineProjectionCache.set(rawTimeline, {
     status,
     revision,
@@ -11341,6 +11385,8 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         modelSelection,
         prompt: String(latestUserMessage.content || ''),
         observerWake: latestUserMessage.observerWake || false,
+        subagentWake: latestUserMessage.subagentWake || false,
+        intentId: latestUserMessage.intentId || '',
         attachments: latestUserMessage.attachments || [],
         ...(hasResetHistory ? { requestMessageIndex, requestMessageAnchor } : {}),
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
@@ -11364,7 +11410,9 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         utility: !!runCtx.utility,
         handoff: session.handoff || null
       });
-      if (!start?.ok) throw new Error(start?.error || 'Z Kernel 启动失败');
+      if (!start?.ok) throw Object.assign(new Error(start?.error || 'Z Kernel 启动失败'), {
+        code: start?.code, subagentWakeNotAccepted: start?.subagentWakeAccepted === false
+      });
       if (start.workspace) {
         session.workspace = runCtx.workspace = start.workspace;
         session.workspaceKind = start.workspaceKind || 'selected';
@@ -11459,6 +11507,7 @@ async function persistResumedOpenCodeRunOnce(session, runCtx, result) {
   renderSessionList();
   if (state.currentSession?.id === session.id) await activatePendingAgentHandoff(session.id);
   scheduleQueuedTurnDispatch(session);
+  void globalThis.zSubagentCompletion?.afterRun(session);
 }
 
 async function resumeOpenCodeRunFromDescriptor(session, descriptor) {
@@ -11906,8 +11955,10 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   await ensureFullSessionLoaded(runSession);
   if (options.observerWake && runSession.observerEnabled === false) return { ok: false, error: 'observer_disabled', code: 'OBSERVER_DISABLED' };
   if (sessionRewindRequests.has(runSession.id)) return { ok: false, error: 'busy' };
+  if (options.subagentWake && (state.queuedTurns.has(runSession.id)
+    || window.ZSubagentCompletion?.isBlockedSession(runSession))) return { ok: false, error: 'busy' };
   const intentId = String(options.intentId || '').trim();
-  const persistedSubmission = findPersistedIntentSubmission(runSession, intentId);
+  let persistedSubmission = findPersistedIntentSubmission(runSession, intentId);
   if (persistedSubmission?.complete) return { ok: true, deduped: true };
   if (isSessionExecutionActive(runSession.id)) return { ok: false, error: 'busy' };
   if (!canStartRun()) {
@@ -11917,6 +11968,10 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
     return { ok: false, error: 'busy' };
   }
 
+  if (options.subagentWake && window.ZSubagentCompletion?.moveUnacceptedWakeToTail(runSession, intentId)) {
+    persistedSubmission = findPersistedIntentSubmission(runSession, intentId);
+    if (state.currentSession?.id === runSession.id) renderMessages(runSession.messages);
+  }
   const effectiveModelSelection = normalizeModelSelectionSnapshot(
     options.modelSelection
       || persistedSubmission?.userMessage?.modelSelection
@@ -11959,6 +12014,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   // else the user sends takes over from a pending observer wake.
   if (options.observerWake && !persistedSubmission?.userMessage) userMsg.observerWake = { ...options.observerWake, ts: userMsg.ts };
   else if (!persistedSubmission?.userMessage) void globalThis.zObserverCompletion?.onUserMessage(runSession.id);
+  if (options.subagentWake) userMsg.subagentWake = { ...options.subagentWake, ts: userMsg.ts };
   runCtx.requestMessage = {
     ...userMsg,
     attachments: (userMsg.attachments || []).map(item => ({ ...item })),
@@ -11978,6 +12034,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   }
 
   await saveCurrentSession(runSession);
+  if (!options.observerWake && !options.subagentWake) await globalThis.zSubagentCompletion?.onUserMessage(runSession.id);
   runCtx.workspace = runSession.workspace || '';
   const taskStartTime = Date.now();
   runCtx.startedAt = taskStartTime;
@@ -12055,7 +12112,17 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
   } catch (err) {
     assistantEl = getActiveAssistantElement(runSession.id) || assistantEl;
     const ui = !!getActiveAssistantBody(runSession.id);
-    if (err?.code === 'Z_CORE_RECONCILED' || runCtx.coreReconciled) {
+    if (options.subagentWake && err?.subagentWakeNotAccepted === true) {
+      // A competing user request can win after claim but before main accepts
+      // the run. Keep the intent incomplete so a later claim can safely reuse
+      // the automatic message, instead of persisting a fake failed response.
+      taskOk = false;
+      taskErr = err.code === 'SUBAGENT_WAKE_BUSY' ? 'busy' : err.message;
+      runCtx.finalStatus = runCtx.agentState.status = 'interrupted';
+      completionNotificationSent = true;
+      assistantEl?.remove();
+      if (ui) showTyping(false);
+    } else if (err?.code === 'Z_CORE_RECONCILED' || runCtx.coreReconciled) {
       // Core has settled execution, so late provider completions are ignored.
       // Keep ownership until the observed work is saved and finally releases it.
       taskOk = false;
@@ -12185,6 +12252,7 @@ async function submitMessage(text, attachments = [], skillCalls = [], options = 
       }
       await activatePendingAgentHandoff(runSession.id);
       scheduleQueuedTurnDispatch(runSession);
+      void globalThis.zSubagentCompletion?.afterRun(runSession);
       // A queued turn or new run takes precedence; the controller checks that itself.
       void globalThis.zObserverCompletion?.afterRun(runSession);
     }

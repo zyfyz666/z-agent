@@ -70,8 +70,10 @@ function fixture(t, { review, runtime } = {}) {
   vm.runInContext(section('const completionReviews =', "\nipcMain.handle('models:quick-list'"), context);
   vm.runInContext(section("ipcMain.handle('session:save'", '\n// 会话级工作区'), context);
   const invoke = (name, ...args) => handlers.get(name)({}, ...args);
+  // Isolate the synchronous Observer setting gate, before the independent
+  // asynchronous subagent-wake admission that now precedes provider startup.
   const runtimeObserverSetting = vm.runInContext('(function (request, zSessionId) {'
-    + section('    const effectiveObserverEnabled =', '    const task = providerAdapter.startTurn(')
+    + section('    const effectiveObserverEnabled =', '    if (request.subagentWake) {')
     + 'return effectiveObserverEnabled; })', context);
   const seed = (id, extra = {}) => {
     const value = { id, title: id, messages: [], conversationRevision: 0, updatedAt: 123, ...extra };

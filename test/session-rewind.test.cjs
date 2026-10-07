@@ -15,6 +15,7 @@ const { normalizeIntent } = require('../lib/z-core/protocol');
 const { filterReviewSummary } = require('../lib/run-change-summary');
 const { guidedHistory } = require('./fixtures/guidance-history.cjs');
 const { combineTurnPrompt } = require('../lib/opencode-sidecar');
+const { SubagentCompletionQueue } = require('../lib/subagent-completion-queue');
 
 const main = fs.readFileSync(path.resolve(__dirname, '../main.js'), 'utf8');
 function section(start, end) {
@@ -63,6 +64,8 @@ function fixture(t, { count = 64, branch = false } = {}) {
   } };
   const context = vm.createContext({
     ...fork, ...rewind, fs, fsp, path, crypto, process: { pid: process.pid }, console,
+    SubagentCompletionQueue, STABLE_DATA_DIR: root, subagentCompletionQueue: null,
+    openCodeSidecar: null, subagentTrackingCancellations: new Map(), isQuiting: true, setTimeout, clearTimeout,
     sessionModelSnapshot, filterReviewSummary, sessionRecordCache: new Map(),
     defaultTasksRoot: path.join(root, 'Tasks'), dataDir: root, ensureTaskWorkspace,
     withSessionWrite: createSessionWriteQueue(),

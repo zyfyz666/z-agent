@@ -16,12 +16,16 @@ function failedRunHandler() {
   const start = source.lastIndexOf('.catch(async error => {', marker) + '.catch('.length;
   const end = source.indexOf('}).finally(() => {', marker) + 1;
   assert.ok(start > 0 && end > start, 'the production rejection handler is isolated');
-  const calls = { flushed: [], core: [], reconciled: [], sent: [], progress: [] };
+  const calls = { flushed: [], core: [], reconciled: [], sent: [], progress: [], subagentParents: [], subagentDeliveries: [] };
   const handler = vm.runInNewContext(`(${source.slice(start, end)})`, {
     console: { error() {} },
     runId: 'run-failed-history',
     zSessionId: 'sess_failed_history', request: { conversationRevision: 3 }, runStartedAt: 1000,
     persistTaskProgress: async payload => calls.progress.push(payload),
+    updateSubagentCompletionQueue: operation => operation({
+      settleParent: (runId, result) => calls.subagentParents.push({ runId, result }),
+      settleDelivery: runId => calls.subagentDeliveries.push(runId)
+    }),
     OPENCODE_VERSION: 'test',
     coreTurnStarted: true,
     flushOpenCodeRendererEvents: runId => calls.flushed.push(runId),
@@ -67,6 +71,8 @@ test('a rejected run retains its Observer snapshot in completion and history rep
   assert.equal(calls.progress.length, 1);
   assert.equal(calls.progress[0].result, result);
   assert.equal(calls.progress[0].request.conversationRevision, 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.subagentParents)), [{ runId: 'run-failed-history', result: { status: 'error' } }]);
+  assert.deepEqual(calls.subagentDeliveries, ['run-failed-history']);
 });
 
 test('a failure before Observer startup does not invent historical telemetry', async () => {
@@ -76,4 +82,6 @@ test('a failure before Observer startup does not invent historical telemetry', a
   assert.equal(result.status, 'error');
   assert.equal(result.error, 'Model startup failed');
   assert.equal(Object.hasOwn(result, 'watchdog'), false);
+  assert.equal(calls.subagentParents[0].result.status, 'error');
+  assert.deepEqual(calls.subagentDeliveries, ['run-failed-history']);
 });
