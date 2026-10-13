@@ -8,6 +8,7 @@ const { rewindBoundary, createRewoundSession } = require('../lib/session-rewind'
 const { projectHistoryForModel } = require('../lib/history-model-context');
 const { combineTurnPrompt } = require('../lib/opencode-sidecar');
 const { projectTimeline } = require('../renderer/guidance-timeline');
+const { checkpointForSession } = require('./fixtures/desktop-context-checkpoint.cjs');
 const clone = value => JSON.parse(JSON.stringify(value));
 const boundary = (source, index, includeSelected = false) => ({ sessionId: source.id, messageIndex: index,
   messageAnchor: messageForkAnchor(source.messages[index]), includeSelected });
@@ -133,4 +134,14 @@ test('inclusive branch creation at a live guide uses the same send-time boundary
   assert.equal(fork.messages[1].agentRun.timeline[0].content, 'BEFORE_FIRST');
   assert.doesNotMatch(JSON.stringify(fork), /BETWEEN_GUIDES|FUTURE_/);
   assert.equal(forkBoundary(source, boundary(source, 1, true)).at(-1).content, 'GUIDE_ONE');
+});
+
+test('mid-turn guidance cannot inherit a checkpoint containing the rest of that assistant run', () => {
+  const source = guidedHistory();
+  source.desktopContextCheckpoints = [checkpointForSession(source, source.messages.length)];
+  const prefix = rewindBoundary(source, boundary(source, 2));
+  const rewound = createRewoundSession(source, prefix, { backupSessionId: 'sess_guidance_backup' });
+  assert.equal(rewound.desktopContextCheckpoints, undefined);
+  assert.equal(rewound.messages.at(-1).agentRun.timeline[0].content, 'BEFORE_FIRST BETWEEN_GUIDES');
+  assert.doesNotMatch(JSON.stringify(rewound), /FUTURE_FINAL|EXACT_RETAINED_NATIVE_TAIL/);
 });

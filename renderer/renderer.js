@@ -10263,6 +10263,17 @@ function mapOpenCodeEventToPet(event, runCtx) {
   if (!event?.type) return null;
 
   const data = event.data || event.properties || {};
+  if (event.type === 'z.context.state.snapshot') {
+    if (data.phase === 'after-run' && runCtx.sessionRef) {
+      runCtx.sessionRef.contextState = { ...runCtx.sessionRef.contextState, version: 2,
+        head: data.ref, estimatedTokens: data.estimatedTokens, nativeSessionId: data.sessionID, needsRestore: false };
+    }
+    return;
+  }
+  if (event.type === 'z.context.state.failed') {
+    upsertOpenCodeTimeline(runCtx, 'context-storage-warning', { type: 'text', content: data.message });
+    return;
+  }
   const part = data.part;
   if (event.type === 'z.opencode.started') return { type: 'phase', message: '回包中' };
   if (event.type === 'z.model.request.started') {
@@ -10281,6 +10292,7 @@ function mapOpenCodeEventToPet(event, runCtx) {
   }
   if (event.type === 'z.opencode.reconnected') return { type: 'phase', message: '思考推理' };
   if (event.type === 'z.context.compression.started') return { type: 'phase', message: '正在压缩上下文' };
+  if (event.type === 'z.context.native-prefix.restored') return { type: 'phase', message: '已恢复保留的上下文' };
   if (event.type === 'z.context.compression.completed') return { type: 'phase', message: '上下文压缩已完成' };
   if (event.type === 'z.goal.acceptance.started') return { type: 'phase', message: '正在验收目标' };
   if (event.type === 'z.goal.acceptance.repaired') return { type: 'phase', message: '已修复问题，准备再次验收' };
@@ -10488,6 +10500,10 @@ function applyOpenCodeEvent(runCtx, event, { deferEffects = false } = {}) {
       inputTokensPerSecond: Math.max(1, Number(data.inputTokensPerSecond) || 10_000)
     };
     updateContextInfo(runCtx.agentState, runCtx.sessionRef || state.currentSession);
+  } else if (event.type === 'z.context.native-prefix.restored') {
+    upsertOpenCodeTimeline(runCtx, 'context-prefix-restored', {
+      type: 'progress', content: '已恢复回退点的上下文，并保留旧工具输出的清理状态。'
+    });
   } else if (event.type === 'z.context.compression.started') {
     upsertOpenCodeTimeline(runCtx, 'context-compression', {
       type: 'progress',
@@ -11374,8 +11390,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
       resolve({ content: agentRun.textContent || '', agentRun });
     });
     try {
-      const hasResetHistory = !!(session.forkedFrom || session.contextReset);
-      const requestMessageAnchor = hasResetHistory ? await messageForkAnchor(latestUserMessage) : '';
+      const requestMessageAnchor = await messageForkAnchor(latestUserMessage);
       const start = await api.openCodeStartRun({
         runId: openCodeRunId,
         zSessionId: session.id,
@@ -11388,7 +11403,7 @@ async function runOpenCodeLoop(session, assistantEl, runCtx) {
         subagentWake: latestUserMessage.subagentWake || false,
         intentId: latestUserMessage.intentId || '',
         attachments: latestUserMessage.attachments || [],
-        ...(hasResetHistory ? { requestMessageIndex, requestMessageAnchor } : {}),
+        requestMessageIndex, requestMessageAnchor,
         selectedSkills: normalizeSkillCalls(latestUserMessage.skillCalls || latestUserMessage.skillCall),
         subagentRoles: Array.isArray(latestUserMessage.subagentRoles) ? latestUserMessage.subagentRoles : [],
         history: requestHistory.map(message => {
@@ -16839,11 +16854,11 @@ function sessionEstimateTokens(session, liveContext) {
   const lastSize = typeof last?.content === 'string'
     ? last.content.length
     : JSON.stringify(last?.content || '').length;
-  const key = `${session?.id || ''}:${msgs.length}:${lastSize}:${liveContext ? liveContext.length : -1}`;
+  const key = `${session?.id || ''}:${session?.conversationRevision || 0}:${session?.contextState?.head || ''}:${msgs.length}:${lastSize}:${liveContext ? liveContext.length : -1}`;
   const now = Date.now();
   if (contextEstimateMemo.key === key) return contextEstimateMemo.value;
   if (now - contextEstimateMemo.at < 400) return contextEstimateMemo.value;
-  const value = Math.max(
+  const value = session?.contextState?.version === 2 ? Math.max(0, Number(session.contextState.estimatedTokens) || 0) : Math.max(
     estimateTokens(liveContext || msgs),
     persistedOpenCodeContextTokens(msgs)
   );
@@ -25129,7 +25144,8 @@ function renderMarkdown(text) {
   // Protect fenced/inline code before math, links, and Markdown formatting.
   const codeBlocks = [];
   const source = String(text).replace(/\r\n?/g, '\n').replace(/\u0000/g, '\ufffd');
-  const fences = /^ {0,3}(`{3,}|~{3,})[^\n]*\n/gm;
+  const codeLanguages = [];
+  const fences = /^ {0,3}(`{3,}|~{3,})([^\n]*)\n/gm;
   const parts = [];
   let cursor = 0;
   let opening;
@@ -25138,6 +25154,8 @@ function renderMarkdown(text) {
     const closing = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}[ \\t]*(?:\\n|$)`, 'gm');
     closing.lastIndex = fences.lastIndex;
     const end = closing.exec(source);
+    // The first word of the info string names the language (```bash, ```c++ title).
+    codeLanguages.push((opening[2].trim().split(/\s+/)[0].match(/^[A-Za-z0-9][\w+#.-]{0,31}/) || [''])[0]);
     codeBlocks.push(source.slice(fences.lastIndex, end ? end.index : source.length).replace(/\n$/, ''));
     parts.push(source.slice(cursor, opening.index), `\u0000CODE${codeBlocks.length - 1}\u0000\n`);
     cursor = end ? closing.lastIndex : source.length;
@@ -25189,20 +25207,22 @@ function renderMarkdown(text) {
   t = escapeHtml(t);
   // bold / italic
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, '<em>$1</em>');
+  // Emphasis needs non-space next to both stars, so "* item" bullets and "a * b * c" stay literal.
+  t = t.replace(/(?<!\w)\*(?!\s)([^*]*?[^*\s])\*(?!\w)/g, '<em>$1</em>');
   // headers
   t = t.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
   t = t.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
   t = t.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
   // tables (在列表/段落处理之前)
   t = renderMarkdownTables(t);
-  // ordered lists — 用哨兵标记合并连续项为 <ol>
-  t = t.replace(/^\s*\d+[.)]\s+(.*)$/gm, '\u0001$1\u0002');
+  // ordered lists — 用哨兵标记合并连续项为 <ol>（只吃行首空格，不吞掉列表前的空行）
+  t = t.replace(/^[ \t]*\d+[.)]\s+(.*)$/gm, '\u0001$1\u0002');
   t = t.replace(/(\u0001[\s\S]*?\u0002(?:\s*\u0001[\s\S]*?\u0002)*)/g,
     m => '<ol>' + m.replace(/\u0001/g, '<li>').replace(/\u0002/g, '</li>').replace(/\s+/g, ' ') + '</ol>');
-  // unordered lists — 合并连续的 <li> 为一个 <ul>
-  t = t.replace(/^(?:- |\* )(.*)$/gm, '<li>$1</li>');
-  t = t.replace(/(<li>[\s\S]*?<\/li>(?:\s*<li>[\s\S]*?<\/li>)*)/g, '<ul>$1</ul>');
+  // unordered lists — 用自己的哨兵合并连续项为 <ul>，不再把 <ol> 里的 <li> 再包一层
+  t = t.replace(/^(?:- |\* )(.*)$/gm, '\u0003$1\u0004');
+  t = t.replace(/(\u0003[\s\S]*?\u0004(?:\s*\u0003[\s\S]*?\u0004)*)/g,
+    m => '<ul>' + m.replace(/\u0003/g, '<li>').replace(/\u0004/g, '</li>') + '</ul>');
   // paragraphs
   t = t.split(/\n{2,}/).map(block => {
     const b = block.trim();
@@ -25216,7 +25236,7 @@ function renderMarkdown(text) {
   t = t.replace(/\u0000INLINE(\d+)\u0000/g, (_, i) => `<code>${escapeHtml(inlineCodes[Number(i)])}</code>`);
   // 还原代码块（内容做转义）
   t = t.replace(/\u0000CODE(\d+)\u0000/g, (_, i) =>
-    `<div class="md-code-block"><span class="md-code-kind">纯文本</span><button type="button" class="md-code-copy" data-state="idle" aria-label="复制整段代码" aria-live="polite" title="复制整段代码">${ICONS.copy}</button><pre><code>${escapeHtml(codeBlocks[Number(i)])}</code></pre></div>`);
+    `<div class="md-code-block"><span class="md-code-kind">${escapeHtml(codeLanguages[Number(i)] || '纯文本')}</span><button type="button" class="md-code-copy" data-state="idle" aria-label="复制整段代码" aria-live="polite" title="复制整段代码">${ICONS.copy}</button><pre><code>${escapeHtml(codeBlocks[Number(i)])}</code></pre></div>`);
   t = t.replace(/\u0000AGENTLINK(\d+)\u0000/g, (_, i) => {
     const link = agentLinks[Number(i)];
     return link ? buildAgentUrlLink(link.label, link.url) : '';

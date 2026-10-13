@@ -150,6 +150,9 @@ test('observer eye expression follows the selected run', () => {
   assert.equal(eye({ mode: 'live', status: 'working', snapshot: snapshot({ enabled: false, phase: 'disabled' }) }), 'closed');
   assert.equal(eye({ mode: 'history', status: 'done', snapshot: snapshot() }), 'closed');
   assert.equal(eye({ mode: 'history', status: 'error', snapshot: snapshot() }), 'closed');
+  // A stopped run re-opens the eye while the end-of-turn review checks the goal.
+  assert.equal(eye({ mode: 'history', status: 'done', snapshot: snapshot(), completion: { status: 'reviewing' } }), 'verifying');
+  assert.equal(eye({ mode: 'history', status: 'done', snapshot: snapshot(), completion: { status: 'achieved' } }), 'closed');
 });
 
 test('runtime text is rendered as text nodes, never parsed as markup', () => {

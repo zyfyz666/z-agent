@@ -1,7 +1,8 @@
 'use strict';
 // Observer eye: every expression renders inside the panel without overlapping the
-// header or status card, the eye node survives re-renders, and a live reminder
-// makes it speak and then return to watching. Isolated profile, no model calls.
+// header or status card, the eye node survives re-renders, a live reminder makes it
+// speak and a "no need to step in" judgement makes it assured, both then return to
+// watching, and a calm end-of-turn verdict is assured too. Isolated profile, no model calls.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -19,14 +20,19 @@ const snap = (extra = {}) => ({ enabled: true, phase: 'observing', judgeEvery: 6
   checks: 2, interventions: 0, observations: 1, updatedAt: now, events: [], ...extra });
 const remind = id => ({ id, ts: now, step: 12, action: 'remind', rules: ['R1_loop'], advisories: [],
   message: '连续三次读取同一文件，结论没有变化。', delivery: 'delivered' });
+const observe = id => ({ ...remind(id), action: 'observe', rules: [], message: '进展正常，不介入。' });
 const STATES = {
   resting: { mode: 'empty', status: 'idle', snapshot: null },
+  closed: { mode: 'history', status: 'done', key: 'run:b', sessionId: 's', snapshot: snap({ phase: 'completed', outcome: 'completed' }) },
+  verifying: { mode: 'history', status: 'done', key: 'run:v', sessionId: 's', snapshot: snap({ phase: 'completed', outcome: 'completed' }),
+    completion: { status: 'reviewing' } },
   watching: { mode: 'live', status: 'working', key: 'run:a', sessionId: 's', snapshot: snap() },
   pondering: { mode: 'live', status: 'working', key: 'run:a', sessionId: 's',
     snapshot: snap({ model: { name: 'GLM', modelId: 'glm', phase: 'reviewing', checks: 1 } }) },
-  closed: { mode: 'history', status: 'done', key: 'run:b', sessionId: 's', snapshot: snap({ phase: 'completed', outcome: 'completed' }) },
   alarmed: { mode: 'live', status: 'working', key: 'run:c', sessionId: 's', snapshot: snap({ phase: 'error' }) }
 };
+// Board order follows a run: stopped, reviewing, live, judging, then the two verdicts.
+const BOARD = ['resting', 'closed', 'verifying', 'watching', 'pondering', 'assured', 'speaking', 'alarmed'];
 
 async function main() {
   const env = { ...process.env, Z_E2E_MODE: '1', Z_E2E_USER_DATA_DIR: profile, Z_E2E_PARENT_PID: String(process.pid),
@@ -36,13 +42,13 @@ async function main() {
   page = await app.firstWindow();
   page.setDefaultTimeout(15_000);
   page.on('pageerror', error => report.errors.push(error.message));
-  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.setViewportSize({ width: 1600, height: 900 });
   await page.waitForFunction(() => typeof quickInputHandlerReady !== 'undefined' && quickInputHandlerReady && window.ZWdMonitor);
   // One fixture host per expression, laid out like the real right-sidebar panel.
   await page.evaluate(names => {
     const board = document.createElement('div');
     board.id = 'eyeBoard';
-    board.style.cssText = 'position:fixed;inset:0;z-index:99999;display:grid;grid-template-columns:repeat(3,380px);gap:12px;padding:12px;background:var(--bg);overflow:hidden';
+    board.style.cssText = 'position:fixed;inset:0;z-index:99999;display:grid;grid-template-columns:repeat(4,380px);gap:12px;padding:12px;background:var(--bg);overflow:hidden';
     for (const name of names) {
       const host = document.createElement('section');
       host.className = 'wd-panel'; host.id = `eye-${name}`;
@@ -50,7 +56,7 @@ async function main() {
       board.append(host);
     }
     document.body.append(board);
-  }, [...Object.keys(STATES), 'speaking']);
+  }, BOARD);
   const draw = (id, selection) => page.evaluate(([id, selection]) =>
     window.ZWdMonitor.render(document.getElementById(`eye-${id}`), selection), [id, selection]);
   const measure = id => page.evaluate(id => {
@@ -60,11 +66,13 @@ async function main() {
       oracle: box('.wd-oracle'), svg: box('.wd-eye'), status: box('.wd-status'), scrollX: host.scrollWidth - host.clientWidth };
   }, id);
   for (const [name, selection] of Object.entries(STATES)) await draw(name, selection);
-  // Speaking: the same live run gains a reminder after the first render.
+  // Speaking and assured: the same live run gains a reminder / a "no need to step in" judgement after the first render.
   await draw('speaking', { ...STATES.watching, key: 'run:s' });
   await draw('speaking', { ...STATES.watching, key: 'run:s', snapshot: snap({ interventions: 1, events: [remind('r1')] }) });
-  await page.waitForTimeout(700);
-  for (const name of [...Object.keys(STATES), 'speaking']) {
+  await draw('assured', { ...STATES.watching, key: 'run:o' });
+  await draw('assured', { ...STATES.watching, key: 'run:o', snapshot: snap({ checks: 3, events: [observe('o1')] }) });
+  await page.waitForTimeout(1300);
+  for (const name of BOARD) {
     const m = report.states[name] = await measure(name);
     assert.equal(m.eye, name, `${name}: data-eye`);
     assert.ok(m.header.bottom <= m.oracle.top + 0.5, `${name}: header overlaps eye`);
@@ -73,7 +81,8 @@ async function main() {
     assert.equal(m.scrollX, 0, `${name}: horizontal overflow`);
   }
   await page.screenshot({ path: path.join(output, 'states-dark.png') });
-  await page.screenshot({ path: path.join(output, 'resting-closed-dark-zoom.png'), clip: { x: 12, y: 12, width: 380, height: 740 }, scale: 'device' });
+  await page.screenshot({ path: path.join(output, 'eyes-row1-dark.png'), clip: { x: 12, y: 12, width: 1556, height: 250 } });
+  await page.screenshot({ path: path.join(output, 'eyes-row2-dark.png'), clip: { x: 12, y: 444, width: 1556, height: 250 } });
   // The eye node survives re-renders; a snapshot that already has a reminder does not flare.
   report.persistent = await page.evaluate(() => {
     const host = document.getElementById('eye-watching');
@@ -97,11 +106,17 @@ async function main() {
   assert.equal(report.blinked, true, 'watching eye never blinked');
   await page.waitForTimeout(2200);
   assert.equal((await measure('speaking')).eye, 'watching', 'speaking did not return to watching');
+  assert.equal((await measure('assured')).eye, 'watching', 'assured did not return to watching');
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   await draw('speaking', { ...STATES.watching, key: 'run:s', snapshot: snap({ interventions: 2, events: [remind('r1'), remind('r2')] }) });
-  await page.waitForTimeout(700);
+  await draw('assured', { ...STATES.watching, key: 'run:o', snapshot: snap({ checks: 4, events: [observe('o1'), observe('o2')] }) });
+  await page.waitForTimeout(1300);
   await page.screenshot({ path: path.join(output, 'states-light.png') });
-  await page.screenshot({ path: path.join(output, 'watching-light-zoom.png'), clip: { x: 404, y: 12, width: 380, height: 300 }, scale: 'device' });
+  await page.screenshot({ path: path.join(output, 'eyes-row1-light.png'), clip: { x: 12, y: 12, width: 1556, height: 250 } });
+  await page.screenshot({ path: path.join(output, 'eyes-row2-light.png'), clip: { x: 12, y: 444, width: 1556, height: 250 } });
+  // An end-of-turn review that decides not to wake the agent is assured before the eye closes.
+  await draw('verifying', { ...STATES.verifying, completion: { status: 'achieved' } });
+  assert.equal((await measure('verifying')).eye, 'assured', 'a calm verdict did not show as assured');
   assert.deepEqual(report.errors, []);
 }
 

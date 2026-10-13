@@ -1,5 +1,5 @@
 {
-  "revision": "all-file-tools-v1-shell-lifecycle-v2",
+  "revision": "all-tools-shell-v2-retry-v2-task-errors-v1",
   "upstreamVersion": "1.18.11",
   "upstreamCommit": "012c2f57f976489d88bd4598a056b4bdcdd428ee",
   "filter": "let j=W.modelID.includes(\"gpt-\")&&!W.modelID.includes(\"oss\")&&!W.modelID.includes(\"gpt-4\");if(J.id===xr.id)return j;if(J.id===Xr.id||J.id===vr.id)return!j;",
@@ -8,7 +8,7 @@
       "package": "opencode-windows-x64",
       "size": 174182280,
       "sourceSha256": "578d7eb3fff2c807fc0dedaab5e5d9177713a9560fa4304db6a0161111e9cc35",
-      "patchedSha256": "cf4b60a444d956526e921cffee593d71a195df61e0b59cd763610059c27253f3"
+      "patchedSha256": "ad69b87934239de21fecd857684418cb3a440981b1d4894ed5aebe4596058bfd"
     }
   ],
   "replacements": [
@@ -16,6 +16,42 @@
       "id": "windows-process-lifecycle",
       "find": "I=(S,y)=>aU((w)=>{let R=s4(),M=I9.default(S.command,S.args,y),T=!1,E;return M.on(\"error\",(h)=>{w(A1(h1(\"spawn\",h,S)))}),M.on(\"exit\",(...h)=>{E=h}),M.on(\"close\",(...h)=>{if(T)return;T=!0,l4(R,i4(E??h))}),M.on(\"spawn\",()=>{w($1([M,R]))}),L1(()=>{M.kill(\"SIGTERM\")})}),L=(S,y,w)=>{if(globalThis.process.platform===\"win32\")return aU((R)=>{J9.exec(`taskkill /pid ${y.pid} /T /F`,{windowsHide:!0},(M)=>{if(M)return R(A1(h1(\"kill\",L0(M),S)));R(u1)})});return r1({try:()=>{globalThis.process.kill(-y.pid,w)},catch:(R)=>h1(\"kill\",L0(R),S)})},k=(S,y,w)=>zD(()=>{if(y.kill(w))return u1;return A1(h1(\"kill\",Error(\"Failed to kill child process\"),S))}),P=(S,y,w)=>(R)=>{let M=w?.killSignal??\"SIGTERM\";if(K0(w?.forceKillAfter))return R(y,S,M);return PA(R(y,S,M),{duration:w.forceKillAfter,orElse:()=>R(y,S,\"SIGKILL\")})},B=(S,y)=>{let w=y??\"stdout\";switch(w){case\"stdout\":return S.stdout;case\"stderr\":return S.stderr;case\"all\":return S.all;default:{let R=BA(w);return r4(R)?S.getOutputFd(R):S.stdout}}},g=vD(function*(S){switch(S._tag){case\"StandardCommand\":{let y=Z(S.options),w=W(S.options,\"stdout\"),R=W(S.options,\"stderr\"),M=H(S.options),T=yield*$(S.options),[E,h]=yield*a4(I(S,{cwd:T,env:A(S.options),stdio:J(y,w,R,M),detached:S.options.detached??!1,shell:S.options.shell,windowsHide:!0}),vD(function*([f,d]){let M_=yield*lU(d),R_=P(f,S,S.options);if(M_){let[C]=yield*t0(d);return yield*u1}let Y1=(C)=>i1(L(S,f,C),()=>k(S,f,C)),Q1=S.options.killSignal??\"SIGTERM\",V=Y1(Q1).pipe(s1(t0(d)),m0),j=S.options.forceKillAfter?PA(V,{duration:S.options.forceKillAfter,orElse:()=>Y1(\"SIGKILL\").pipe(s1(t0(d)),m0)}):V;return yield*eU(j)})),o=yield*N(S,E,M),i=F(S,E,w,R),m=!0;return X9({pid:U9(E.pid),stdin:yield*O(S,E,y),stdout:i.stdout,stderr:i.stderr,all:i.all,getInputFd:o.getInputFd,getOutputFd:o.getOutputFd,isRunning:V1(lU(h),(f)=>!f),exitCode:S1(t0(h),([f,d])=>{if(kA(f))return $1(A9(f));return A1(h1(\"exitCode\",Error(`Process interrupted due to receipt of signal: '${d}'`),S))}),kill:(f)=>{let d=f?.killSignal??\"SIGTERM\",M_=(Y1)=>i1(L(S,E,Y1),()=>k(S,E,Y1)),R_=M_(d).pipe(s1(t0(h)),m0);if(!f?.forceKillAfter)return R_;return PA(R_,{duration:f.forceKillAfter,orElse:()=>M_(\"SIGKILL\").pipe(s1(t0(h)),m0)})},unref:L1(()=>{if(m)E.unref(),m=!1;return L1(()=>{if(!m)E.ref(),m=!0})})})}",
       "replace": "I=(S,y)=>aU(w=>{let R=s4(),M=I9.default(S.command,S.args,y),T=!1,E,t;const done=h=>{T||(T=!0,clearTimeout(t),l4(R,i4(h)))};return M.on(\"error\",h=>w(A1(h1(\"spawn\",h,S)))),M.on(\"exit\",(...h)=>{E=h,t=setTimeout(()=>{for(const p of M.stdio||[])p?.destroy?.();done(h)},500)}),M.on(\"close\",(...h)=>done(E??h)),M.on(\"spawn\",()=>w($1([M,R]))),L1(()=>M.kill(\"SIGTERM\"))}),L=(S,y,w)=>globalThis.process.platform===\"win32\"?aU(R=>{J9.exec(`taskkill /pid ${y.pid} /T /F`,{windowsHide:!0,timeout:3e3},M=>{if(M)return R(A1(h1(\"kill\",L0(M),S)));R(u1)})}):r1({try:()=>globalThis.process.kill(-y.pid,w),catch:R=>h1(\"kill\",L0(R),S)}),k=(S,y,w)=>zD(()=>y.kill(w)?u1:A1(h1(\"kill\",Error(\"Failed to kill child process\"),S))),P=(S,y,w,R)=>{let attempt=signal=>zD(()=>y.exitCode!=null||y.signalCode!=null?t0(R).pipe(m0):i1(L(S,y,signal),()=>k(S,y,signal)).pipe(s1(t0(R)),m0));return PA(attempt(w?.killSignal??\"SIGTERM\"),{duration:w?.forceKillAfter??\"3 seconds\",orElse:()=>PA(attempt(\"SIGKILL\"),{duration:\"3 seconds\",orElse:()=>A1(h1(\"kill\",Error(\"Command did not exit after bounded termination\"),S))})})},B=(S,y)=>{let w=y??\"stdout\";switch(w){case\"stdout\":return S.stdout;case\"stderr\":return S.stderr;case\"all\":return S.all;default:{let R=BA(w);return r4(R)?S.getOutputFd(R):S.stdout}}},g=vD(function*(S){switch(S._tag){case\"StandardCommand\":{let y=Z(S.options),w=W(S.options,\"stdout\"),R=W(S.options,\"stderr\"),M=H(S.options),T=yield*$(S.options),[E,h]=yield*a4(I(S,{cwd:T,env:A(S.options),stdio:J(y,w,R,M),detached:S.options.detached??!1,shell:S.options.shell,windowsHide:!0}),vD(function*([f,d]){return(yield*lU(d))?yield*u1:yield*eU(P(S,f,S.options,d))})),o=yield*N(S,E,M),i=F(S,E,w,R),m=!0;return X9({pid:U9(E.pid),stdin:yield*O(S,E,y),stdout:i.stdout,stderr:i.stderr,all:i.all,getInputFd:o.getInputFd,getOutputFd:o.getOutputFd,isRunning:V1(lU(h),f=>!f),exitCode:S1(t0(h),([f,d])=>kA(f)?$1(A9(f)):A1(h1(\"exitCode\",Error(`Process interrupted due to receipt of signal: '${d}'`),S))),kill:f=>P(S,E,f,h),unref:L1(()=>(m&&(E.unref(),m=!1),L1(()=>{m||(E.ref(),m=!0)})))})}"
+    },
+    {
+      "id": "session-retry-delay",
+      "find": "function cl(e){return Math.min(e,ra)}function ta(e,o){if(o){let l=o.data.responseHeaders;if(l){let i=l[\"retry-after-ms\"];if(i){let r=Number.parseFloat(i);if(!Number.isNaN(r))return cl(r)}let h=l[\"retry-after\"];if(h){let r=Number.parseFloat(h);if(!Number.isNaN(r))return cl(Math.ceil(r*1000));let d=Date.parse(h)-Date.now();if(!Number.isNaN(d)&&d>0)return cl(Math.ceil(d))}return cl(vs*Math.pow(Ds,e-1))}}return cl(Math.min(vs*Math.pow(Ds,e-1),ha))}",
+      "replace": "function cl(e){return Math.max(0,Math.min(e,ha))}function ta(e,o){let l=o?.data?.responseHeaders,h,r;if(l){if((h=l[\"retry-after-ms\"])&&(r=Number.parseFloat(h),r===r))return cl(r);if(h=l[\"retry-after\"]){r=Number.parseFloat(h);if(r===r)return cl(Math.ceil(r*1000));r=Date.parse(h)-Date.now();if(r===r&&r>0)return cl(Math.ceil(r))}}return cl(vs*Ds**(e-1))}function zRetryData(e){return{...e,message:\"[Z_NATIVE_RETRY_EXHAUSTED] \"+e.message}}"
+    },
+    {
+      "id": "session-retry-policy",
+      "find": "function Zd(e){return na.fromStepWithMetadata(s.succeed((o)=>{let l=e.parse(o.input),i=da(l,e.provider);if(!i)return me.done(o.attempt);return s.gen(function*(){let h=ta(o.attempt,Oe.APIError.isInstance(l)?l:void 0),r=yield*sa.currentTimeMillis;return yield*e.set({attempt:o.attempt,message:i.message,action:i.action,next:r+h}),[o.attempt,la.millis(h)]})}))}",
+      "replace": "function Zd(e){return na.fromStepWithMetadata(s.succeed(o=>{let l=e.parse(o.input),i=da(l,e.provider);if(!i||o.attempt>5)return i&&e.exhausted?.(l),me.done(o.attempt);return s.gen(function*(){let h=ta(o.attempt,l);return yield*e.set({attempt:o.attempt,message:i.message,action:i.action,next:(yield*sa.currentTimeMillis)+h}),[o.attempt,la.millis(h)]})}))}"
+    },
+    {
+      "id": "session-retry-exhaustion-capture",
+      "find": "s.retry(wl.policy({provider:w.model.providerID,parse:$,set:(H)=>{return f.set(a.sessionID,{type:\"retry\",attempt:H.attempt,message:H.message,action:H.action,next:H.next})}})),s.catch(ze)",
+      "replace": "s.retry(wl.policy({provider:w.model.providerID,parse:$,exhausted:H=>a.zRetryError={...H,data:zRetryData(H.data)},set:H=>f.set(a.sessionID,{type:\"retry\",...H})})),s.catch(ze)"
+    },
+    {
+      "id": "session-retry-halt-error",
+      "find": "ze=s.fn(\"SessionProcessor.halt\")(function*(c){yield*s.logError(\"process\",{\"session.id\":w.sessionID,messageID:w.assistantMessage.id,error:Yo(c),stack:c instanceof Error?c.stack:void 0});let H=$(c);",
+      "replace": "ze=s.fn(\"SessionProcessor.halt\")(function*(c){yield*s.logError(\"process\",{\"session.id\":w.sessionID,messageID:w.assistantMessage.id,error:Yo(c),stack:c?.stack});let H=a.zRetryError??$(c);"
+    },
+    {
+      "id": "session-llm-disable-sdk-retries",
+      "find": "headers:a.headers,maxRetries:y.retries??0,messages:a.messages",
+      "replace": "headers:a.headers,maxRetries:0,messages:a.messages"
+    },
+    {
+      "id": "task-propagate-child-error",
+      "find": "let A=s.fn(\"TaskTool.runTask\")(function*(){let Y=yield*K.resolvePromptParts(m.prompt);return(yield*K.prompt({messageID:Lo.ascending(),sessionID:O.id,model:{modelID:R.modelID,providerID:R.providerID},variant:c.model?void 0:q,agent:c.name,parts:Y})).parts.findLast((_)=>_.type===\"text\")?.text??\"\"}),D=s.fn(\"TaskTool.injectBackgroundResult\")(function*(Y,k){let _=yield*i.get(p.sessionID);yield*K.prompt({sessionID:p.sessionID,agent:_.agent??p.agent,variant:q,parts:[{type:\"text\",synthetic:!0,text:Rr({sessionID:O.id,state:Y,summary:Y===\"completed\"?`Background task completed: ${m.description}`:`Background task failed: ${m.description}`,text:k})}]}).pipe(s.ignore,s.forkIn(t,{startImmediately:!0}))}),Z=s.fn(\"TaskTool.notifyBackgroundResult\")(function*(Y){yield*e.wait({id:Y}).pipe(s.flatMap((k)=>{if(k.info?.status===\"completed\")return D(\"completed\",k.info.output??\"\");if(k.info?.status===\"error\")return D(\"error\",k.info.error??\"\");return s.void}),s.forkIn(t,{startImmediately:!0}))});if(yield*e.extend({id:O.id,run:A()}))return{title:m.description,metadata:{...N,background:!0,jobId:O.id},output:Rr({sessionID:O.id,state:\"running\",summary:\"Background task updated\",text:Bs})};let V=yield*e.start({id:O.id,type:sr,title:m.description,metadata:N,onPromote:s.all([p.metadata({title:m.description,metadata:{...N,background:!0,jobId:O.id}}),Z(O.id)]),run:A().pipe(s.onInterrupt(()=>K.cancel(O.id)))});function oo(){return{title:m.description,metadata:{...N,background:!0,jobId:V.id},output:Rr({sessionID:O.id,state:\"running\",summary:\"Background task started\",text:Fs})}}",
+      "replace": "let A=s.fn(\"TaskTool.runTask\")(function*(){let Y=yield*K.resolvePromptParts(m.prompt),k=yield*K.prompt({messageID:Lo.ascending(),sessionID:O.id,model:{modelID:R.modelID,providerID:R.providerID},variant:c.model?void 0:q,agent:c.name,parts:Y}),_=k.parts.filter(p=>p.type===\"text\").map(p=>p.text);if(k.info.error)return yield*s.fail(Error(\"[Z_SUBAGENT_FAILED] \"+JSON.stringify(k.info.error)+\"\\nPartial output:\\n\"+_.join(\"\\n\")));return _.at(-1)??\"\"}),D=s.fn(\"TaskTool.injectBackgroundResult\")(function*(Y,k){let _=yield*i.get(p.sessionID);yield*K.prompt({sessionID:p.sessionID,agent:_.agent??p.agent,variant:q,parts:[{type:\"text\",synthetic:!0,text:Rr({sessionID:O.id,state:Y,summary:`Background task ${Y===\"completed\"?\"completed\":\"failed\"}: ${m.description}`,text:k})}]}).pipe(s.ignore,s.forkIn(t,{startImmediately:!0}))}),Z=s.fn(\"TaskTool.notifyBackgroundResult\")(function*(Y){yield*e.wait({id:Y}).pipe(s.flatMap(k=>{let _=k.info;return _?.status===\"completed\"?D(\"completed\",_.output??\"\"):_?.status===\"error\"?D(\"error\",_.error??\"\"):s.void}),s.forkIn(t,{startImmediately:!0}))});if(yield*e.extend({id:O.id,run:A()}))return oo(!0);let V=yield*e.start({id:O.id,type:sr,title:m.description,metadata:N,onPromote:s.all([p.metadata({title:m.description,metadata:{...N,background:!0,jobId:O.id}}),Z(O.id)]),run:A().pipe(s.onInterrupt(()=>K.cancel(O.id)))});function oo(U){return{title:m.description,metadata:{...N,background:!0,jobId:U?O.id:V.id},output:Rr({sessionID:O.id,state:\"running\",summary:\"Background task \"+(U?\"updated\":\"started\"),text:U?Bs:Fs})}}"
     }
-  ]
+  ],
+  "retryPolicy": {
+    "maxRetries": 5,
+    "maxDelayMs": 30000,
+    "exhaustedMarker": "[Z_NATIVE_RETRY_EXHAUSTED]"
+  },
+  "subagentFailureMarker": "[Z_SUBAGENT_FAILED]"
 }

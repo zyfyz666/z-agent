@@ -13,6 +13,7 @@ const patterns = Array.isArray(pkg.build?.asarUnpack) ? pkg.build.asarUnpack : [
 // archive is not readable. Anything reachable from a z-*-mcp.js entry must
 // therefore be unpacked next to the archive, or the child exits with code 1
 // and the MCP manager reports a crash.
+// Standalone Node workers also have no Electron ASAR filesystem support.
 function globToRegExp(pattern) {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   const body = escaped.replace(/\*\*\/|\*\*|\*/g, (token) => {
@@ -78,5 +79,17 @@ test('native MCP entries and their local dependency trees are unpacked', () => {
       const relative = path.relative(appRoot, file);
       assert.ok(isUnpacked(relative), `${relative} must match build.asarUnpack`);
     }
+  }
+});
+
+test('legacy checkpoint worker and its local dependency tree are unpacked', () => {
+  const entry = path.join(appRoot, 'lib', 'legacy-context-checkpoint-worker.cjs');
+  const { files, unresolved } = collectDependencyTree(entry);
+  assert.deepEqual(unresolved, [], 'legacy checkpoint worker has unresolved local requires');
+  assert.ok(files.includes(path.join(appRoot, 'renderer', 'guidance-timeline.js')),
+    'the worker must retain the shared guidance-history projection');
+  for (const file of files) {
+    const relative = path.relative(appRoot, file);
+    assert.ok(isUnpacked(relative), `${relative} must match build.asarUnpack for the standalone Node worker`);
   }
 });

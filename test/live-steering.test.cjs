@@ -35,7 +35,7 @@ function fixture(deliver) {
     },
     loadConfig() { throw new Error('live steering must not select another model'); },
     saveConfig() { throw new Error('live steering must not write configuration'); },
-    readSessionRecord() { throw new Error('the frontend owns durable user-message persistence'); },
+    readSessionRecord() { return null; }, // Main reads only the saved guidance boundary.
     ipcMain: { handle(name, callback) { handlers.set(name, callback); } }
   });
   vm.runInContext(source.slice(start, end), context);
@@ -63,7 +63,7 @@ test('concurrent retries and later acknowledgement retries share one delivery an
   const first = f.send(request());
   const concurrent = f.send(request());
   assert.equal(first, concurrent);
-  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.calls.length, 1);
   resolve({ ok: true, accepted: true, delivered: false, version: 7 });
   const result = await first;
@@ -115,7 +115,7 @@ for (const state of ['finished', 'cancelled', 'replaced']) {
     let resolve;
     const f = fixture(() => new Promise(done => { resolve = done; }));
     const pending = f.send(request());
-    await Promise.resolve();
+    await new Promise(resolve => setImmediate(resolve));
     if (state === 'finished') f.runs.clear();
     if (state === 'cancelled') f.active.visionAbortController.abort();
     if (state === 'replaced') f.runs.set('run-a', { zSessionId: 'sess_other' });
@@ -203,7 +203,7 @@ test('stopping during image preparation cannot insert guidance into the cancelle
 test('stop continuation ownership is checked and insertion acknowledgement must finish first', async () => {
   let finish;
   const f = fixture(() => new Promise(resolve => { finish = resolve; }));
-  const pending = f.send(request()); await Promise.resolve();
+  const pending = f.send(request()); await new Promise(resolve => setImmediate(resolve));
   f.runs.clear(); f.kernels.clear();
   const payload = { runId: 'run-a', zSessionId: 'sess_alpha', requestIds: ['message-1'] };
   assert.equal((await f.detach({ ...payload, zSessionId: 'sess_wrong' })).items[0].status, 'failed');

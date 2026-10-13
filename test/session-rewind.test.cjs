@@ -16,6 +16,8 @@ const { filterReviewSummary } = require('../lib/run-change-summary');
 const { guidedHistory } = require('./fixtures/guidance-history.cjs');
 const { combineTurnPrompt } = require('../lib/opencode-sidecar');
 const { SubagentCompletionQueue } = require('../lib/subagent-completion-queue');
+const { restoreDesktopContextCheckpoint } = require('../lib/desktop-context-checkpoint');
+const { checkpointForSession } = require('./fixtures/desktop-context-checkpoint.cjs');
 
 const main = fs.readFileSync(path.resolve(__dirname, '../main.js'), 'utf8');
 function section(start, end) {
@@ -63,7 +65,12 @@ function fixture(t, { count = 64, branch = false } = {}) {
     return fs.promises.rename(from, to);
   } };
   const context = vm.createContext({
-    ...fork, ...rewind, fs, fsp, path, crypto, process: { pid: process.pid }, console,
+    ...require('../lib/context-state'), ContextStore: require('../lib/context-store').ContextStore,
+    appRoot: path.resolve(__dirname, '..'), STABLE_DATA_DIR: root,
+    // Archive transaction tests; real native snapshot restore has separate E2E coverage.
+    resolveContextBoundary: async () => new (require('../lib/context-store').ContextStore)(root).capture([], { directory: source.workspace }),
+    ...fork, ...rewind, fs, fsp, path, crypto, process: { pid: process.pid }, console, Buffer,
+    restoreDesktopContextCheckpoint,
     SubagentCompletionQueue, STABLE_DATA_DIR: root, subagentCompletionQueue: null,
     openCodeSidecar: null, subagentTrackingCancellations: new Map(), isQuiting: true, setTimeout, clearTimeout,
     sessionModelSnapshot, filterReviewSummary, sessionRecordCache: new Map(),
@@ -102,6 +109,7 @@ function fixture(t, { count = 64, branch = false } = {}) {
     section("ipcMain.handle('z:core-enqueue-intent',", "ipcMain.handle('z:core-ack-intent',"),
     section('async function setSessionModelRecord(', "ipcMain.handle('session:messages',")
   ]) vm.runInContext(code, context);
+  vm.runInContext(section('async function persistDesktopContextCheckpoint(', 'async function persistTaskProgress('), context);
   // Execute production admission validation; the separate Electron E2E
   // exercises the actual sidecar and model transport after this boundary.
   vm.runInContext(section("ipcMain.handle('opencode:start-run',", '    // The persisted conversation owns its directory.')
@@ -157,6 +165,85 @@ test('rewind IPC keeps the same session and inclusive prefix, preserves Observer
   assert.equal(backup.workspace, current.workspace);
   assert.equal(backup.pinned, false);
   f.filesUnchanged();
+});
+
+test('rewind and restore inherit only context snapshots inside the retained prefix', async t => {
+  const f = fixture(t);
+  const original = f.read(f.source.id);
+  original.desktopContextCheckpoints = [checkpointForSession(original, 6), checkpointForSession(original, 20, 'FUTURE_CHECKPOINT')];
+  fs.writeFileSync(f.file(original.id), JSON.stringify(original));
+  const rewound = await f.rewind(f.boundary(13));
+  assert.equal(rewound.ok, true);
+  const current = f.read(original.id);
+  assert.equal(current.desktopContextCheckpoints.length, 1);
+  assert.equal(current.desktopContextCheckpoints[0].conversationRevision, 1);
+  assert.equal(current.desktopContextCheckpoints[0].desktopPrefix.messageCount, 6);
+  const recovered = restoreDesktopContextCheckpoint(current.desktopContextCheckpoints[0], { messages: current.messages,
+    request: { zSessionId: original.id, conversationRevision: 1, workMode: 'normal' } });
+  assert.equal(recovered.ok, true);
+  assert.equal(recovered.context.desktopTail.length, 8);
+  assert.equal(recovered.context.nativeTail[0].parts[0].text, 'EXACT_RETAINED_NATIVE_TAIL');
+  assert.doesNotMatch(JSON.stringify(current.desktopContextCheckpoints), /FUTURE_CHECKPOINT/);
+  const backup = f.read(rewound.backupSessionId);
+  assert.equal(backup.desktopContextCheckpoints.length, 2);
+  assert.equal(backup.desktopContextCheckpoints[0].sessionId, backup.id);
+  const restored = await f.restore({ sessionId: original.id, conversationRevision: 1 });
+  assert.equal(restored.ok, true);
+  const restoredFull = f.read(original.id);
+  assert.equal(restoredFull.desktopContextCheckpoints.length, 2);
+  assert.equal(restoredFull.desktopContextCheckpoints[1].conversationRevision, 2);
+  assert.equal(restoredFull.desktopContextCheckpoints[1].context.summary, 'FUTURE_CHECKPOINT');
+  f.filesUnchanged();
+});
+
+test('rewinding into a compressed prefix keeps the archive and discards its later snapshot', async t => {
+  const f = fixture(t);
+  const source = f.read(f.source.id);
+  source.desktopContextCheckpoints = [checkpointForSession(source, 14)];
+  fs.writeFileSync(f.file(source.id), JSON.stringify(source));
+  const result = await f.rewind(f.boundary(5));
+  assert.equal(result.ok, true);
+  assert.equal(result.session.messages.length, 6);
+  assert.equal(result.session.desktopContextCheckpoints, undefined);
+  assert.equal(f.read(result.backupSessionId).desktopContextCheckpoints.length, 1);
+});
+
+test('checkpoint persistence validates durable identity and prefix while renderer saves cannot forge or erase it', async t => {
+  const f = fixture(t);
+  const source = f.read(f.source.id);
+  const checkpoint = checkpointForSession(source, 14);
+  for (const invalid of [{ ...checkpoint, context: { ...checkpoint.context, summary: 'FORGED' } },
+    { ...checkpoint, conversationRevision: 2 }, { ...checkpoint, sessionId: 'sess_another' }]) {
+    await f.context.persistDesktopContextCheckpoint(source.id, invalid, 0);
+    assert.equal(f.read(source.id).desktopContextCheckpoints, undefined);
+  }
+  await f.context.persistDesktopContextCheckpoint(source.id, checkpoint, 0);
+  assert.equal(f.read(source.id).desktopContextCheckpoints.length, 1);
+  await f.save({ ...source, desktopContextCheckpoints: [{ context: { summary: 'INJECTED' } }] });
+  assert.deepEqual(f.read(source.id).desktopContextCheckpoints, [checkpoint]);
+  const other = { ...source, messages: source.messages.map((message, index) => index ? message : { ...message, content: 'OTHER_CONTENT' }) };
+  await f.context.persistDesktopContextCheckpoint(source.id, checkpointForSession(other, 14), 0);
+  assert.deepEqual(f.read(source.id).desktopContextCheckpoints, [checkpoint]);
+});
+
+test('run admission supplies a verified full desktop prefix and rejects renderer-supplied checkpoint content', async t => {
+  const f = fixture(t);
+  const source = f.read(f.source.id);
+  const checkpoint = checkpointForSession(source, 14);
+  source.desktopContextCheckpoints = [checkpoint];
+  const prompt = { role: 'user', ts: 5000, content: 'Continue after saved summary' };
+  source.messages.push(prompt);
+  fs.writeFileSync(f.file(source.id), JSON.stringify(source));
+  const request = { zSessionId: source.id, prompt: prompt.content, requestMessageIndex: 64,
+    requestMessageAnchor: fork.messageForkAnchor(prompt), checkpointDesktopHistory: [{ content: 'FORGED' }],
+    desktopContextCheckpoints: [{ context: { summary: 'FORGED' } }] };
+  const started = await f.start(request);
+  assert.equal(started.ok, true);
+  assert.deepEqual(started.request.desktopContextCheckpoints, [checkpoint]);
+  assert.deepEqual(started.request.checkpointDesktopHistory, source.messages.slice(0, 64));
+  const withoutProof = await f.start({ ...request, requestMessageAnchor: 'f'.repeat(64) });
+  assert.equal(withoutProof.ok, true);
+  assert.deepEqual(withoutProof.request.checkpointDesktopHistory, []);
 });
 
 test('absolute boundaries and anchors reject stale, forged, unfinished or invalid choices without touching records', async t => {

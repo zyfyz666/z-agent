@@ -299,21 +299,26 @@
   }
 
   // Observer eye: a persistent SVG above the status card. Its expression follows
-  // the run (data-eye): resting with no task, watching a live run, pondering while
-  // the model reviews, speaking right after a reminder, closed for past runs and
-  // alarmed on errors. It is kept across renders so blinks and gaze never reset.
+  // the run (data-eye): resting with no task, closed once a run has stopped,
+  // verifying while the end-of-turn review runs, watching a live run between
+  // checks, pondering while the model judges, then briefly assured (judged, no
+  // need to step in) or speaking (a reminder or a wake), and alarmed on errors.
+  // It is kept across renders so blinks and gaze never reset.
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const FLARE_ACTIONS = new Set(['remind', 'escalate', 'halt']);
+  const ASSURE_ACTIONS = new Set(['observe']);
+  const WAKE_VERDICTS = new Set(['pending', 'scheduled']);
+  const CALM_VERDICTS = new Set(['achieved', 'needs_user', 'uncertain']);
   const TRACKING = new Set(['watching', 'resting']);
   const shells = new WeakMap();
   const tracked = new WeakSet();
-  const ALMOND = 'M54 66C84 30 156 30 186 66C156 98 84 98 54 66Z';
+  const ALMOND = 'M48 70C80 35 160 35 192 70C160 101 80 101 48 70Z';
   let eyeSerial = 0;
 
   function eyeState(view, selection = {}) {
     if (view.mode === 'empty') return 'resting';
     const completion = selection.completion?.status;
-    if (completion === 'reviewing') return 'pondering';
+    if (completion === 'reviewing') return 'verifying';
     if (completion === 'pending') return 'watching';
     if (completion === 'scheduled') return 'resting';
     if (view.mode !== 'live' || view.phase === 'disabled') return 'closed';
@@ -330,41 +335,81 @@
       parent?.append(element);
       return element;
     };
-    const root = svg('svg', { class: 'wd-eye', viewBox: '0 0 240 132', 'aria-hidden': 'true', focusable: 'false' });
+    const root = svg('svg', { class: 'wd-eye', viewBox: '0 0 240 140', 'aria-hidden': 'true', focusable: 'false' });
     const defs = svg('defs', {}, root);
-    const glow = svg('radialGradient', { id: `${id}Glow` }, defs);
-    svg('stop', { offset: '0', 'stop-color': 'currentColor', 'stop-opacity': '.34' }, glow);
-    svg('stop', { offset: '1', 'stop-color': 'currentColor', 'stop-opacity': '0' }, glow);
-    const iris = svg('radialGradient', { id: `${id}Iris` }, defs);
-    [['0', '.5'], ['.55', '.78'], ['1', '1']].forEach(([offset, opacity]) =>
-      svg('stop', { offset, 'stop-color': 'currentColor', 'stop-opacity': opacity }, iris));
+    // Gradient stops are coloured by class, so state and theme changes recolour them in CSS.
+    const gradient = (tag, name, attrs, stops) => {
+      const grad = svg(tag, { id: `${id}${name}`, ...attrs }, defs);
+      stops.forEach(([offset, tone, opacity]) => svg('stop', { offset, class: `wd-stop-${tone}`, 'stop-opacity': opacity }, grad));
+    };
+    gradient('radialGradient', 'Glow', {}, [['0', 'halo', '.5'], ['.45', 'halo', '.16'], ['1', 'halo', '0']]);
+    gradient('radialGradient', 'Fade', { gradientUnits: 'userSpaceOnUse', cx: 120, cy: 70, r: 70 }, [['.5', 'halo', '.9'], ['1', 'halo', '0']]);
+    gradient('radialGradient', 'Iris', {}, [['.3', 'light', '1'], ['.48', 'eye', '1'], ['.84', 'eye', '1'], ['1', 'deep', '1']]);
+    gradient('radialGradient', 'White', { cy: '.42', r: '.62' }, [['.55', 'white', '1'], ['1', 'white-edge', '1']]);
+    gradient('linearGradient', 'Shade', { x1: 0, y1: 0, x2: 0, y2: 1 }, [['.18', 'ink', '.38'], ['.5', 'ink', '0']]);
     svg('path', { d: ALMOND }, svg('clipPath', { id: `${id}Clip` }, defs));
-    svg('circle', { class: 'wd-eye-glow', cx: 120, cy: 66, r: 66, fill: `url(#${id}Glow)` }, root);
-    svg('circle', { class: 'wd-eye-ring', cx: 120, cy: 66, r: 63 }, root);
+    const at = (r, angle) => [120 + r * Math.cos(angle), 70 + r * Math.sin(angle)];
+    const pt = ([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`;
+    svg('circle', { class: 'wd-eye-glow', cx: 120, cy: 70, r: 70, fill: `url(#${id}Glow)` }, root);
+    // Glory: 16 tapered beams alternate with 16 flame-like waves, as on a monstrance.
     const rays = svg('g', { class: 'wd-eye-rays' }, root);
-    const at = (r, angle) => [(120 + r * Math.cos(angle)).toFixed(2), (66 + r * Math.sin(angle)).toFixed(2)];
-    for (let i = 0; i < 24; i += 1) {
-      const angle = i * Math.PI / 12;
-      const [[x1, y1], [x2, y2]] = (i % 2 ? [47, 57] : [42, 62]).map(r => at(r, angle));
-      svg('line', { x1, y1, x2, y2 }, rays);
+    let beams = '', flames = '';
+    for (let i = 0; i < 32; i += 1) {
+      const angle = i * Math.PI / 16 - Math.PI / 2;
+      if (i % 2) {
+        flames += `M${pt(at(41, angle))}Q${pt(at(45, angle + 0.045))} ${pt(at(49, angle))}T${pt(at(57, angle))}T${pt(at(64, angle))}`;
+      } else {
+        const reach = i % 4 ? 61 : 69;
+        beams += `M${pt(at(39, angle - 0.042))}L${pt(at(reach, angle))}L${pt(at(39, angle + 0.042))}Z`;
+      }
     }
-    svg('circle', { class: 'wd-eye-orbit', cx: 120, cy: 66, r: 54 }, root);
-    svg('path', { class: 'wd-eye-crease', d: 'M70 47C96 26 144 26 170 47' }, root);
+    svg('path', { class: 'wd-eye-beams', d: beams, fill: `url(#${id}Fade)` }, rays);
+    svg('path', { class: 'wd-eye-flames', d: flames, stroke: `url(#${id}Fade)` }, rays);
+    svg('circle', { class: 'wd-eye-ring', cx: 120, cy: 70, r: 66 }, root);
+    svg('circle', { class: 'wd-eye-sweep', cx: 120, cy: 70, r: 66 }, root);
+    let ticks = '';
+    for (let i = 0; i < 72; i += 1) ticks += `M${pt(at(i % 6 ? 64 : 62, i * Math.PI / 36))}L${pt(at(66, i * Math.PI / 36))}`;
+    svg('path', { d: ticks }, svg('g', { class: 'wd-eye-dial' }, root));
+    svg('circle', { class: 'wd-eye-orbit', cx: 120, cy: 70, r: 47 }, root);
+    const star = (x, y, s) => {
+      const p = (dx, dy) => pt([x + dx, y + dy]);
+      return `M${p(0, -s)}Q${p(0, 0)} ${p(s, 0)}Q${p(0, 0)} ${p(0, s)}Q${p(0, 0)} ${p(-s, 0)}Q${p(0, 0)} ${p(0, -s)}Z`;
+    };
+    [[178, 22, 4.2], [56, 26, 3], [196, 112, 3.2], [40, 104, 2.4]].forEach(([x, y, s], index) =>
+      svg('path', { class: 'wd-eye-spark', d: star(x, y, s), style: `--wd-spark-delay:${index * -1.3}s` }, root));
+    svg('path', { class: 'wd-eye-crease', d: 'M80 42C104 31 136 31 160 42' }, root);
+    // One ring sweeps outward when a check ends: soft for "no need to step in", sharp for a reminder.
+    svg('circle', { class: 'wd-eye-wave', cx: 120, cy: 70, r: 50 }, root);
     // The lid squeezes this group vertically: half-open at rest, a line when closed.
     const ball = svg('g', { class: 'wd-eye-ball' }, root);
-    svg('path', { class: 'wd-eye-white', d: ALMOND }, ball);
+    svg('path', { class: 'wd-eye-white', d: ALMOND, fill: `url(#${id}White)` }, ball);
     const inner = svg('g', { 'clip-path': `url(#${id}Clip)` }, ball);
     const gaze = svg('g', { class: 'wd-eye-gaze' }, inner);
-    svg('circle', { class: 'wd-eye-iris', cx: 120, cy: 66, r: 22, fill: `url(#${id}Iris)` }, gaze);
-    const fibers = svg('g', { class: 'wd-eye-fibers' }, gaze);
-    for (let i = 0; i < 12; i += 1) {
-      const angle = i * Math.PI / 6;
-      const [[x1, y1], [x2, y2]] = [12, 19].map(r => at(r, angle));
-      svg('line', { x1, y1, x2, y2 }, fibers);
+    svg('circle', { class: 'wd-eye-iris', cx: 120, cy: 70, r: 26, fill: `url(#${id}Iris)` }, gaze);
+    // Iris texture: jittered light and dark strands, a ragged collarette and a dark limbal ring.
+    const jitter = seed => { const x = Math.sin(seed * 91.7) * 4375.85; return x - Math.floor(x); };
+    let light = '', dark = '', collarette = '';
+    for (let i = 0; i < 64; i += 1) {
+      const angle = (i + jitter(i) * 0.6) * Math.PI / 32;
+      const strand = `M${pt(at(10.5 + jitter(i + 7) * 2, angle))}L${pt(at(19 + jitter(i + 3) * 5.5, angle + (jitter(i + 5) - 0.5) * 0.08))}`;
+      if (i % 2) dark += strand; else light += strand;
     }
-    svg('circle', { class: 'wd-eye-pupil', cx: 120, cy: 66, r: 8.5 }, gaze);
-    svg('circle', { class: 'wd-eye-glint', cx: 127, cy: 58, r: 3 }, gaze);
-    svg('path', { class: 'wd-eye-lid', d: ALMOND }, ball);
+    for (let i = 0; i < 28; i += 1) collarette += `${i ? 'L' : 'M'}${pt(at(13.2 + (jitter(i + 11) - 0.5) * 2.4, i * Math.PI / 14))}`;
+    svg('path', { class: 'wd-eye-strands-light', d: light }, gaze);
+    svg('path', { class: 'wd-eye-strands-dark', d: dark }, gaze);
+    svg('path', { class: 'wd-eye-collarette', d: `${collarette}Z` }, gaze);
+    svg('circle', { class: 'wd-eye-limbus', cx: 120, cy: 70, r: 25.2 }, gaze);
+    svg('circle', { class: 'wd-eye-pupil', cx: 120, cy: 70, r: 9 }, gaze);
+    // The upper-lid shadow falls on sclera and iris alike; corneal glints sit above it.
+    svg('rect', { class: 'wd-eye-shade', x: 40, y: 34, width: 160, height: 72, fill: `url(#${id}Shade)` }, inner);
+    const glints = svg('g', { class: 'wd-eye-gaze' }, inner);
+    svg('ellipse', { class: 'wd-eye-glint', cx: 129, cy: 60.5, rx: 4.6, ry: 3.1, transform: 'rotate(-28 129 60.5)' }, glints);
+    svg('circle', { class: 'wd-eye-glint wd-eye-glint-soft', cx: 110.5, cy: 80, r: 1.7 }, glints);
+    svg('path', { class: 'wd-eye-lid', d: 'M48 70C80 35 160 35 192 70' }, ball);
+    svg('path', { class: 'wd-eye-lid wd-eye-lid-low', d: 'M48 70C80 101 160 101 192 70' }, ball);
+    svg('path', { class: 'wd-eye-wing', d: 'M48 70Q41 67.6 35.5 63.2M192 70Q199 67.6 204.5 63.2' }, ball);
+    // A closed eye is drawn as a downcast curve instead of a squeezed ball.
+    svg('path', { class: 'wd-eye-sleep', d: 'M48 70C80 90 160 90 192 70M48 70Q41 67.6 35.5 63.2M192 70Q199 67.6 204.5 63.2' }, root);
     return root;
   }
 
@@ -375,7 +420,7 @@
       entry.blinkTimer = null;
       if (!entry.oracle.isConnected) return;
       const calm = view.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      if (!calm && !view.document?.hidden && ['watching', 'pondering'].includes(entry.oracle.dataset.eye)) {
+      if (!calm && !view.document?.hidden && ['watching', 'pondering', 'verifying'].includes(entry.oracle.dataset.eye)) {
         entry.oracle.dataset.blink = 'true';
         view.setTimeout(() => { delete entry.oracle.dataset.blink; }, 150);
         if (Math.random() < 0.18) {
@@ -443,25 +488,32 @@
     }
   }
 
-  // A reminder that arrives while the run is live makes the eye "speak" briefly:
-  // glow flares, pupil narrows, gaze turns to the conversation. Opening a panel or
-  // switching runs only records the latest event and never flares.
+  // A judgement that arrives while the run is live shows briefly on the eye:
+  // "speaking" for a reminder (glow flares, pupil narrows, gaze turns to the
+  // conversation), "assured" for a check that decided not to step in (a slow
+  // blink and a soft halo). Opening a panel or switching runs only records the
+  // latest event and never flares.
   function updateEye(entry, view, selection) {
     const base = eyeState(view, selection);
     const latest = normalizeSnapshot(selection?.snapshot)?.events?.at(-1) || null;
     const runKey = `${selection?.sessionId || ''}|${selection?.key || ''}`;
     const fresh = entry.runKey === runKey && !!latest && latest.id !== entry.lastEventId;
     const win = entry.oracle.ownerDocument?.defaultView;
-    if (entry.runKey !== runKey && entry.flareTimer) { win?.clearTimeout(entry.flareTimer); entry.flareTimer = null; }
-    // The observer also speaks when its end-of-turn review decides to wake the agent.
+    if (entry.runKey !== runKey && entry.flareTimer) { win?.clearTimeout(entry.flareTimer); entry.flareTimer = null; entry.flare = null; }
+    // The end-of-turn review speaks when it decides to wake the agent and is assured when it does not.
     const completion = selection?.completion?.status || null;
-    const decided = ['pending', 'scheduled'].includes(completion) && entry.lastCompletion === 'reviewing';
+    const reviewed = entry.lastCompletion === 'reviewing' && completion !== 'reviewing';
     Object.assign(entry, { runKey, lastEventId: latest?.id ?? null, base, lastCompletion: completion });
-    if (((fresh && view.mode === 'live' && FLARE_ACTIONS.has(latest.action)) || decided) && win?.setTimeout) {
+    const live = fresh && view.mode === 'live';
+    const flare = (live && FLARE_ACTIONS.has(latest.action)) || (reviewed && WAKE_VERDICTS.has(completion)) ? 'speaking'
+      : (live && ASSURE_ACTIONS.has(latest.action)) || (reviewed && CALM_VERDICTS.has(completion)) ? 'assured' : null;
+    // A reminder is never cut short by a calmer verdict that lands right after it.
+    if (flare && win?.setTimeout && !(flare === 'assured' && entry.flare === 'speaking')) {
       if (entry.flareTimer) win.clearTimeout(entry.flareTimer);
-      entry.flareTimer = win.setTimeout(() => { entry.flareTimer = null; applyEye(entry, entry.base); }, 2600);
+      entry.flare = flare;
+      entry.flareTimer = win.setTimeout(() => { entry.flareTimer = null; entry.flare = null; applyEye(entry, entry.base); }, 2600);
     }
-    applyEye(entry, entry.flareTimer ? 'speaking' : base);
+    applyEye(entry, entry.flareTimer ? entry.flare : base);
     scheduleBlink(entry);
   }
 

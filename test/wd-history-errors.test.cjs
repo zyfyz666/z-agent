@@ -19,6 +19,7 @@ function failedRunHandler() {
   const calls = { flushed: [], core: [], reconciled: [], sent: [], progress: [], subagentParents: [], subagentDeliveries: [] };
   const handler = vm.runInNewContext(`(${source.slice(start, end)})`, {
     console: { error() {} },
+    contextStateWrite: Promise.resolve(),
     runId: 'run-failed-history',
     zSessionId: 'sess_failed_history', request: { conversationRevision: 3 }, runStartedAt: 1000,
     persistTaskProgress: async payload => calls.progress.push(payload),

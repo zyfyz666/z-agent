@@ -15,7 +15,7 @@ const { findReusableBlankSession } = require('../lib/session-policy');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
 const { normalizeContextSettings } = require('../lib/context-settings');
-const { preserveForkAuthority, forkRunContext } = require('../lib/session-fork');
+const { preserveForkAuthority, forkRunContext, checkpointDesktopHistoryForRequest } = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
@@ -41,6 +41,7 @@ function fixture(t) {
     ...rewind, fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
+    checkpointDesktopHistoryForRequest,
     normalizeContextSettings,
     loadConfig: () => ({ agentModel: { providerId: '', supplierId: '', modelId: '', modelType: 'text' } }),
     composerConnections: () => [],
@@ -176,6 +177,8 @@ test('start-run uses the persisted task folder even when the renderer sends blan
     const result = await vm.runInContext(`(async () => { ${block}; return { workspace, workspaceKind }; })()`, f.context);
     assert.equal(result.workspace, session.workspace);
     assert.equal(result.workspaceKind, 'default');
+    assert.deepEqual(Array.from(f.context.request.checkpointDesktopHistory), [],
+      'an unanchored legacy request cannot claim a verified desktop-history prefix');
   }
   assert.equal(f.events.length, 2);
   assert.equal(f.events[0].id, session.id);

@@ -8,6 +8,17 @@ const drain = async () => { for (let i = 0; i < 30; i++) await Promise.resolve()
 const makeWake = (id = 'wake-a', sessionId = 'a') => ({ id, intentId: `intent-${id}`, sessionId,
   conversationRevision: 0, parentRunId: 'parent-1', childSessionID: 'child-1', title: '测试子代理', result: '检查已通过', status: 'pending' });
 
+test('failed child notifications identify failure and retain partial work plus the actual error', () => {
+  const message = completion.wakeText({ ...makeWake(), status: 'error',
+    result: '已检查两个文件，还有一个未检查', error: 'Provider retry budget exhausted' });
+  assert.match(message, /子代理失败/);
+  assert.doesNotMatch(message, /子代理完成|已完成/);
+  const report = completion.reportText(message);
+  assert.match(report, /已检查两个文件，还有一个未检查/);
+  assert.match(report, /Provider retry budget exhausted/);
+  assert.match(message, /不构成新增授权/);
+});
+
 function fixture() {
   const sessions = new Map(['a', 'b'].map(id => [id, { id, observerEnabled: false, conversationRevision: 0,
     messages: [{ role: 'user', content: '完成任务' }, { role: 'assistant', content: '等子代理返回', agentRun: { runId: 'parent-1', status: 'done' } }] }]));

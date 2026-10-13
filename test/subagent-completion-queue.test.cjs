@@ -63,6 +63,47 @@ test('native consumption wins and does not revive when completion is replayed or
   assert.equal(reload().list().wakes.length, 0);
 });
 
+test('unverified parent success stays inspectable, then a child failure persists with partial output exactly once', t => {
+  const { queue, event, reload } = fixture(t);
+  queue.recordLifecycle({ ...event, status: 'completed', result: 'Partial result', completedAt: 1800,
+    consumed: true, waitingForInspection: true });
+  queue.settleParent(event.parentRunId, { status: 'done' });
+  assert.equal(queue.list().wakes.length, 0);
+  const [pending] = queue.pollable();
+  assert.ok(pending, 'a completed parent wrapper still has its child outcome inspected');
+  assert.equal(!!pending.consumed, false, 'unverified consumption cannot close the receipt');
+  const inspected = { status: 'error', result: 'Partial result', error: 'Retry budget exhausted',
+    completedAt: 1700, consumed: false, parentResultMismatch: true };
+  queue.applyInspection(pending, inspected);
+  const [wake] = queue.list().wakes;
+  assert.equal(wake.status, 'error');
+  assert.equal(wake.result, 'Partial result');
+  assert.equal(wake.error, 'Retry budget exhausted');
+  const restored = reload();
+  assert.equal(restored.list().wakes[0].error, 'Retry budget exhausted');
+  restored.applyInspection(wake, inspected);
+  assert.deepEqual(restored.list().wakes.map(item => item.id), [wake.id]);
+  const claim = restored.claim({ id: wake.id, sessionId: wake.sessionId, conversationRevision: 0 });
+  assert.equal(claim.ok, true);
+  assert.equal(restored.accept({ id: wake.id, sessionId: wake.sessionId, conversationRevision: 0,
+    intentId: wake.intentId, claimToken: claim.claimToken }, 'failure-wake').ok, true);
+  restored.applyInspection(wake, inspected);
+  assert.equal(restored.list().wakes.length, 0, 'a delivered failure cannot wake a second time');
+});
+
+for (const inspect of [false, true]) test(`child cancellation closes ${inspect ? 'inspected' : 'live'} completion without a wake`, t => {
+  const { queue, event, reload } = fixture(t);
+  queue.recordLifecycle(event);
+  queue.settleParent(event.parentRunId, { status: 'done' });
+  const [pending] = queue.pollable();
+  if (inspect) queue.applyInspection(pending, { status: 'interrupted', result: 'Partial', error: 'The user cancelled' });
+  else queue.recordLifecycle({ ...event, status: 'interrupted' });
+  assert.equal(queue.list().wakes.length, 0);
+  assert.equal(queue.pollable().length, 0);
+  assert.equal(queue.state.records[pending.id].reason, 'child_interrupted');
+  assert.equal(reload().recordLifecycle({ ...event, status: 'error', error: 'Late error' }), false);
+});
+
 for (const result of [{ status: 'error' }, { status: 'cancelled' }, { status: 'done', userRequestedFinish: true }]) {
   test(`parent ${JSON.stringify(result)} cannot revive child work after reload`, t => {
     const { queue, event, reload } = fixture(t);

@@ -10,12 +10,15 @@ const crypto = require('node:crypto');
 const { sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue } = require('../lib/session-model');
 const { taskWorkspaceRoot, ensureTaskWorkspace } = require('../lib/task-workspace');
 const { normalizeWorkspacePath, sameWorkspace } = require('../lib/session-handoff');
-const { preserveForkAuthority, forkRunContext, createSessionForkRecord, messageForkAnchor } = require('../lib/session-fork');
+const { preserveForkAuthority, forkRunContext, createSessionForkRecord, messageForkAnchor,
+  checkpointDesktopHistoryForRequest } = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 const { isDefaultSessionTitle } = require('../lib/session-policy');
 const { normalizeOutputTokens, validateOutputTokens } = require('../lib/model-output-limits');
 const { normalizeReasoningSpeed, reasoningSpeedEnablesThinking } = require('../lib/reasoning-effort');
 const { normalizeContextSettings } = require('../lib/context-settings');
+const { restoreDesktopContextCheckpoint } = require('../lib/desktop-context-checkpoint');
+const { checkpointForSession } = require('./fixtures/desktop-context-checkpoint.cjs');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 function section(start, end) {
@@ -50,14 +53,17 @@ function fixture(t) {
   const handlers = new Map();
   const cache = new Map();
   const compressionCalls = [];
+  let compressionResult = { compacted: true };
   let writeGate = null;
   const context = vm.createContext({
     ...rewind, fs, fsp: { ...fs.promises, async writeFile(...args) {
       if (writeGate) { const gate = writeGate; writeGate = null; gate.enter(); await gate.promise; }
       return fs.promises.writeFile(...args);
-    } }, path, crypto, process: { pid: process.pid }, dataDir, defaultTasksRoot, sessionRecordCache: cache,
+    } }, path, crypto, process: { pid: process.pid }, Buffer, dataDir, defaultTasksRoot, sessionRecordCache: cache,
     ensureTaskWorkspace, normalizeWorkspacePath, sameWorkspace,
     sessionModelSnapshot, inferSessionModelSelection, createSessionWriteQueue, preserveForkAuthority, forkRunContext,
+    checkpointDesktopHistoryForRequest,
+    restoreDesktopContextCheckpoint,
     normalizeOutputTokens, validateOutputTokens,
     normalizeReasoningSpeed, reasoningSpeedEnablesThinking,
     normalizeContextSettings,
@@ -99,7 +105,7 @@ function fixture(t) {
     workspaceSandbox: { normalizeWorkspace: value => value },
     getNoWorkspaceAgentDirectory: () => root,
     ensureOpenCodeSidecar: async runtime => ({ compressSession: async request => {
-      compressionCalls.push({ runtime, request }); return { compacted: true };
+      compressionCalls.push({ runtime, request }); return structuredClone(compressionResult);
     } }),
     MAX_CONCURRENT_AGENT_RUNS: 10,
     openCodeActiveRuns: new Map(), openCodeRunAdmissions: new Map()
@@ -118,12 +124,14 @@ function fixture(t) {
     section('function getOpenCodeRuntimeConfig(', 'function getOpenCodeCapabilityContext('),
     section('const manualContextCompressions =', "ipcMain.handle('opencode:start-run',")
   ]) vm.runInContext(code, context);
+  vm.runInContext(section('async function persistDesktopContextCheckpoint(', 'async function persistTaskProgress('), context);
   // Execute the actual admission/routing block, stopping at the kernel
   // boundary. The separate desktop E2E exercises real provider requests.
   vm.runInContext(section("ipcMain.handle('opencode:start-run',", '    // The persisted conversation owns its directory.')
     + 'return { ok: true, selection, runtime: getOpenCodeRuntimeConfig(cfg), cfg, observerEnabled: request.observerEnabled }; } catch (error) { return { ok: false, error: error.message, code: error.code }; } });', context);
   return {
     root, context, compressionCalls,
+    setCompressionResult(value) { compressionResult = value; },
     create: () => context.createFreshSessionRecord(),
     read: id => context.readSessionRecord(id),
     disk: id => JSON.parse(fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf8')),
@@ -145,6 +153,25 @@ function fixture(t) {
     }
   };
 }
+
+test('manual compression sends authoritative desktop identity and persists a verified result', async t => {
+  const f = fixture(t);
+  const session = await f.create();
+  session.messages = [{ role: 'user', content: 'Older request', ts: 1 },
+    { role: 'assistant', content: 'Completed evidence', ts: 2 }];
+  session.openCodeSessionId = 'native-compress';
+  f.seed(session);
+  const checkpoint = checkpointForSession(session, session.messages.length);
+  f.setCompressionResult({ compacted: true, desktopCheckpoint: checkpoint });
+  const result = await f.compress(session.id);
+  assert.equal(result.ok, true);
+  const call = f.compressionCalls[0].request;
+  assert.equal(call.zSessionId, session.id);
+  assert.equal(call.branchId, session.id);
+  assert.equal(call.conversationRevision, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(call.checkpointDesktopHistory)), session.messages);
+  assert.deepEqual(f.disk(session.id).desktopContextCheckpoints, [checkpoint]);
+});
 
 test('snapshots retain only model identity and safe display metadata', () => {
   const snapshot = sessionModelSnapshot({ ...selection('a'), apiKey: 'secret', baseUrl: 'private-endpoint',

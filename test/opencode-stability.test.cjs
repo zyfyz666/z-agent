@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   isTransientOpenCodeError,
+  isNativeRetryExhausted,
   isContextOverflowError,
   withRetries,
   createAbortError,
@@ -39,6 +40,22 @@ test('does not classify config, auth, or context errors as transient', () => {
   for (const message of stable) {
     assert.equal(isTransientOpenCodeError({ message }), false, message);
   }
+});
+
+test('native exhaustion cannot start an outer retry budget even when wrapped', async () => {
+  const message = '[Z_NATIVE_RETRY_EXHAUSTED] Service unavailable HTTP 503';
+  for (const error of [message, new Error(message), { data: { message } },
+    { error: { data: { message } } }, { cause: new Error(message) }]) {
+    assert.equal(isNativeRetryExhausted(error), true);
+    assert.equal(isTransientOpenCodeError(error), false);
+  }
+  assert.equal(isNativeRetryExhausted(new Error('Service unavailable')), false);
+  let attempts = 0;
+  await assert.rejects(withRetries(async () => {
+    attempts++;
+    throw new Error(message);
+  }, { baseDelayMs: 1 }), /Z_NATIVE_RETRY_EXHAUSTED/);
+  assert.equal(attempts, 1);
 });
 
 test('classifies gateway request-size failures as recoverable context overflow', () => {

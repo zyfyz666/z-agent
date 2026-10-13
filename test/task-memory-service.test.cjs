@@ -7,6 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { safeText, taskMemoryIdentity, taskSource, buildTaskProgressRecord, buildReviewJobPayload, summarizeHarnessBaselines } = require('../lib/task-memory-service');
 const { LongTermMemoryStore } = require('../lib/long-term-memory');
+const { withMemoryDatabase } = require('../lib/memory-database');
 const { ContinualHarnessStore } = require('../lib/continual-harness');
 
 function fixture(t) {
@@ -105,6 +106,35 @@ test('review payload excludes provider config and credentials in copied tool res
   assert.equal(payload.refinementRequest.instructions, '');
   assert.equal(payload.result.toolCalls[0].args, '');
   assert.equal(payload.result.toolCalls[0].output, '');
+});
+
+test('rewinding before the first message keeps knowledge that existed when the task began', t => {
+  const { root } = fixture(t);
+  const workspace = root;
+  const store = new LongTermMemoryStore({ globalPath: path.join(root, 'memory.json') });
+  assert.equal(store.upsert({ type: 'preference', scope: 'global', key: 'reply.language', content: 'Reply to the user in Chinese', confidence: 0.9 },
+    { sourceKind: 'fixture' }).ok, true);
+  const createdAt = Date.now();
+  const discarded = store.upsert({ type: 'project', scope: 'workspace', content: 'Discarded path: cryogenic calibrator uses port 5432' },
+    { workspace, sessionId: 'sess_rewound', conversationRevision: 0, runStartedAt: createdAt + 50 }).memory;
+  // Pin the order: this fact was learned after the task began, on the path that was rewound away.
+  withMemoryDatabase(store.dbPath, db => {
+    const record = JSON.parse(db.prepare('SELECT record FROM memories WHERE id=?').get(discarded.id).record);
+    record.createdAt = record.updatedAt = record.contentUpdatedAt = createdAt + 1000;
+    db.prepare('UPDATE memories SET record=? WHERE id=?').run(JSON.stringify(record), discarded.id);
+  });
+  const query = 'cryogenic calibrator port';
+  assert.match(store.query({ workspace, sessionId: 'sess_other', query }).context, /Discarded path/, 'the fact itself is relevant');
+  const session = { id: 'sess_rewound', workspace, createdAt, conversationRevision: 1,
+    contextReset: { kind: 'rewind', sourceSessionId: 'sess_rewound', messageCount: 0, messageIndex: -1, createdAt: createdAt + 2000 },
+    messages: [{ id: 'm1', role: 'user', ts: createdAt + 3000, content: 'Edited first prompt about the cryogenic calibrator' }] };
+  const identity = taskMemoryIdentity(session);
+  assert.equal(identity.cutoff, createdAt);
+  const context = store.query({ ...identity, query }).context;
+  assert.match(context, /Reply to the user in Chinese/);
+  assert.doesNotMatch(context, /Discarded path/);
+  const kept = { ...session, contextReset: { ...session.contextReset, messageCount: 1, messageIndex: 0 } };
+  assert.equal(taskMemoryIdentity(kept).cutoff, createdAt + 3000, 'a kept prefix still branches at its last message');
 });
 
 test('compact harness baselines preserve disjoint-update concurrency and reject conflicting stale writes', async t => {

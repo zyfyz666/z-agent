@@ -11,6 +11,8 @@ const fork = require('../lib/session-fork');
 const rewind = require('../lib/session-rewind');
 const { createSessionWriteQueue, sessionModelSnapshot, inferSessionModelSelection } = require('../lib/session-model');
 const { ensureTaskWorkspace, defaultTaskWorkspace } = require('../lib/task-workspace');
+const { checkpointForSession } = require('./fixtures/desktop-context-checkpoint.cjs');
+const { restoreDesktopContextCheckpoint } = require('../lib/desktop-context-checkpoint');
 
 const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
 function section(start, end) {
@@ -51,6 +53,11 @@ function fixture(t, { defaultWorkspace = false, count = 112 } = {}) {
   const notifications = [];
   const config = { agentModel: model('default') };
   const context = vm.createContext({
+    ...require('../lib/context-state'), ContextStore: require('../lib/context-store').ContextStore,
+    appRoot: path.resolve(__dirname, '..'), STABLE_DATA_DIR: root,
+    // These IPC unit tests isolate archive/permission transactions. Native
+    // boundary restoration is exercised by context-state.e2e.cjs.
+    resolveContextBoundary: async () => new (require('../lib/context-store').ContextStore)(root).capture([], { directory: source.workspace }),
     ...fork, ...rewind, fs, fsp: fs.promises, path, crypto, process: { pid: process.pid }, console,
     defaultTasksRoot, dataDir: root, ensureTaskWorkspace, withSessionWrite: createSessionWriteQueue(),
     sessionModelSnapshot,
@@ -105,6 +112,23 @@ test('fork IPC copies the exact selected prefix from disk, preserves Observer hi
   assert.ok(branch.messages.every(message => message.forkedHistory));
   assert.equal(fs.readFileSync(f.file(f.source.id), 'utf8'), before);
   assert.doesNotMatch(JSON.stringify(branch), /FUTURE-MARKER|FUTURE-HANDOFF|FUTURE-COMPRESSION|source-native-FUTURE/);
+});
+
+test('fork inherits only verified checkpoint prefixes and rebinds their conversation ownership', async t => {
+  const f = fixture(t);
+  f.source.desktopContextCheckpoints = [checkpointForSession(f.source, 6), checkpointForSession(f.source, 20, 'LATER_SUMMARY')];
+  fs.writeFileSync(f.file(f.source.id), JSON.stringify(f.source));
+  const result = await f.create(f.boundary(13));
+  assert.equal(result.ok, true);
+  const branch = f.read(result.session.id);
+  assert.equal(branch.desktopContextCheckpoints.length, 1);
+  const checkpoint = branch.desktopContextCheckpoints[0];
+  assert.equal(checkpoint.sessionId, branch.id);
+  assert.equal(checkpoint.branchId, branch.id);
+  assert.equal(checkpoint.conversationRevision, 0);
+  assert.equal(restoreDesktopContextCheckpoint(checkpoint, { messages: branch.messages,
+    request: { zSessionId: branch.id, conversationRevision: 0 } }).ok, true);
+  assert.doesNotMatch(JSON.stringify(branch), /LATER_SUMMARY/);
 });
 
 test('absolute message index and anchor reject stale or malformed choices without creating a session', async t => {

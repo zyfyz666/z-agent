@@ -5,6 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { messageForkAnchor } = require('../lib/session-fork');
 const source = fs.readFileSync(path.join(__dirname, '../renderer/renderer.js'), 'utf8');
 
 function section(start, end) {
@@ -36,6 +37,7 @@ function fixture() {
   const element = { disabled: false, classList: { contains: () => true }, open: false };
   const context = {
     console,
+    messageForkAnchor,
     state: { currentSession: a, sessions: [a, b], activeRuns: new Map(), config: { agentModel: model('global'), api: {} } },
     api: {
       setSessionModel(id, selection, conversationRevision) {
@@ -217,6 +219,9 @@ test('a background run sends the target conversation model and freezes it before
   await pending;
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].zSessionId, 'A');
+  assert.equal(f.calls[0].requestMessageIndex, 0);
+  assert.equal(f.calls[0].requestMessageAnchor, messageForkAnchor(f.a.messages[0]),
+    'an ordinary background run anchors its own persisted user message');
   assert.equal(f.calls[0].modelSelection.modelId, 'a');
   assert.equal(f.calls[0].modelSelection.providerId, 'provider-a');
   assert.equal(f.calls[0].modelSelection.capabilities.vision, true);

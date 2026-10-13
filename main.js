@@ -107,9 +107,14 @@ const { normalizeObserverSettings, completionInput, completionSettings, reviewCo
 const { sessionObserverEnabled, cancelSessionObserverCompletion } = require('./lib/session-observer-settings');
 const { SubagentCompletionQueue } = require('./lib/subagent-completion-queue');
 const { normalizeOutputTokens, validateOutputTokens } = require('./lib/model-output-limits');
-const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext } = require('./lib/session-fork');
+const { forkBoundary, createSessionForkRecord, isAuthoritativeHistorySession, preserveForkAuthority, forkRunContext,
+  checkpointDesktopHistoryForRequest } = require('./lib/session-fork');
 const { sessionConversationRevision, assertConversationRevision, rewindBoundary, createRewindBackup,
   restoreRewindSnapshot, createRewoundSession } = require('./lib/session-rewind');
+const { resolveContextBoundary } = require('./lib/context-runtime');
+const { ContextStore } = require('./lib/context-store');
+const { boundaryKey, pointReference, inheritedContextState } = require('./lib/context-state');
+const { restoreDesktopContextCheckpoint } = require('./lib/desktop-context-checkpoint');
 const workspaceSandbox = require('./lib/workspace-sandbox');
 const { classifyDelegatedShellCommand } = require('./lib/shell-command-risk');
 const {
@@ -7566,7 +7571,7 @@ async function forkSessionRecord(boundary = {}) {
       throw error;
     });
     const source = JSON.parse(text);
-    forkBoundary(source, boundary);
+    const prefix = forkBoundary(source, boundary);
     const resolved = await ensureTaskWorkspace(source, { root: defaultTasksRoot, dataDirectory: dataDir });
     const workspaceStat = await fsp.stat(resolved.workspace).catch(() => null);
     if (!workspaceStat?.isDirectory()) throw Object.assign(new Error('来源任务文件夹不存在，无法共享文件创建分支。'), { code: 'SESSION_FORK_WORKSPACE_UNAVAILABLE' });
@@ -7577,6 +7582,10 @@ async function forkSessionRecord(boundary = {}) {
     const id = `sess_${Date.now().toString(36)}${crypto.randomBytes(6).toString('hex')}`;
     const session = createSessionForkRecord(source, boundary, { id, workspace: resolved.workspace,
       defaultSelection: cfg.agentModel, candidates });
+    const contextRef = await resolveContextBoundary({ appRoot, dataDir: STABLE_DATA_DIR, directory: resolved.workspace,
+      source, prefix, selected: source.messages[boundary.messageIndex] });
+    session.contextState = inheritedContextState(source, session, contextRef);
+    session.contextState.estimatedTokens = new ContextStore(STABLE_DATA_DIR).read(contextRef).manifest.estimatedTokens;
     await writeSessionFileAtomic(sessionPath(id), JSON.stringify(session, null, 2));
     await refreshSessionSummaryCache(id, session);
     notifyDesktopSessionUpdate({ id, reason: 'fork-created', sourceSessionId: sourceId });
@@ -7591,14 +7600,37 @@ async function persistForkKernelBinding(sessionId, openCodeSessionId, conversati
   return withSessionWrite(sessionId, async () => {
     const stored = await readSessionRecord(sessionId, { sessionLocked: true });
     assertConversationRevision(stored, conversationRevision);
-    if (!isAuthoritativeHistorySession(stored) || stored.openCodeSessionId === openCodeSessionId) return;
+    if ((!isAuthoritativeHistorySession(stored) && !stored.contextState) || stored.openCodeSessionId === openCodeSessionId) return;
     const updated = { ...stored, openCodeSessionId: String(openCodeSessionId) };
+    if (stored.contextState) updated.contextState = { ...stored.contextState,
+      nativeSessionId: String(openCodeSessionId), needsRestore: false };
     await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(updated, null, 2));
     await refreshSessionSummaryCache(sessionId, updated);
   });
 }
 
 const sessionRewindOperations = new Set();
+
+async function persistContextStatePoint(sessionId, revision, key, ref, nativeSessionId, { head = false } = {}) {
+  // Only native runtime receipts reach here. Renderer saves never create or
+  // replace context heads; delayed receipts cannot cross a rewind revision.
+  const { manifest } = new ContextStore(STABLE_DATA_DIR).read(ref);
+  return withSessionWrite(sessionId, async () => {
+    const stored = await readSessionRecord(sessionId, { sessionLocked: true });
+    assertConversationRevision(stored, revision);
+    const state = { version: 2, ...stored.contextState, points: { ...stored.contextState?.points, ...(key ? { [key]: ref } : {}) } };
+    state.nativeSessionId = nativeSessionId;
+    state.needsRestore = false;
+    stored.openCodeSessionId = nativeSessionId;
+    if (head) {
+      state.head = ref; state.nativeSessionId = nativeSessionId; state.needsRestore = false;
+      state.estimatedTokens = manifest.estimatedTokens;
+      stored.openCodeSessionId = nativeSessionId;
+    }
+    stored.contextState = state;
+    await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(stored, null, 2));
+  });
+}
 
 function assertSessionRewindIdle(sessionId) {
   const pending = Object.values(zCore?.state?.intents || {}).some(intent =>
@@ -7627,6 +7659,7 @@ async function rewindSessionRecord(request = {}, { restore = false } = {}) {
       assertConversationRevision(source, request.conversationRevision);
       let messages;
       let modelSelection;
+      let checkpointSource = source;
       if (restore) {
         const backupId = source.rewindState?.backupSessionId;
         if (!isSafeSessionId(backupId)) throw Object.assign(new Error('找不到回退前的备份对话。'), { code: 'SESSION_REWIND_BACKUP_NOT_FOUND' });
@@ -7634,7 +7667,7 @@ async function rewindSessionRecord(request = {}, { restore = false } = {}) {
           if (error.code === 'ENOENT') throw Object.assign(new Error('回退前的备份对话已经不存在。'), { code: 'SESSION_REWIND_BACKUP_NOT_FOUND' });
           throw error;
         });
-        ({ messages, modelSelection } = restoreRewindSnapshot(source, JSON.parse(backupText)));
+        ({ messages, modelSelection, checkpointSource } = restoreRewindSnapshot(source, JSON.parse(backupText)));
       } else messages = rewindBoundary(source, request);
       Object.assign(source, await ensureTaskWorkspace(source, { root: defaultTasksRoot, dataDirectory: dataDir }));
       const cfg = loadConfig();
@@ -7645,7 +7678,15 @@ async function rewindSessionRecord(request = {}, { restore = false } = {}) {
       const backupSessionId = `sess_${now.toString(36)}${crypto.randomBytes(6).toString('hex')}`;
       const backup = createRewindBackup(source, { id: backupSessionId, now });
       const session = createRewoundSession(source, messages, { backupSessionId, now,
-        action: restore ? 'restore' : 'rewind', modelSelection, candidates, defaultSelection: cfg.agentModel });
+        action: restore ? 'restore' : 'rewind', modelSelection, candidates, defaultSelection: cfg.agentModel, checkpointSource });
+      const contextOptions = { appRoot, dataDir: STABLE_DATA_DIR, directory: source.workspace };
+      const targetRef = await resolveContextBoundary({ ...contextOptions, source: checkpointSource, prefix: messages,
+        selected: restore ? null : source.messages[request.messageIndex], includeSelected: restore || request.includeSelected !== false });
+      const backupRef = await resolveContextBoundary({ ...contextOptions, source, prefix: source.messages });
+      session.contextState = inheritedContextState(checkpointSource, session, targetRef);
+      backup.contextState = inheritedContextState(source, backup, backupRef);
+      session.contextState.estimatedTokens = new ContextStore(STABLE_DATA_DIR).read(targetRef).manifest.estimatedTokens;
+      backup.contextState.estimatedTokens = new ContextStore(STABLE_DATA_DIR).read(backupRef).manifest.estimatedTokens;
       // Commit a separate, independently resumable backup FIRST. Even if the
       // second atomic rename fails, both the old original and its backup survive.
       await writeSessionFileAtomic(sessionPath(backupSessionId), JSON.stringify(backup, null, 2));
@@ -8053,6 +8094,12 @@ ipcMain.handle('session:save', async (_e, session) => {
     // A stale renderer save must not erase them or supply a forged summary.
     if (stored?.contextCheckpoints) persisted.contextCheckpoints = stored.contextCheckpoints;
     else delete persisted.contextCheckpoints;
+    if (stored?.desktopContextCheckpoints) persisted.desktopContextCheckpoints = stored.desktopContextCheckpoints;
+    else delete persisted.desktopContextCheckpoints;
+    if (stored?.contextState) persisted.contextState = stored.contextState;
+    else delete persisted.contextState;
+    // Immutable per-message snapshot references come from authoritative
+    // history, not from an arbitrary renderer payload.
     if (session.messagesTruncated === true && Number.isInteger(session.messagesStart) && session.messagesStart > 0) {
       if (stored && Array.isArray(stored.messages)) {
         const head = stored.messages.slice(0, session.messagesStart);
@@ -8065,7 +8112,16 @@ ipcMain.handle('session:save', async (_e, session) => {
         delete persisted.totalMessages;
       }
     }
+    persisted.messages = (persisted.messages || []).map((item, index) => {
+      const message = { ...item }, original = stored?.messages?.[index];
+      delete message.contextSnapshot;
+      if (original?.contextSnapshot && original.role === message.role && original.ts === message.ts
+        && original.content === message.content) message.contextSnapshot = original.contextSnapshot;
+      return message;
+    });
     persisted = preserveForkAuthority(stored, persisted);
+    if (stored?.contextState) persisted.openCodeSessionId = stored.contextState.needsRestore
+      ? undefined : stored.contextState.nativeSessionId || stored.openCodeSessionId;
     persisted.conversationRevision = sessionConversationRevision(stored);
     Object.assign(persisted, await ensureTaskWorkspace(persisted, {
       root: defaultTasksRoot, dataDirectory: dataDir, previousSession: stored
@@ -8147,6 +8203,26 @@ async function persistTaskContextCheckpoint(sessionId, checkpoint, revision) {
     const previous = Array.isArray(stored.contextCheckpoints) ? stored.contextCheckpoints : [];
     stored.contextCheckpoints = [...previous.filter(item => item.checkpointHash !== checkpoint.checkpointHash), checkpoint].slice(-8);
     await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(stored, null, 2));
+  });
+}
+
+async function persistDesktopContextCheckpoint(sessionId, checkpoint, revision) {
+  if (!checkpoint || checkpoint.sessionId !== sessionId || checkpoint.branchId !== sessionId
+    || checkpoint.conversationRevision !== revision || Buffer.byteLength(JSON.stringify(checkpoint), 'utf8') > 8 * 1024 * 1024) return;
+  return withSessionWrite(sessionId, async () => {
+    const stored = await readSessionRecord(sessionId, { sessionLocked: true });
+    if (!stored || sessionConversationRevision(stored) !== revision) return;
+    const verified = restoreDesktopContextCheckpoint(checkpoint, { messages: stored.messages?.slice(0, checkpoint.desktopPrefix?.messageCount),
+      request: { zSessionId: sessionId, branchId: sessionId, conversationRevision: revision, workMode: checkpoint.workMode } });
+    if (!verified.ok) return;
+    const previous = Array.isArray(stored.desktopContextCheckpoints) ? stored.desktopContextCheckpoints : [];
+    stored.desktopContextCheckpoints = [...previous.filter(item => item.checkpointHash !== checkpoint.checkpointHash), checkpoint].slice(-8);
+    while (stored.desktopContextCheckpoints.length > 1
+      && Buffer.byteLength(JSON.stringify(stored.desktopContextCheckpoints), 'utf8') > 8 * 1024 * 1024) {
+      stored.desktopContextCheckpoints.shift();
+    }
+    await writeSessionFileAtomic(sessionPath(sessionId), JSON.stringify(stored, null, 2));
+    await refreshSessionSummaryCache(sessionId, stored);
   });
 }
 
@@ -10145,10 +10221,19 @@ ipcMain.handle('opencode:compress-session', async (_e, { zSessionId } = {}) => {
       const sidecar = await ensureOpenCodeSidecar(getOpenCodeRuntimeConfig(cfg));
       const result = await sidecar.compressSession({
         openCodeSessionId: session.openCodeSessionId, workspace,
+        zSessionId: id, branchId: id, conversationRevision: sessionConversationRevision(session),
+        contextV2: true,
+        checkpointDesktopHistory: Array.isArray(session.messages) ? session.messages : [],
+        desktopContextCheckpoints: Array.isArray(session.desktopContextCheckpoints) ? session.desktopContextCheckpoints : [],
+        workMode: cfg.agent?.workMode || 'normal',
         providerId: selection.providerId, modelId: selection.modelId,
         openCodeConfig: getOpenCodeRuntimeConfig(cfg)
       });
       if (result.compacted) {
+        if (result.contextSnapshot) await persistContextStatePoint(id, sessionConversationRevision(session),
+          '', result.contextSnapshot, session.openCodeSessionId, { head: true });
+        if (result.checkpoint) await persistTaskContextCheckpoint(id, result.checkpoint, sessionConversationRevision(session));
+        if (result.desktopCheckpoint) await persistDesktopContextCheckpoint(id, result.desktopCheckpoint, sessionConversationRevision(session));
         console.info('[context] manual compression completed:', id, result.beforeTokens, '->', result.afterTokens);
       } else {
         console.warn('[context] manual compression failed:', id, result.error || '内核未完成压缩');
@@ -10201,10 +10286,23 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
     }
     request.branchId = String(authoritativeSession?.id || request.zSessionId || '');
     request.contextCheckpoints = Array.isArray(authoritativeSession?.contextCheckpoints) ? authoritativeSession.contextCheckpoints : [];
+    request.desktopContextCheckpoints = Array.isArray(authoritativeSession?.desktopContextCheckpoints)
+      ? authoritativeSession.desktopContextCheckpoints : [];
+    request.checkpointDesktopHistory = checkpointDesktopHistoryForRequest(authoritativeSession, request);
+    request.contextV2 = !!authoritativeSession;
+    request.contextSource = authoritativeSession?.contextState?.head || '';
+    const contextUserMessage = authoritativeSession?.messages?.[request.requestMessageIndex];
+    request.contextBeforeKey = contextUserMessage ? boundaryKey(contextUserMessage) : '';
+    delete request.restoredDesktopCheckpointContext;
+    delete request.restoredCheckpointContext;
     delete request.taskMemoryContext;
     delete request.forkHistory;
     const forkContext = forkRunContext(authoritativeSession, request);
     if (forkContext) Object.assign(request, forkContext);
+    if (request.contextV2) {
+      request.openCodeSessionId = authoritativeSession.contextState?.needsRestore ? ''
+        : authoritativeSession.contextState?.nativeSessionId || authoritativeSession.openCodeSessionId || '';
+    }
     const cfg = loadConfig();
     const requestedModel = Object.prototype.hasOwnProperty.call(request, 'modelSelection')
       ? request.modelSelection : (authoritativeSession?.modelSelection || (request.utility === true ? null : cfg.agentModel));
@@ -10510,13 +10608,27 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         : {})
     });
     let forkBindingWrite = Promise.resolve();
+    let contextStateWrite = Promise.resolve();
+    let contextStateWriteError = '';
     const recordForkBinding = nativeId => {
-      if (!forkContext || !nativeId) return forkBindingWrite;
+      if ((!forkContext && !request.contextV2) || !nativeId) return forkBindingWrite;
       forkBindingWrite = forkBindingWrite.then(() => persistForkKernelBinding(zSessionId, nativeId, request.conversationRevision))
         .catch(error => console.warn('[session-fork] Kernel binding could not be saved:', error?.message || error));
       return forkBindingWrite;
     };
     const emitOpenCodeEvent = event => {
+      if (event?.type === 'z.context.state.snapshot' && request.contextV2) {
+        const data = event.data;
+        contextStateWrite = contextStateWrite.then(() => persistContextStatePoint(zSessionId,
+          request.conversationRevision, data.key, data.ref, data.sessionID, { head: data.phase === 'after-run' }))
+          .catch(error => {
+            contextStateWriteError = error?.message || String(error);
+            console.warn('[context] snapshot receipt could not be saved:', contextStateWriteError);
+            sendOpenCodeRendererEvent(runId, { type: 'z.context.state.failed', data: {
+              message: '上下文快照索引未保存，本轮执行记录仍保留在内核中。请检查磁盘空间后再回退。'
+            } });
+          });
+      }
       if (event?.type === 'z.opencode.started') void recordForkBinding(event.data?.sessionID);
       if (event?.type === 'z.opencode.started') {
         updateSubagentCompletionQueue(queue => queue.bindParent(runId, event.data?.sessionID));
@@ -10527,6 +10639,10 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       if (event?.type === 'z.context.checkpoint') {
         void persistTaskContextCheckpoint(zSessionId, event.data?.checkpoint, request.conversationRevision)
           .catch(error => console.warn('[memory] checkpoint could not be saved:', error?.message || error));
+      }
+      if (event?.type === 'z.context.desktop-checkpoint') {
+        void persistDesktopContextCheckpoint(zSessionId, event.data?.checkpoint, request.conversationRevision)
+          .catch(error => console.warn('[memory] desktop checkpoint could not be saved:', error?.message || error));
       }
       if (event?.type === 'z.delivery.contract.updated') {
         const activeRun = openCodeActiveRuns.get(runId);
@@ -10635,6 +10751,8 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
       prompt: relayed.prompt || prompt
     });
     task.then(async result => {
+      await contextStateWrite;
+      if (contextStateWriteError) result.contextPersistenceError = contextStateWriteError;
       await recordForkBinding(result?.openCodeSessionId);
       updateSubagentCompletionQueue(queue => { queue.settleParent(runId, result); queue.settleDelivery(runId); });
       if (coreTurnStarted) zCore.completeTurn(runId, result);
@@ -10779,12 +10897,12 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         } catch (error) { console.warn('[memory] review could not be queued:', error?.message || error); }
       }
     }).catch(async error => {
+      await contextStateWrite;
       updateSubagentCompletionQueue(queue => { queue.settleParent(runId, { status: 'error' }); queue.settleDelivery(runId); });
       console.error(`[opencode] Run ${runId} failed:`, error);
       flushOpenCodeRendererEvents(runId);
       const failedResult = {
         openCodeVersion: OPENCODE_VERSION,
-        status: 'error',
         text: '',
         reasoning: '',
         toolCalls: [],
@@ -10792,6 +10910,8 @@ ipcMain.handle('opencode:start-run', async (_e, request = {}) => {
         changes: [],
         usage: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
         contextTokens: 0,
+        ...(error?.runResult && typeof error.runResult === 'object' ? error.runResult : {}),
+        status: 'error',
         ...(error?.watchdog ? { watchdog: error.watchdog } : {}),
         error: openCodeErrorDetail(error)
       };
@@ -11153,9 +11273,14 @@ function steerOpenCodeRun(payload = {}) {
         preparedAttachments = prepared.attachments;
         if (!isLive()) return failure('读取附件期间任务已结束或停止，引导未送达。', 'STEERING_STALE');
       }
+      const guidanceSession = await readSessionRecord(zSessionId);
+      const savedGuidance = guidanceSession?.messages?.find(message => message.liveGuidance?.requestId === requestId);
+      const contextBoundary = savedGuidance?.liveGuidance?.historyBoundary?.agentRun;
+      if (!isLive()) return failure('读取引导边界期间任务已结束或停止，未送达。', 'STEERING_STALE');
       requestEntry.insertionAttempted = true;
       const delivery = await sidecar.deliverInterjection(runId, {
         kind: 'guidance', guidance, requestId, requestFinish: false, hardCancel: false, source: 'user',
+        ...(contextBoundary ? { contextBoundary: { ...contextBoundary, historyBoundaryAt: savedGuidance.ts } } : {}),
         ...(preparedAttachments.length ? { attachments: preparedAttachments } : {})
       });
       if (delivery?.ok !== true || delivery.accepted !== true) {

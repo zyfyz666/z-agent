@@ -1,0 +1,74 @@
+/* Z refresh — calmer hierarchy for the main workbench. Loaded after z-theme.css.
+   One accent (lime) for primary actions and live status only; everything else is neutral ink. */
+:root { --zr-r: 10px; --zr-r-sm: 8px; }
+
+/* ---------- Sidebar ---------- */
+.sidebar-brand-shell { padding: 16px 18px 14px; }
+.sidebar-brand { gap: 10px; }
+.z-wordmark { font-size: 28px; }
+.z-wordmark-dot { width: 5px; height: 5px; margin: 0 0 2px 5px; }
+.z-brand-caption { font-size: 12px; letter-spacing: 0; gap: 0; }
+.z-brand-caption .sidebar-brand-version { display: none; }
+.sidebar-nav { gap: 2px; padding: 0 10px; }
+.sidebar-nav-item { min-height: 34px; padding: 7px 10px; border-radius: var(--zr-r-sm); font-size: 13px; font-weight: 450; color: var(--text-dim); }
+.sidebar-nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.sidebar-nav-item.active { background: var(--bg-active); color: var(--text); }
+#newTaskNavBtn { background: var(--bg-elev2); color: var(--text); border: 1px solid var(--border); font-weight: 500; margin-bottom: 8px; }
+#newTaskNavBtn:hover { opacity: 1; background: var(--bg-hover); border-color: var(--border-strong); }
+#newTaskNavBtn svg { color: var(--accent); }
+.z-monitor-nav { border: 0; }
+.sidebar-list-section-label, .sidebar-list-section-header { font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--text-faint); }
+.session-item { border-radius: var(--zr-r-sm); }
+.session-item .session-title-text, .workspace-name { font-size: 13px; }
+.session-item.active { background: var(--bg-hover); }
+.session-item.active .session-title-text { color: var(--text); font-weight: 500; }
+
+/* Bottom row: one labelled settings button, three quiet icon buttons (same grid, wider first cell). */
+.sidebar-bottom { padding: 8px 10px; }
+.settings-menu-wrap { grid-template-columns: minmax(0, 1fr) repeat(3, 32px); gap: 2px; }
+.settings-menu-wrap > .sidebar-profile-row #settingsBtn { justify-content: flex-start; gap: 8px; padding: 0 10px; height: 34px; min-height: 34px; border-radius: var(--zr-r-sm); }
+.settings-menu-wrap > .sidebar-profile-row #settingsBtn .bottom-btn-label { display: inline; font-size: 13px; }
+.settings-menu-wrap > .sidebar-profile-row #settingsBtn:hover { background: var(--bg-hover); color: var(--text); }
+.settings-menu-wrap > #settingsMenu .settings-menu-item { height: 32px; min-height: 32px; border-radius: var(--zr-r-sm); }
+
+/* ---------- Task bar ---------- */
+.task-bar-title { font-size: 13px; font-weight: 600; }
+#taskBarFolder, #taskGitBranchBtn { background: transparent; border-color: transparent; color: var(--text-dim); font-weight: 450; }
+#taskBarFolder:hover, #taskGitBranchBtn:hover { background: var(--bg-hover); color: var(--text); }
+.task-tools-control { background: transparent; border: 1px solid var(--border); border-radius: var(--zr-r-sm); }
+.task-tools-control button { background: transparent; }
+#taskToolsPillIcon { filter: grayscale(1); opacity: .7; }
+.task-tools-control:hover #taskToolsPillIcon { filter: none; opacity: 1; }
+
+/* ---------- Welcome ---------- */
+.z-eyebrow, .z-emblem-line, #welcomeWdBtn { display: none; }
+.z-hero-emblem { margin-bottom: 18px; }
+.z-hero-emblem img { width: 56px; height: 56px; border-radius: 16px; transform: none; }
+.empty-header #greeting { font: 600 28px/1.35 var(--font-sans); letter-spacing: -.01em; }
+.z-hero-copy { font-size: 13.5px; line-height: 1.7; margin: 8px auto 0; }
+#guideHint { font-size: 12px; color: var(--text-faint); }
+
+/* ---------- Composer ---------- */
+.composer { border-color: var(--border); border-radius: 14px; box-shadow: 0 1px 2px #00000026, 0 10px 30px #00000014; }
+.composer:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.composer-toolbar-controls { gap: 4px; }
+.composer-toolbar-controls .z-connection-pill { border-color: transparent; color: var(--text-dim); }
+.composer-toolbar-controls .z-connection-pill:hover { background: var(--bg-hover); color: var(--text); }
+#modelPillSpeed { color: var(--text-dim); background: var(--bg-elev2); border-radius: 5px; padding: 1px 5px; font-size: 11px; font-weight: 500; }
+
+/* Leave the right gutter to the dock and the left one to the turn scale, so neither covers content. */
+#chatMainColumn { --chat-pad-x: 64px; }
+
+/* ---------- Right dock: quiet, never over content ---------- */
+#rightDock .rs-dock-pill, #rightDock .rs-dock-close, #rightDock .rs-dock-context-ring { background: var(--bg-elev); border-color: var(--border-soft); box-shadow: none; }
+#rightDock .rs-dock-btn { color: var(--text-faint); }
+#rightDock .rs-dock-btn:hover { color: var(--text); background: var(--bg-hover); }
+
+/* ---------- Messages ---------- */
+.agent-run-header .run-status-label, .agent-run-header .run-reply-time, .agent-run-header .run-reply-elapsed { color: var(--text-faint); font-weight: 400; font-size: 12px; }
+.tool-activity-label, .tool-activity-outer-label { color: var(--text-dim) !important; font-weight: 450; }
+.tool-activity-summary svg { color: var(--text-faint); }
+#turnScaleNav { opacity: .3; transition: opacity var(--fast) var(--ease); }
+#turnScaleNav:hover, #turnScaleNav:focus-within { opacity: 1; }
+.msg-body code, .msg-body pre, .msg-body kbd { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+.msg.user .msg-body { border-radius: 14px; }

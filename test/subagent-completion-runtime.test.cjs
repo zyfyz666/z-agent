@@ -14,10 +14,10 @@ const identity = { parentRunId: 'run', zSessionId: 'chat', conversationRevision:
   childSessionID: 'child', callId: 'call', startedAt: 1100, directory: process.cwd() };
 const assistant = (id, created, completed, parts = [], extra = {}) => ({ info: { id, sessionID: 'parent', role: 'assistant',
   time: { created, ...(completed ? { completed } : {}) }, ...(completed ? { finish: 'stop' } : {}), ...extra }, parts });
-function task({ callId = 'call', child = 'child', start = 1100, end, status = 'running', output = '', messageID = 'task-message' } = {}) {
+function task({ callId = 'call', child = 'child', start = 1100, end, status = 'running', output = '', error, messageID = 'task-message' } = {}) {
   return { type: 'message.part.updated', data: { part: { type: 'tool', tool: 'task', callID: callId, messageID,
     state: { input: { subagent_type: 'reviewer', description: 'Review fresh changes' }, metadata: { sessionID: child },
-      status, output, time: { start, ...(end ? { end } : {}) } } } } };
+      status, output, ...(error ? { error } : {}), time: { start, ...(end ? { end } : {}) } } } } };
 }
 function tracker(events = [], overrides = {}) {
   return new SubagentCompletionTracker({ runId: 'run', zSessionId: 'chat', conversationRevision: 2,
@@ -50,6 +50,8 @@ test('task completion does not prove consumption until a later parent assistant 
   state.observe({ type: 'message.updated', data: { info: assistant('parallel', 1450, 1700).info } });
   assert.equal(state.find(identity).consumed, false);
   state.observe({ type: 'message.updated', data: { info: assistant('follow-up', 1501).info } });
+  assert.equal(state.find(identity).consumed, false, 'parent wrapper alone cannot hide a failed child');
+  state.applyInspection(state.find(identity), { status: 'completed', completedAt: 1500, consumed: true });
   const receipt = events.at(-1).data;
   assert.equal(receipt.consumed, true);
   assert.equal(receipt.parentRunId, 'run');
@@ -67,6 +69,7 @@ test('reordered assistant evidence is reconciled and reused child sessions keep 
   state.observe({ type: 'message.updated', data: { info: assistant('later', 1600).info } });
   state.observe(task({ status: 'completed', end: 1500, output: 'First result' }));
   state.observe(task({ callId: 'second-call', start: 2000 }));
+  state.applyInspection(state.find(identity), { status: 'completed', completedAt: 1500, consumed: true });
   assert.equal(state.records.size, 2);
   assert.equal(state.find(identity).consumed, true);
   assert.equal(state.find({ callId: 'second-call', startedAt: 2000 }).status, 'running');
@@ -78,11 +81,13 @@ test('native start timestamp enrichment cannot create a second receipt or leak t
   state.observe(task({ start: 1221, end: 1700, status: 'completed', output: 'Result' }));
   assert.equal(state.records.size, 1);
   assert.equal(events.at(-1).data.startedAt, 1100);
-  assert.equal(state.backgroundRecords().length, 0);
+  assert.equal(state.backgroundRecords().length, 1, 'the terminal wrapper remains pinned until inspection');
   const result = await inspectNativeCompletion(nativeClient([
     assistant('task-message', 1000, 1700, [task({ start: 1221, end: 1700, status: 'completed', output: 'Result' }).data.part])
   ], []), identity);
   assert.equal(result.status, 'completed');
+  state.applyInspection(state.find(identity), result);
+  assert.equal(state.backgroundRecords().length, 0);
 });
 
 test('read-only inspection distinguishes a running tool wrapper, a tool step, and a final result', async () => {
@@ -106,6 +111,69 @@ test('inspection never adopts old output from a reused child and observes consum
   const next = { ...identity, callId: 'next-call', startedAt: 2000 };
   assert.equal((await inspectNativeCompletion(nativeClient(parent, [old]), next)).status, 'running');
   assert.equal((await inspectNativeCompletion(nativeClient(parent, [old]), identity)).consumed, true);
+});
+
+test('a fresh terminal child error overrides a successful wrapper and retains partial output before waking', async () => {
+  const events = [], state = tracker(events);
+  const completed = task({ status: 'completed', end: 1800, output: 'Partial analysis' });
+  const parent = [assistant('task-message', 1000, 1800, [completed.data.part]), assistant('parent-final', 1900, 2000)];
+  const child = assistant('child-error', 1200, 1700, [
+    { type: 'text', text: 'Partial analysis' },
+    { type: 'tool', tool: 'bash', state: { status: 'running' } }
+  ], { sessionID: 'child', error: { name: 'APIError', data: { message: 'Retry budget exhausted' } } });
+  state.observe(completed);
+  state.observe({ type: 'message.updated', data: { info: parent[1].info } });
+  assert.equal(state.find(identity).consumed, false);
+  assert.equal(state.backgroundRecords().length, 1);
+  const inspected = await inspectNativeCompletion(nativeClient(parent, [child], { child: { type: 'busy' } }), identity);
+  assert.deepEqual(inspected, { status: 'error', result: 'Partial analysis', completedAt: 1700,
+    error: 'Retry budget exhausted', consumed: false, parentResultMismatch: true });
+  state.applyInspection(state.find(identity), inspected);
+  assert.equal(events.at(-1).data.status, 'error');
+  assert.equal(state.backgroundRecords().length, 0);
+  const count = events.length;
+  state.observe(completed);
+  state.applyInspection(state.find(identity), inspected);
+  assert.equal(events.length, count, 'replayed native success cannot replace the verified error or notify twice');
+  assert.equal(state.find(identity).consumed, false, 'the later parent saw partial text, not the failure');
+});
+
+test('a parent that actually received the child failure suppresses a redundant wake', () => {
+  const child = assistant('child-error', 1200, 1500, [{ type: 'text', text: 'Partial' }],
+    { error: { name: 'APIError', data: { message: 'Provider unavailable' } } });
+  const part = task({ status: 'error', end: 1600, error: '[Z_SUBAGENT_FAILED] Provider unavailable\nPartial output:\nPartial' }).data.part;
+  const parent = [assistant('task-message', 1000, 1600, [part]), assistant('parent-followup', 1700, 1800)];
+  const inspected = inspectMessages(identity, parent, [child], { idle: true });
+  assert.equal(inspected.status, 'error');
+  assert.equal(inspected.result, 'Partial');
+  assert.equal(inspected.error, 'Provider unavailable');
+  assert.equal(inspected.consumed, true);
+});
+
+test('reused child errors are bounded by the exact native invocation start and next call', () => {
+  const oldError = assistant('previous-child-error', 1150, 1200, [],
+    { error: { name: 'APIError', message: 'Old failure' } });
+  const laterError = assistant('next-child-error', 2100, 2200, [],
+    { error: { name: 'APIError', message: 'Later failure' } });
+  const parent = [assistant('task-message', 1000, 1600, [
+    task({ start: 1221, status: 'completed', end: 1500, output: 'Current result' }).data.part
+  ]), assistant('next-task', 1900, 2300, [task({ callId: 'next-call', start: 2000 }).data.part])];
+  const result = inspectMessages(identity, parent, [oldError, laterError], { idle: true });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.result, 'Current result');
+  assert.equal(result.error, undefined);
+});
+
+test('a cancelled child or parent task remains interrupted and cannot become an error wake', () => {
+  const child = assistant('cancelled-child', 1200, 1500, [{ type: 'text', text: 'Partial' }],
+    { error: { name: 'MessageAbortedError', data: { message: 'The user cancelled' } } });
+  const parent = [assistant('task-message', 1000, 1600, [task({ status: 'completed', end: 1600 }).data.part])];
+  assert.equal(inspectMessages(identity, parent, [child], { idle: true }).status, 'interrupted');
+  const interrupted = [assistant('task-message', 1000, 1600, [task({ status: 'interrupted', end: 1600 }).data.part])];
+  const failure = assistant('child-error', 1200, 1500, [], { error: { name: 'APIError', message: 'Provider failure' } });
+  const result = inspectMessages(identity, interrupted, [failure], { idle: true });
+  assert.equal(result.status, 'interrupted');
+  assert.equal(result.consumed, false);
 });
 
 test('completed-run inspection releases background pins and reads from the owning pooled kernel', async () => {

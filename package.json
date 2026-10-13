@@ -58,6 +58,7 @@
     ],
     "asarUnpack": [
       "lib/**/*",
+      "renderer/guidance-timeline.js",
       "node_modules/@ai-sdk/anthropic/**/*",
       "node_modules/@ai-sdk/openai-compatible/**/*",
       "node_modules/@ai-sdk/provider/**/*",

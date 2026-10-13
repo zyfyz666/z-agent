@@ -65,14 +65,24 @@ const server = http.createServer((request, response) => {
         report.requests.push({ action: 'COMPACT', model: body.model, summary: markers.summary });
         return completion(response, `Earlier conversation summary: ${markers.future}; ${markers.handoff}; ${markers.summary}`, body.model);
       }
-      const lastUser = JSON.stringify((body.messages || []).findLast(message => message.role === 'user')?.content || '');
-      // A new native session embeds prior turns before the actual new prompt.
-      const action = [...lastUser.matchAll(/REWIND_RUN_(SOURCE_SEED|FORGED|AFTER_REWIND|AFTER_UNDO|HOLD|QUEUED|STALE|STRESS_[0-3])_8264/g)].at(-1)?.[1];
+      const userContent = (body.messages || []).findLast(message => message.role === 'user')?.content || '';
+      const lastUser = typeof userContent === 'string' ? userContent
+        : userContent.filter(part => part.type === 'text').map(part => part.text).join('\n');
+      // Prior turns precede the new prompt, but runtime memory follows it and
+      // can mention old fixture actions. Route only the actual prompt portion.
+      const contextStart = lastUser.lastIndexOf('<z-turn-context');
+      const hasTrailingContext = contextStart >= 0
+        && /^<z-turn-context(?:\s[^>]*)?>[\s\S]*<\/z-turn-context>\s*$/.test(lastUser.slice(contextStart));
+      const actionInput = hasTrailingContext ? lastUser.slice(0, contextStart) : lastUser;
+      const actionsIn = text => [...text.matchAll(/REWIND_RUN_(SOURCE_SEED|FORGED|AFTER_REWIND|AFTER_UNDO|HOLD|QUEUED|STALE|STRESS_[0-3])_8264/g)].map(match => match[1]);
+      const promptActions = actionsIn(actionInput);
+      const runtimeContextActions = hasTrailingContext ? actionsIn(lastUser.slice(contextStart)) : [];
+      const action = promptActions.at(-1);
       if (!action || !body.tools?.length) return completion(response, 'REWIND_AUXILIARY_OK', body.model);
       const fullPayload = JSON.stringify(body);
       const flags = Object.fromEntries(Object.entries(markers).map(([name, marker]) => [name, fullPayload.includes(marker)]));
       const previousRewoundTurn = fullPayload.includes(runMarker('AFTER_REWIND'));
-      report.requests.push({ action, model: body.model, flags, previousRewoundTurn });
+      report.requests.push({ action, model: body.model, flags, previousRewoundTurn, promptActions, runtimeContextActions });
       assert.ok(report.requests.length <= 20, 'bounded real model requests');
       assert.notEqual(action, 'STALE', 'a stale revision must fail before any model request');
       if (['FORGED', 'AFTER_REWIND'].includes(action)) {

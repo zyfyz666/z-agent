@@ -6,13 +6,14 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { stageOpenCodeRuntime, applyRuntimeReplacements } = require('../lib/opencode-runtime');
 const patch = require('../vendor/opencode/runtime-patch.json');
 
 function removeFixture(directory) {
   assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
   assert.ok(path.basename(directory).startsWith('z-runtime-patch-'));
-  fs.rmSync(directory, { recursive: true, force: true });
+  fs.rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 }
 
 test('unknown runtime fails explicitly without modifying it or producing a fallback', async () => {
@@ -40,7 +41,7 @@ test('invalid replacement plans fail before changing any bytes', () => {
   }
 });
 
-test('stages only the pinned registry and Windows lifecycle changes, shares work, and repairs a corrupt cache', {
+test('stages only the pinned native changes, executes them, shares work, and repairs a corrupt cache', {
   skip: process.platform !== 'win32' || process.arch !== 'x64'
 }, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'z-runtime-patch-'));
@@ -79,5 +80,8 @@ test('stages only the pinned registry and Windows lifecycle changes, shares work
     assert.equal(fs.statSync(executable).mtimeMs, sourceStat.mtimeMs);
     assert.equal(crypto.createHash('sha256').update(source).digest('hex'), patch.binaries[0].sourceSha256);
     assert.deepEqual(fs.readdirSync(path.dirname(target)), ['opencode.exe']);
+    const version = spawnSync(target, ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+    assert.equal(version.status, 0, version.stderr || version.error?.message);
+    assert.equal(version.stdout.trim(), patch.upstreamVersion, 'the complete staged executable must parse and launch');
   } finally { removeFixture(directory); }
 });

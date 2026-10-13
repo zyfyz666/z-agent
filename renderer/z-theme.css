@@ -141,41 +141,105 @@ html[data-theme="light"] {
 .wd-eyebrow { font: 500 10px/1.5 var(--font-mono); letter-spacing: .07em; color: var(--text-dim); }
 .wd-mode { padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-faint); font-size: 10px; }
 .wd-mode[data-mode="live"] { color: var(--accent-text); border-color: var(--border-strong); background: var(--accent-soft); }
-/* Observer eye. data-eye sets lid, pupil, gaze and glow; motion is transform/opacity only. */
-.wd-oracle { --wd-eye: var(--accent); --wd-lid: 1; --wd-iris-y: 1; --wd-pupil: 1; --wd-gx: -6px; --wd-gy: 1px; --wd-glow: .55;
+/* Observer eye. data-eye sets lid, pupil, gaze, glow and rays; motion is transform/opacity only. */
+.wd-oracle { --wd-eye: var(--accent); --wd-halo: color-mix(in srgb, var(--wd-eye) 78%, #ffe9a8); --wd-lid: .9; --wd-iris-y: 1.11;
+  --wd-pupil: 1; --wd-gx: -4px; --wd-gy: 1px; --wd-glow: .5; --wd-rays: .5; --wd-reach: 1;
+  --wd-white: #e6ecdd; --wd-white-edge: #95a088; --wd-lid-ink: var(--wd-eye);
   display: flex; justify-content: center; margin: 0 0 14px; color: var(--wd-eye); pointer-events: none; }
+html[data-theme="light"] .wd-oracle { --wd-halo: color-mix(in srgb, var(--wd-eye) 45%, #c39a2c);
+  --wd-white: #fff; --wd-white-edge: #dce2cf; --wd-lid-ink: var(--text); }
+/* Pale gold on a pale panel needs more presence than lime light on a dark one. */
+html[data-theme="light"] .wd-eye-rays { opacity: min(1, calc(var(--wd-rays) * 1.6)); }
+html[data-theme="light"] .wd-eye-ring, html[data-theme="light"] .wd-eye-dial { stroke-width: 1; }
 .wd-eye { width: min(100%, 236px); height: auto; overflow: visible; }
+.wd-stop-halo { stop-color: var(--wd-halo); } .wd-stop-eye { stop-color: var(--wd-eye); }
+.wd-stop-light { stop-color: color-mix(in srgb, var(--wd-eye) 52%, #fff4cf); }
+.wd-stop-deep { stop-color: color-mix(in srgb, var(--wd-eye) 40%, #0b1006); }
+.wd-stop-white { stop-color: var(--wd-white); } .wd-stop-white-edge { stop-color: var(--wd-white-edge); }
+.wd-stop-ink { stop-color: var(--z-ink); }
 .wd-eye-glow { opacity: var(--wd-glow); transform-box: fill-box; transform-origin: center; transition: opacity .6s var(--ease-out); }
-.wd-eye-ring, .wd-eye-orbit { fill: none; stroke: currentColor; stroke-width: .8; opacity: .28; }
-.wd-eye-rays { stroke: currentColor; stroke-width: .9; stroke-linecap: round; opacity: .42;
-  transform-box: view-box; transform-origin: 120px 66px; animation: wd-eye-turn 140s linear infinite; }
-.wd-eye-orbit { stroke-dasharray: 2 7; opacity: 0; transform-box: view-box; transform-origin: 120px 66px; transition: opacity .5s var(--ease-out); }
-.wd-eye-crease { fill: none; stroke: var(--text-faint); stroke-width: 1; stroke-linecap: round; opacity: .6; }
-.wd-eye-ball { transform-box: view-box; transform-origin: 120px 64.5px; transform: scaleY(var(--wd-lid)); transition: transform .32s var(--ease-out); }
-.wd-eye-white { fill: var(--bg-elev); }
-.wd-eye-lid { fill: none; stroke: var(--text); stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.wd-eye-rays, .wd-eye-dial, .wd-eye-orbit, .wd-eye-sweep, .wd-eye-wave { transform-box: view-box; transform-origin: 120px 70px; }
+.wd-eye-rays { opacity: var(--wd-rays); scale: var(--wd-reach); animation: wd-eye-turn 180s linear infinite;
+  transition: opacity .6s var(--ease-out), scale .6s var(--ease-out); }
+.wd-eye-flames { fill: none; stroke-width: 1; stroke-linecap: round; animation: wd-eye-shimmer 5s ease-in-out infinite; }
+.wd-eye-ring { fill: none; stroke: var(--wd-halo); stroke-width: .8; opacity: .35; }
+.wd-eye-dial { fill: none; stroke: var(--wd-halo); stroke-width: .8; opacity: .4; animation: wd-eye-turn 240s linear infinite reverse;
+  transition: opacity .5s var(--ease-out); }
+.wd-eye-orbit { fill: none; stroke: var(--wd-halo); stroke-width: 1.2; stroke-linecap: round; stroke-dasharray: .1 5.8; opacity: 0;
+  animation: wd-eye-turn 14s linear infinite reverse; transition: opacity .5s var(--ease-out); }
+.wd-eye-sweep { fill: none; stroke: var(--wd-halo); stroke-width: 1.8; stroke-linecap: round; stroke-dasharray: 64 351; opacity: 0;
+  animation: wd-eye-turn 2.6s linear infinite; transition: opacity .5s var(--ease-out); }
+.wd-eye-wave { fill: none; stroke: var(--wd-halo); stroke-width: 1.2; opacity: 0; vector-effect: non-scaling-stroke; }
+.wd-eye-spark { fill: var(--wd-halo); opacity: 0; transform-box: fill-box; transform-origin: center;
+  animation: wd-eye-twinkle 4.8s ease-in-out infinite; animation-delay: var(--wd-spark-delay, 0s); }
+/* The crease follows the lid down so a narrowed or closed eye keeps a natural fold above it. */
+.wd-eye-crease { fill: none; stroke: var(--wd-lid-ink); stroke-width: 1; stroke-linecap: round; opacity: .42;
+  transform: translateY(calc((1 - var(--wd-lid)) * 22px)); transition: transform .32s var(--ease-out), opacity .3s var(--ease-out); }
+.wd-eye-ball { transform-box: view-box; transform-origin: 120px 70px; transform: scaleY(var(--wd-lid));
+  transition: transform .32s var(--ease-out), opacity .3s var(--ease-out); }
+.wd-eye-sleep { fill: none; stroke: var(--text-dim); stroke-width: 1.8; stroke-linecap: round; opacity: 0; transition: opacity .4s var(--ease-out); }
 /* --wd-iris-y undoes the lid squeeze so a narrowed eye covers a round iris instead of flattening it. */
-.wd-eye-gaze { transform-box: view-box; transform-origin: 120px 64.5px; transition: transform .5s var(--ease-out);
+.wd-eye-gaze { transform-box: view-box; transform-origin: 120px 70px; transition: transform .5s var(--ease-out);
   transform: translate(var(--wd-gaze-x, var(--wd-gx)), var(--wd-gaze-y, var(--wd-gy))) scaleY(var(--wd-iris-y)); }
-.wd-eye-fibers { stroke: var(--z-ink); stroke-width: .7; opacity: .22; }
-.wd-eye-pupil { fill: var(--z-ink); transform-box: fill-box; transform-origin: center; transform: scale(var(--wd-pupil)); transition: transform .6s var(--ease-out); }
-.wd-eye-glint { fill: #fff; opacity: .85; }
+.wd-eye-strands-light { fill: none; stroke: color-mix(in srgb, var(--wd-eye) 40%, #fff8dc); stroke-width: .55; stroke-linecap: round; opacity: .55; }
+.wd-eye-strands-dark { fill: none; stroke: color-mix(in srgb, var(--wd-eye) 35%, #0b1006); stroke-width: .6; stroke-linecap: round; opacity: .42; }
+.wd-eye-collarette { fill: none; stroke: color-mix(in srgb, var(--wd-eye) 45%, #fff3c4); stroke-width: .8; stroke-linejoin: round; opacity: .55; }
+.wd-eye-limbus { fill: none; stroke: color-mix(in srgb, var(--wd-eye) 30%, #0b1006); stroke-width: 1.8; opacity: .85; }
+.wd-eye-pupil { fill: #0b0f08; transform-box: fill-box; transform-origin: center; transform: scale(var(--wd-pupil)); transition: transform .6s var(--ease-out); }
+.wd-eye-shade { opacity: .9; } html[data-theme="light"] .wd-eye-shade { opacity: .6; }
+.wd-eye-glint { fill: #fff; opacity: .92; } .wd-eye-glint-soft { opacity: .5; }
+.wd-eye-lid, .wd-eye-wing { fill: none; stroke: var(--wd-lid-ink); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.wd-eye-lid { stroke-width: 2.2; } .wd-eye-lid-low { stroke-width: 1.1; opacity: .7; } .wd-eye-wing { stroke-width: 1.4; opacity: .8; }
 .wd-oracle[data-blink] .wd-eye-ball { transform: scaleY(.06); transition-duration: .08s; }
-.wd-oracle[data-eye="resting"] { --wd-lid: .58; --wd-iris-y: 1.72; --wd-pupil: 1.12; --wd-gx: 0px; --wd-gy: 3px; --wd-glow: .3; }
+/* No task: half-lidded, looking down, the glow breathes. */
+.wd-oracle[data-eye="resting"] { --wd-lid: .56; --wd-iris-y: 1.78; --wd-pupil: 1.12; --wd-gx: 0px; --wd-gy: 4px; --wd-glow: .3; --wd-rays: .32; }
 .wd-oracle[data-eye="resting"] .wd-eye-glow { animation: wd-eye-breathe 6s ease-in-out infinite; }
-.wd-oracle[data-eye="pondering"] { --wd-pupil: 1.55; --wd-gx: -3px; --wd-gy: -5px; --wd-glow: .8; }
-.wd-oracle[data-eye="pondering"] .wd-eye-orbit { opacity: .6; animation: wd-eye-turn 9s linear infinite reverse; }
-.wd-oracle[data-eye="speaking"] { --wd-pupil: .62; --wd-gx: -11px; --wd-gy: 0px; --wd-glow: 1; }
+/* Run stopped: closed and grey, still breathing slowly. */
+.wd-oracle[data-eye="closed"] { --wd-eye: var(--text-faint); --wd-lid: .06; --wd-gx: 0px; --wd-gy: 0px; --wd-glow: .14; --wd-rays: .2; --wd-reach: .96; }
+.wd-oracle[data-eye="closed"] .wd-eye-glow { animation: wd-eye-breathe 8s ease-in-out infinite; }
+.wd-oracle[data-eye="closed"] .wd-eye-spark { animation: none; opacity: 0; }
+.wd-oracle[data-eye="closed"] .wd-eye-ball, .wd-oracle[data-eye="closed"] .wd-eye-crease { opacity: 0; }
+.wd-oracle[data-eye="closed"] .wd-eye-sleep { opacity: .9; }
+/* End-of-turn review: open again, the gaze reads left to right and a sweep runs round the dial. */
+.wd-oracle[data-eye="verifying"] { --wd-lid: .96; --wd-iris-y: 1.04; --wd-pupil: .9; --wd-gx: 0px; --wd-gy: -1px; --wd-glow: .62; --wd-rays: .46; }
+.wd-oracle[data-eye="verifying"] .wd-eye-gaze { animation: wd-eye-read 3.2s ease-in-out infinite; }
+.wd-oracle[data-eye="verifying"] .wd-eye-sweep { opacity: .8; }
+.wd-oracle[data-eye="verifying"] .wd-eye-dial { opacity: .7; }
+/* Live run between checks: relaxed, the gaze drifts and follows the pointer. */
+.wd-oracle[data-eye="watching"] .wd-eye-gaze { animation: wd-eye-drift 11s ease-in-out infinite; }
+/* The model is judging: wide open, pupil dilated, eyes on the conversation, dotted orbit turning. */
+.wd-oracle[data-eye="pondering"] { --wd-lid: 1; --wd-iris-y: 1; --wd-pupil: 1.42; --wd-gx: -9px; --wd-gy: -2px; --wd-glow: .85; --wd-rays: .72; --wd-reach: 1.04; }
+.wd-oracle[data-eye="pondering"] .wd-eye-orbit { opacity: .8; }
+.wd-oracle[data-eye="pondering"] .wd-eye-dial { opacity: .62; }
+/* Judged and chose not to step in: a slow blink, a soft halo and one gentle ring. */
+.wd-oracle[data-eye="assured"] { --wd-lid: .8; --wd-iris-y: 1.25; --wd-pupil: 1.06; --wd-gx: 0px; --wd-gy: 2px; --wd-glow: .7; --wd-rays: .58; }
+.wd-oracle[data-eye="assured"] .wd-eye-ball { animation: wd-eye-nod 1.2s ease-in-out; }
+.wd-oracle[data-eye="assured"] .wd-eye-glow { animation: wd-eye-bloom 2.4s ease-in-out; }
+.wd-oracle[data-eye="assured"] .wd-eye-wave { animation: wd-eye-wave 2.2s var(--ease-out); }
+/* Stepping in: wide, gold, pupil narrowed, rays reach out and a sharp ring breaks away. */
+.wd-oracle[data-eye="speaking"] { --wd-eye: var(--warning); --wd-lid: 1.06; --wd-iris-y: .95; --wd-pupil: .6; --wd-gx: -12px; --wd-gy: 0px;
+  --wd-glow: 1; --wd-rays: .95; --wd-reach: 1.08; }
 .wd-oracle[data-eye="speaking"] .wd-eye-glow { animation: wd-eye-flare 1.3s var(--ease-out) 2; }
-.wd-oracle[data-eye="closed"] { --wd-eye: var(--text-faint); --wd-lid: .06; --wd-gx: 0px; --wd-gy: 0px; --wd-glow: .12; }
-.wd-oracle[data-eye="closed"] .wd-eye-lid { stroke: var(--text-dim); }
-.wd-oracle[data-eye="alarmed"] { --wd-eye: var(--danger); --wd-pupil: .72; --wd-gx: 0px; --wd-gy: 0px; --wd-glow: .7; }
-@keyframes wd-eye-turn { to { transform: rotate(360deg); } }
-@keyframes wd-eye-breathe { 0%, 100% { opacity: .22; } 50% { opacity: .42; } }
-@keyframes wd-eye-flare { 0% { opacity: .55; transform: scale(1); } 35% { opacity: 1; transform: scale(1.14); } 100% { opacity: .7; transform: scale(1); } }
+.wd-oracle[data-eye="speaking"] .wd-eye-wave { stroke-width: 2; animation: wd-eye-wave 1.2s var(--ease-out) 2; }
+.wd-oracle[data-eye="alarmed"] { --wd-eye: var(--danger); --wd-lid: 1.02; --wd-iris-y: .98; --wd-pupil: .7; --wd-gx: 0px; --wd-gy: 0px;
+  --wd-glow: .75; --wd-rays: .6; }
+.wd-oracle[data-eye="alarmed"] .wd-eye-glow { animation: wd-eye-throb 1.6s ease-in-out infinite; }
+@keyframes wd-eye-turn { to { rotate: 360deg; } }
+@keyframes wd-eye-breathe { 0%, 100% { opacity: calc(var(--wd-glow) * .7); scale: .96; } 50% { opacity: calc(var(--wd-glow) * 1.35); scale: 1.04; } }
+@keyframes wd-eye-flare { 0%, 100% { scale: 1; } 35% { scale: 1.16; } }
+@keyframes wd-eye-bloom { 0%, 100% { scale: 1; } 40% { scale: 1.1; opacity: calc(var(--wd-glow) * 1.3); } }
+@keyframes wd-eye-throb { 0%, 100% { opacity: calc(var(--wd-glow) * .7); } 50% { opacity: 1; } }
+@keyframes wd-eye-nod { 0%, 100% { scale: 1 1; } 45%, 55% { scale: 1 .12; } }
+@keyframes wd-eye-wave { 0% { opacity: .75; scale: 1; } 100% { opacity: 0; scale: 1.36; } }
+@keyframes wd-eye-shimmer { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes wd-eye-twinkle { 0%, 68%, 100% { opacity: 0; scale: .4; } 82% { opacity: .9; scale: 1; } }
+@keyframes wd-eye-drift { 0%, 100% { translate: 0 0; } 30% { translate: 2.5px -1px; } 62% { translate: -2px 1px; } }
+@keyframes wd-eye-read { 0%, 100% { translate: -8px 0; } 70% { translate: 8px 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .wd-eye-rays, .wd-eye-orbit, .wd-eye-glow { animation: none !important; }
-  .wd-eye-ball, .wd-eye-gaze, .wd-eye-pupil, .wd-eye-glow { transition: none; }
+  .wd-eye-rays, .wd-eye-dial, .wd-eye-orbit, .wd-eye-sweep, .wd-eye-glow, .wd-eye-flames, .wd-eye-spark,
+  .wd-eye-gaze, .wd-eye-ball, .wd-eye-wave { animation: none !important; }
+  .wd-eye-ball, .wd-eye-gaze, .wd-eye-pupil, .wd-eye-glow, .wd-eye-crease, .wd-eye-rays { transition: none; }
+  .wd-eye-spark { opacity: .5; }
 }
 /* End-of-turn review card under the status card. */
 .wd-completion { padding: 14px 15px; margin: 0 0 20px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: var(--z-radius); background: var(--bg-elev); }

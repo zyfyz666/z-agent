@@ -196,6 +196,29 @@ test('real runtime config declares native image input when visual relay is disab
   assert.equal(mediaRuntime.vision.enabled, false);
 });
 
+for (const modelId of ['gpt-6-astra', 'claude-opus-4-7']) {
+test(`real runtime config enables ${modelId} PDF input from the saved model catalog`, () => {
+  const providerId = 'openai';
+  const supplierId = 'official';
+  const cfg = {
+    api: {
+      provider: providerId, model: modelId,
+      providerActiveSupplierIds: { [providerId]: supplierId },
+      providerSuppliers: { [providerId]: [{ id: supplierId, name: 'PDF fixture',
+        kind: 'official', baseUrl: 'https://example.invalid/v1', apiKey: 'test-key',
+        models: [{ id: modelId, name: modelId }] }] }
+    },
+    agentModel: { providerId, supplierId, modelId }
+  };
+  const model = main.__test.getOpenCodeRuntimeConfig(cfg).provider[providerId].models[modelId];
+  assert.equal(model.attachment, true);
+  assert.deepEqual(model.modalities.input, ['text', 'image', 'pdf']);
+  cfg.api.providerSuppliers[providerId][0].models[0].capabilities = { pdfInput: false };
+  const disabled = main.__test.getOpenCodeRuntimeConfig(cfg).provider[providerId].models[modelId];
+  assert.equal(disabled.modalities.input.includes('pdf'), false);
+});
+}
+
 test('task MCP capability flags do not change the shared kernel signature', () => {
   const servers = main.__test.getOpenCodeMcpServers({}, {
     workspace: stubDataDir,

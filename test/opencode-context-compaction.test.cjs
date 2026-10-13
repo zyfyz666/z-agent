@@ -340,14 +340,15 @@ test('manual compression requires a fresh nonempty successful summary', async ()
 
 test('manual compression disables continuation and estimates the new summary when context endpoint is absent', async () => {
   let payload;
-  const summary={info:{id:'new-summary',role:'assistant',summary:true},parts:[{type:'text',text:'Retain the task and constraints.'}]};
+  const marker={info:{id:'compact',role:'user'},parts:[{type:'compaction'}]};
+  const summary={info:{id:'new-summary',role:'assistant',summary:true,parentID:'compact',finish:'stop',time:{completed:2}},parts:[{type:'text',text:'Retain the task and constraints.'}]};
   const original=[assistantMessage('old',45000)];
   const result=await compactOpenCodeSession({
-    client:{session:{summarize:async input=>{payload=input;return {data:true};},messages:async()=>({data:[...original,summary]})}},
+    client:{session:{summarize:async input=>{payload=input;return {data:true};},messages:async()=>({data:[...original,marker,summary]})}},
     session:{id:'manual'},directory:'C:/fixture',request:requestWithContext(),messages:original,force:true,manual:true
   });
   assert.equal(payload.auto,false);
   assert.equal(result.compacted,true);
-  assert.equal(result.afterTokens,estimateContextMessagesTokens([summary]));
+  assert.equal(result.afterTokens,estimateContextMessagesTokens([marker,summary]));
   assert.ok(result.afterTokens>0 && result.afterTokens<result.beforeTokens);
 });

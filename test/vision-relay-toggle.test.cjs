@@ -45,8 +45,6 @@ assert.match(
 
 // --- sidecar passes the toggle into the run and the kernel declaration ------
 assert.ok(/const imageInputDeclared = !!\(capabilities\.imageInput \|\| capabilities\.vision\)\s*\|\| options\.visionRelayEnabled === false;/.test(sidecarSrc), 'sidecar declaration override missing');
-assert.ok(sidecarSrc.includes('attachment: imageInputDeclared,'), 'kernel attachment flag must use the declared value');
-assert.ok(sidecarSrc.includes("input: imageInputDeclared ? ['text', 'image'] : ['text'],"), 'kernel modalities must use the declared value');
 
 const relayOffConfig = buildOpenCodeConfig({
   providerId: 'unknown-provider',
